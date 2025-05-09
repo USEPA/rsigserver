@@ -1,0 +1,276 @@
+#!/usr/bin/perl -wT
+
+##############################################################################
+# PURPOSE: edmserver - Serve EstuaryDataMapper requests.
+#
+# NOTES:   Used by EstuaryDataMapper application.
+#          Example usage:
+#
+#          wget -q -T 0 -O - 'https://ofmpub.epa.gov/rsig/edmserver?\
+#                     REQUEST=GetVersion'
+#
+#          wget -q -T 0 -O - 'https://ofmpub.epa.gov/rsig/edmserver?\
+#                     REQUEST=Download&PLATFORM=Win64'
+#
+# HISTORY: 2011/05/06, plessel.todd@epa.gov, 1-919-541-5500, TSSMS=cws
+#
+# STATUS:  unreviewed, tested.
+##############################################################################
+
+
+use strict;
+package main;
+$| = 1; # Turn off output buffering so messages appear in correct order.
+alarm( 3600 ); # Kill process after 1 hour. Legitimate usage could be an hour!
+# Restrict PATH and ENV. (But before popen, ENV is cleared!)
+delete @ENV{ 'PATH', 'IFS', 'CDPATH', 'ENV', 'BASH_ENV' };
+
+
+############################## TUNABLE CONSTANTS #############################
+
+
+my $debugging = 0; # 1 = print debug messages to STDERR logs/error_log.
+
+# Server where this program is installed:
+
+my $server_path = 'https://YOUR_WEBSERVER_HOST/cgi-bin';
+
+# Query string parsing routine dispatch table:
+
+my %parsers = (
+  'service'  => \&parse_service_option,
+  'request'  => \&parse_request_option,
+  'platform' => \&parse_platform_option
+);
+
+# Full URL path to this program:
+
+my @pathed_program_parts = split( /\//, $0 );
+my $program_name = $pathed_program_parts[ @pathed_program_parts - 1 ];
+my $program = "$server_path/$program_name";
+
+    
+################################## VARIABLES #################################
+
+# Parsed from the URL query string:
+
+my $service  = ''; # edm.
+my $request  = ''; # getversion, download.
+my $platform = ''; # Win64, Darwin.x86_64, Linux.x86_64.
+
+################################## ROUTINES ##################################
+
+
+main();
+
+
+sub main {
+  my $result = 0;
+
+  if ( ! parse_url() ) {
+    print "Content-type: text/plain; charset=iso-8859-1\n\n"; # Read by httpd.
+  } elsif ( $request eq 'getversion' ) {
+    print "Content-type: text/xml; charset=iso-8859-1\n\n"; # Read by httpd.
+    my $command = '/bin/cat /rsig/edm/download/EDM_VERSION';
+    $result = execute_command( $command );
+  } elsif ( $request eq 'download' ) {
+    my $platform2 = $platform;
+    $platform2 =~ tr/./_/;
+    my $header = "Content-Type: application/zip; charset=iso-8859-1;\n" .
+                 "Content-Disposition: attachment; filename=EDM.zip\n\n";
+    debug( "edmserver printing HTTP header:\n$header" );
+    print $header;
+    my $command = "/bin/cat /rsig/edm/download/EDM_$platform2.zip";
+
+    if ( $platform eq 'Code' ) {
+      $command = '/bin/cat /rsig/edm/download/EDM_code.tgz';
+    }
+
+    $result = execute_command( $command );
+    print STDERR "\nEDM download $platform2\n";
+  }
+
+  $result = 1 - $result; # UNIX: zero is success, non-zero is failure.
+  debug( "exit result = $result" );
+  exit $result;
+}
+
+
+
+# Parse URL parameters into variables.
+
+sub parse_url {
+  use CGI qw/ untaint /;     # Load Safe untainting CGI routines.
+  $CGI::DISABLE_UPLOADS = 1; # Disable uploads.
+  $CGI::POST_MAX = 1024;     # Limit posts to 1024 bytes.
+  my $query = new CGI;       # Parse QUERY_STRING.
+  %ENV = ();                 # Unset all environment variables.
+  my @names = $query->param; # Extract names of parameters.
+  my $count = @names;
+  my $result = 0;
+  debug( "$program_name @names ($count)" );
+
+  for ( my $parameter = 0; $parameter < $count; ++$parameter) {
+    $_ = $names[ $parameter ];                # $_ is tainted.
+    s/[^A-Za-z]/_/go;                         # Untaint $_.
+    my $option = $_;                          # $option is untainted.
+    $_ = $query->param( $option );            # $_ is tainted.
+    s/[^\w\-.,:\/]/_/go;                      # Untaint $_.
+    my $value = $_;                           # $value is untainted.
+    my $lowercase_option = lc( $option );
+    my $lowercase_value  = lc( $value );
+    debug( "$lowercase_option $lowercase_value" );
+
+    if ( $parsers{ $lowercase_option } ) {
+      $result = $parsers{ $lowercase_option }->( $lowercase_value );
+    } else {
+      print STDERR "\nInvalid option: '$option'\n";
+      $result = 0;
+    }
+
+    if ( ! $result ) {
+      $parameter = $count; # Finish looping.
+    }
+  }
+
+  $result = $result && required_options_specified();
+  return $result;
+}
+
+
+
+# Parse service option.
+
+sub parse_service_option {
+  my $value = shift;
+  my $result =
+    parse_option( $service, $value, 'SERVICE', 'edm' );
+  return $result;
+}
+
+
+
+# Parse request option.
+
+sub parse_request_option {
+  my $value = shift;
+  my $result =
+    parse_option( $request, $value, 'REQUEST', 'getversion download' );
+  return $result;
+}
+
+
+
+# Parse platform option:
+
+sub parse_platform_option {
+  my $value = shift;
+  my $result =
+    parse_option( $platform, $value, 'PLATFORM',
+                  'win64 darwin.x86_64 linux.x86_64 code' );
+
+  if ( $result ) {
+    $platform = uc( substr( $platform, 0, 1 ) ) . substr( $platform, 1 );  
+  }
+
+  return $result;
+}
+
+
+# Check that all required 'options' have been specified:
+
+sub required_options_specified {
+  my $result = 0;
+
+  if ( $request eq '' ) {
+    print STDERR "\nMissing option: 'REQUEST'\n";
+  } elsif ( $request eq 'download' && $platform eq '' ) {
+    print STDERR "\nMissing option: 'PLATFORM'\n";
+  } else {
+    $result = 1;
+  }
+
+  return $result;
+}
+
+
+
+############################### HELPER ROUTINES ##############################
+
+
+
+# debug( message );
+
+sub debug {
+  my $message = shift;
+
+  if ( $debugging ) {
+    print STDERR "\n$message\n";
+####print STDOUT "\n$message\n";
+  }
+}
+
+
+
+# Execute command and echo its output to STDOUT. E.g., execute_command( 'ls' );
+
+sub execute_command {
+  my $command = shift;
+  my $result = 0;
+  my $the_pipe = 0;
+
+  # Untaint command (match expression is arbitrary as far as -T is concerned):
+
+  if ( $command =~ m#^(/[\w-]+/[\w -/\.]+)$# ) {
+    $command = $1; # Re-assign first match, which is enough to satisfy -T.
+    debug( "$0 executing command = $command" );
+    %ENV = (); # Unset all environment variables prior to popen.
+    # Complicated, supposedly safer way to open a readable pipe to command:
+    my $pid = open( the_pipe, "-|" );
+
+    if ( ! defined( $pid ) ) {
+      die "Couldn't open pipe to subprocess";
+    } elsif ( $pid ) { # Parent process.
+
+      while ( <the_pipe> ) {
+        print;
+      }
+
+      close( the_pipe ) or die $!;
+      $result = ! $?;
+    } else { # Child process.
+      exec( $command ) or die "can't exec program: $!";
+    }
+  } else {
+    print STDERR "\n$0: '$command' contains invalid characters.\n";
+  }
+
+  return $result;
+}
+
+
+
+# my $result = parse_option( $option, $value, $option_name, $valid_values );
+# my $result = parse_option( $variable, $value, 'COVERAGE', 'ozone pm25' );
+
+sub parse_option {
+  my ( $option, $value, $option_name, $valid_values ) = @_;
+  my $result = 0;
+
+  if ( $option ne '' ) {
+    print STDERR "\nRedundant $option_name option: '$value'\n";
+  } else {
+    $result = index( " $valid_values ", " $value " ) != -1;
+
+    if ( $result ) {
+      $_[ 0 ] = $value;
+    } else {
+      print STDERR "\nInvalid $option_name option: '$value'\n";
+    }
+  }
+
+  return $result;
+}
+
+
+

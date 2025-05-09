@@ -1,0 +1,9 @@
+#!/usr/bin/sh
+cp -p *.h ../../../include/
+gcc -g -c -I../../../include shpopen.c dbfopen.c safileio.c
+ar -rv ../../../lib/Win32/libShapefile.debug.a *.o
+gcc -O -DNDEBUG -c -I../../../include shpopen.c dbfopen.c safileio.c
+ar -rv ../../../lib/Win32/libShapefile.a *.o
+rm *o
+ls -l ../../../lib/Win32/libShapefile.*
+file  ../../../lib/Win32/libShapefile.*

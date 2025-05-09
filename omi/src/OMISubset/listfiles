@@ -1,0 +1,140 @@
+#!/bin/csh -f
+# listfiles - List OMI-Aura data files for PRODUCT, YYYYMMDDHH, HOURS, BBOX.
+# 2025-03-25 plessel.todd@epa.gov 919-541-5500
+
+############################## Tunable parameters #############################
+
+set directory = /data/OMI
+set tempdir = /data/tmp
+set bindir = $directory
+set data_directory = $directory/data
+set temp  = $tempdir/listfiles.$$
+set temp2 = $tempdir/listfiles2.$$
+
+
+
+###############################################################################
+# Read and check command-line arguments.
+
+@ ok = 0
+@ yyyymmddhh = 0
+@ hours      = 0
+set lonmin = 0
+set lonmax = 0
+set latmin = 0
+set latmax = 0
+
+if ( $#argv == 7 ) then
+  set product  = `echo $1 | awk -F. '{ print toupper($1)"-"toupper($2) }'`
+
+  @ yyyymmddhh = $2
+  @ hours      = $3
+  set lonmin   = $4
+  set latmin   = $5
+  set lonmax   = $6
+  set latmax   = $7
+  @ ok = ($yyyymmddhh >= 1990010100 && $yyyymmddhh <= 2147123123 && $hours >= 1)
+  
+  if ( $ok ) then
+    @ ok = `echo $lonmin $lonmax $latmin $latmax | awk '{ lonmin = $1; lonmax = $2; latmin = $3; latmax = $4; print ( lonmin >= -180 && lonmin <= 180 && lonmax >= lonmin && lonmax <= 180 && latmin >= -90 && latmin <= 90 && latmax >= latmin && latmax <= 90 ) }'`
+  endif
+
+  if ( ! $ok ) then
+    echo "$0 Invalid command-line arguments $*"
+  endif
+endif
+
+
+
+###############################################################################
+# If invalid then print usage instructions and an example:
+
+if ( ! $ok ) then
+  echo
+  echo "$0 - List OMI data files for given PRODUCT and starting YYYYMMDDHH and HOURS and lon-lat bounds."
+  echo "usage: $0 PRODUCT YYYYMMDDHH HOURS LONMIN LATMIN LONMAX LATMAX"
+  echo "example: $0 l2.omno2 2005080100 24 -51 35 -50 36"
+  exit 1
+endif
+
+
+
+# Set initial time variables:
+
+set days_per_month = ( 31 28 31 30 31 30 31 31 30 31 30 31 )
+@ yyyy =   $yyyymmddhh / 1000000
+@ mm   = ( $yyyymmddhh / 10000 ) % 100
+@ dd   = ( $yyyymmddhh / 100 ) % 100
+@ hh   =   $yyyymmddhh % 100
+
+@ leap = ( $yyyy % 4 == 0 && ! ( $yyyy % 100 == 0 && ! $yyyy % 400 == 0 ) )
+@ days_per_year = 365 + $leap
+
+
+
+###############################################################################
+# Generate the file list then use /bin/ls -f1
+# Listing a directory containing thousands of files is slow.
+# Using the -f1 flag avoids further slowness of coloring, etc.
+# File names look like this:
+# OMI-Aura_L2-OMNO2_2005m0801t1518-o005568_v004-2024m1111t171818.he5
+# OMI-Aura_L2-OMTO3_2005m0801t1635-o005569_v004-2024m1017t164531.he5
+# OMI-Aura_L2-OMCLDRR_2005m0801t1456-o005568_v004-2024m0528t192549.he5
+
+###############################################################################
+# file_count is the number of files in the temp list.
+
+@ file_count = 0
+@ h = 1
+
+while ( $h <= $hours )
+
+  # List files matching product yyyymmdd hh:
+
+  @ yyyymmdd = `printf "%04d%02d%02d" $yyyy $mm $dd`
+  set hh0 = `printf "%02d" $hh`
+  set YYYY = `echo $yyyymmdd | awk '{ printf  "%04d", substr( $1, 1, 4 ) }'`
+  set MM   = `echo $yyyymmdd | awk '{ printf  "%02d", substr( $1, 5, 2 ) }'`
+  set MMDD = `echo $yyyymmdd | awk '{ printf  "%02d%02d", substr( $1, 5, 2 ), substr( $1, 7, 2 ) }'`
+  /bin/ls -f1 $data_directory/$YYYY/$MMDD/OMI-Aura_${product}_${yyyy}m${MMDD}t${hh0}??-*.he5 |& grep -v 'ls: ' >> $temp
+
+  @ hh += 1
+
+  if ( $hh == 24 ) then
+    @ hh = 0
+    @ dd += 1
+
+    @ days_this_month = $days_per_month[$mm]
+
+    if ( $mm == 2 ) then
+      @ days_this_month += $leap
+    endif
+
+    if ( $dd > $days_this_month ) then
+      @ dd = 1
+      @ mm += 1
+
+      if ( $mm > 12 ) then
+        @ mm = 1
+        @ yyyy += 1
+        @ leap = ($yyyy % 4 == 0 && ! ($yyyy % 100 == 0 && ! $yyyy % 400 == 0))
+      endif
+    endif
+  endif
+
+  @ h += 1
+end
+
+touch $temp
+sort $temp | uniq > $temp2
+mv $temp2 $temp
+@ file_count = `cat $temp | wc -l`
+
+
+
+###############################################################################
+# Finally output the filtered file list (or empty) then remove the file:
+
+touch $temp
+cat $temp
+rm $temp

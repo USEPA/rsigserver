@@ -1,0 +1,3008 @@
+#!/usr/bin/perl -wT
+
+##############################################################################
+# PURPOSE: ofsserver - Serve a NOAA OFS model water data, subsetted by
+#          longitude-latitude box, in binary or ASCII format for use by
+#          EstuaryDataMapper (via wget).
+#
+# NOTES:   Server is WCS-compliant:
+#          https://www.opengeospatial.org/standards/wcs
+#          https://datafed.net/xs/OpenGIS/wcs/1.0.0/
+#
+#          Connects to a subset of external web services listed here:
+#          https://tidesandcurrents.noaa.gov/models.html
+#          https://opendap.co-ops.nos.noaa.gov/thredds/catalog.html
+#          To check server status: go to above url then click on each model.
+#          Typically offline status message appears in red at the top.
+#
+#          Example usage:
+#
+#          wget -q -T 0 -O - 'https://ofmpub.epa.gov/rsig/ofsserver?\
+#                     SERVICE=wcs&\
+#                     VERSION=1.0.0&\
+#                     REQUEST=GetCoverage&\
+#                     COVERAGE=cbofs.current&\
+#                     TIME=2012-07-01T00:00:00Z/2012-07-01T23:59:59Z&\
+#                     BBOX=-77,36,-75,40&\
+#                     FORMAT=bin'
+#
+# HISTORY: 2013-07-22 plessel.todd@epa.gov 1-919-541-5500
+#
+# STATUS: unreviewed tested
+##############################################################################
+
+
+use strict;
+package main;
+$| = 1; # Turn off output buffering so messages appear in correct order.
+alarm( 3600 ); # Kill process after 1 hour. Legitimate usage could be an hour!
+# Restrict PATH and ENV.
+delete @ENV{ 'PATH', 'IFS', 'CDPATH', 'ENV', 'BASH_ENV' };
+
+
+############################## TUNABLE CONSTANTS #############################
+
+
+my $debugging = 0; # 1 = print debug messages to STDERR logs/error_log.
+
+# This program must issue many queries to the remote webservice -
+# one for each hour of data. This is so slow that it may exceed http timeout.
+# 24 = try at most 24 concurrent hourly queries to remote server to speed-up
+# throughput.
+# 0 = use sequential one-at-a-time hourly queries (to not overwhelm remote
+# server).
+
+my $concurrent_queries = 24;
+
+my $bindir = '/rsig/current/code/bin/Linux.x86_64';
+#my $wget_command = "$bindir/wget -q -t 1 -T 0 -O - ";
+my $wget_command = '/usr/bin/curl -k -g --silent --max-time 3600 --retry 0 -L --max-redirs 10 --tcp-nodelay ';
+
+my $subsetter = "$bindir/ofssubset";
+my $list_file = "/data/tmp/ofsserver_input_files.$$";
+my $temp_file_format = "/data/tmp/ofsserver_%04d.$$.dods";
+my $temp_script = "/data/tmp/ofsserver_remote_queries.$$.sh";
+
+# Server where this program is installed:
+
+my $server_path = 'https://YOUR_WEBSERVER_HOST/cgi-bin';
+
+# Query string parsing routine dispatch table:
+
+my %parsers = (
+  'service'  => \&parse_service_option,
+  'version'  => \&parse_version_option,
+  'request'  => \&parse_request_option,
+  'coverage' => \&parse_coverage_option,
+  'time'     => \&parse_time_option,
+  'bbox'     => \&parse_bbox_option,
+  'format'   => \&parse_format_option
+);
+
+# Webserver content types for each output format:
+
+my %content_types = (
+  'bin' => 'application/octet-stream'
+);
+
+# Full URL path to this program:
+
+my @pathed_program_parts = split( /\//, $0 );
+my $program_name = $pathed_program_parts[ @pathed_program_parts - 1 ];
+my $program = "$server_path/$program_name";
+
+# Metadata:
+# name         - The COVERAGE= name used by this script.
+# units        - Units for the parameter, e.g., mg/m3.
+# min          - Minimum valid value.
+# max          - Maximum valid value.
+# start_date   - Earliest date of available data.
+# hourly_date   - Date to switch to hourly_query.
+# base_hour_query - First hour of day in query. E.g., 03. (03, 09, 15, 21).
+# hours_per_query - Hour stride accepted by query. E.g., 6.
+# layers       - Number of model layers.
+# layer_1_is_surface - 1 if query result layer 1 is near the surface.
+# convert_lon  - 1 if query result longitudes must be converted from [0, 360].
+# description  - Parameter description.
+# query        - Template for remote query.
+# hourly_query - Template for remote query for dates >= hourly_date.
+# https://tidesandcurrents.noaa.gov/models.html
+# https://opendap.co-ops.nos.noaa.gov/thredds/catalog/catalog.html
+# https://tidesandcurrents.noaa.gov/ofs/publications/pns24-34_sscofs.pdf
+# BBOX Z is 1-based model layer (1 = seabed), not depth (m):
+
+my $maximum_model_layers = 54;
+
+my @metadata = (
+
+  # CBOFS: -------------------------------------------------------------------
+ # https://opendap.co-ops.nos.noaa.gov/thredds/dodsC/NOAA/CBOFS/MODELS/2024/10/01/cbofs.t18z.20241001.fields.n006.nc?Pair[0:1:0][0:1:290][0:1:331]
+
+  {
+    'name' => 'cbofs.air_pressure',
+    'units' => 'hPa',
+    'min' => 500.0,
+    'max' => 1500.0,
+    'start_date' => '2012-09-12',
+    'hourly_date' => '2013-07-25T12',
+    'base_hour_query' => 0,
+    'hours_per_query' => 6,
+    'layers' => 1,
+    'layer_1_is_surface' => 0,
+    'convert_lon' => 0,
+    'longitude_minimum' => -77.33,
+    'longitude_maximum' => -74.8,
+    'latitude_minimum' => 36.19,
+    'latitude_maximum' => 39.62,
+    'description' => 'Chesapeake Bay Operational Forecast System modeled ' .
+                     'air pressure.',
+    'hourly_query' =>
+      'https://opendap.co-ops.nos.noaa.gov/thredds/dodsC/NOAA/' .
+      'CBOFS/MODELS/YYYY/MM/DD/' .
+      'cbofs.tHHz.YYYYMMDD.fields.nNNN.nc.dods?' .
+      'lon_rho,lat_rho,mask_rho,ocean_time,Pair'
+  },
+  {
+    'name' => 'cbofs.wind',
+    'units' => 'm/s',
+    'min' => -100.0,
+    'max' => 100.0,
+    'start_date' => '2012-09-12',
+    'hourly_date' => '2013-07-25T12',
+    'base_hour_query' => 0,
+    'hours_per_query' => 6,
+    'layers' => 1,
+    'layer_1_is_surface' => 0,
+    'convert_lon' => 0,
+    'longitude_minimum' => -77.33,
+    'longitude_maximum' => -74.8,
+    'latitude_minimum' => 36.19,
+    'latitude_maximum' => 39.62,
+    'description' => 'Chesapeake Bay Operational Forecast System modeled ' .
+                     'wind-u,v.',
+    'hourly_query' =>
+      'https://opendap.co-ops.nos.noaa.gov/thredds/dodsC/NOAA/' .
+      'CBOFS/MODELS/YYYY/MM/DD/' .
+      'cbofs.tHHz.YYYYMMDD.fields.nNNN.nc.dods?' .
+      'lon_rho,lat_rho,angle,mask_rho,ocean_time,Uwind,Vwind'
+  },
+  {
+    'name' => 'cbofs.current',
+    'units' => 'm/s',
+    'min' => -50.0,
+    'max' => 50.0,
+    'start_date' => '2012-09-12',
+    'hourly_date' => '2013-07-25T12',
+    'base_hour_query' => 0,
+    'hours_per_query' => 6,
+    'layers' => 20,
+    'layer_1_is_surface' => 0,
+    'convert_lon' => 0,
+    'longitude_minimum' => -77.33,
+    'longitude_maximum' => -74.8,
+    'latitude_minimum' => 36.19,
+    'latitude_maximum' => 39.62,
+    'description' => 'Chesapeake Bay Operational Forecast System modeled ' .
+                     'current-u,v,w.',
+    'hourly_query' =>
+      'https://opendap.co-ops.nos.noaa.gov/thredds/dodsC/NOAA/' .
+      'CBOFS/MODELS/YYYY/MM/DD/' .
+      'cbofs.tHHz.YYYYMMDD.fields.nNNN.nc.dods?' .
+      's_rho[LAYER],' .
+      'h,lon_rho,lat_rho,angle,mask_rho,mask_u,mask_v,' .
+      'ocean_time,zeta,' .
+      'u[0][LAYER][0:1:290][0:1:330],' .
+      'v[0][LAYER][0:1:289][0:1:331],' .
+      'w[0][LAYER:1:LAYER1][0:1:290][0:1:331]'
+  },
+  {
+    'name' => 'cbofs.water_temperature',
+    'units' => 'C',
+    'min' => 0.0,
+    'max' => 50.0,
+    'start_date' => '2012-09-12',
+    'hourly_date' => '2013-07-25T12',
+    'base_hour_query' => 0,
+    'hours_per_query' => 6,
+    'layers' => 20,
+    'layer_1_is_surface' => 0,
+    'convert_lon' => 0,
+    'longitude_minimum' => -77.33,
+    'longitude_maximum' => -74.8,
+    'latitude_minimum' => 36.19,
+    'latitude_maximum' => 39.62,
+    'description' => 'Chesapeake Bay Operational Forecast System modeled ' .
+                     'water temperature.',
+    'hourly_query' =>
+      'https://opendap.co-ops.nos.noaa.gov/thredds/dodsC/NOAA/' .
+      'CBOFS/MODELS/YYYY/MM/DD/' .
+      'cbofs.tHHz.YYYYMMDD.fields.nNNN.nc.dods?' .
+      's_rho[LAYER],' .
+      'h,lon_rho,lat_rho,mask_rho,ocean_time,zeta,' .
+      'temp[0][LAYER][0:1:290][0:1:331]'
+  },
+  {
+    'name' => 'cbofs.salinity',
+    'units' => 'PSU',
+    'min' => 0.0,
+    'max' => 50.0,
+    'start_date' => '2012-09-12',
+    'hourly_date' => '2013-07-25T12',
+    'base_hour_query' => 0,
+    'hours_per_query' => 6,
+    'layers' => 20,
+    'layer_1_is_surface' => 0,
+    'convert_lon' => 0,
+    'longitude_minimum' => -77.33,
+    'longitude_maximum' => -74.8,
+    'latitude_minimum' => 36.19,
+    'latitude_maximum' => 39.62,
+    'description' => 'Chesapeake Bay Operational Forecast System modeled ' .
+                     'salinity.',
+    'hourly_query' =>
+      'https://opendap.co-ops.nos.noaa.gov/thredds/dodsC/NOAA/' .
+      'CBOFS/MODELS/YYYY/MM/DD/' .
+      'cbofs.tHHz.YYYYMMDD.fields.nNNN.nc.dods?' .
+      's_rho[LAYER],' .
+      'h,lon_rho,lat_rho,mask_rho,ocean_time,zeta,' .
+      'salt[0][LAYER][0:1:290][0:1:331]'
+  },
+  {
+    'name' => 'cbofs.oxygen',
+    'units' => 'mmol/m3',
+    'min' => 0.0,
+    'max' => 200.0,
+    'start_date' => '2012-09-12',
+    'hourly_date' => '2013-07-25T12',
+    'base_hour_query' => 0,
+    'hours_per_query' => 6,
+    'layers' => 20,
+    'layer_1_is_surface' => 0,
+    'convert_lon' => 0,
+    'longitude_minimum' => -77.33,
+    'longitude_maximum' => -74.8,
+    'latitude_minimum' => 36.19,
+    'latitude_maximum' => 39.62,
+    'description' => 'Chesapeake Bay Operational Forecast System modeled ' .
+                     'dissolved oxygen concentration.',
+    'hourly_query' =>
+      'https://opendap.co-ops.nos.noaa.gov/thredds/dodsC/NOAA/' .
+      'CBOFS/MODELS/YYYY/MM/DD/' .
+      'cbofs.tHHz.YYYYMMDD.fields.nNNN.nc.dods?' .
+      's_rho[LAYER],' .
+      'h,lon_rho,lat_rho,mask_rho,ocean_time,zeta,' .
+      'oxygen[0][LAYER][0:1:290][0:1:331]'
+  },
+
+  # CIOFS: -------------------------------------------------------------------
+
+  {
+    'name' => 'ciofs.air_pressure',
+    'units' => 'hPa',
+    'min' => 500.0,
+    'max' => 1500.0,
+    'start_date' => '2019-04-04',
+    'hourly_date' => '2019-04-04T00',
+    'base_hour_query' => 0,
+    'hours_per_query' => 6,
+    'layers' => 1,
+    'layer_1_is_surface' => 0,
+    'convert_lon' => 0,
+    'longitude_minimum' => -156.5,
+    'longitude_maximum' => -148.5,
+    'latitude_minimum' => 56.5,
+    'latitude_maximum' => 61.5,
+    'description' => 'Cook Inlet, Alaska Operational Forecast System modeled ' .
+                     'air pressure.',
+    'hourly_query' =>
+      'https://opendap.co-ops.nos.noaa.gov/thredds/dodsC/NOAA/' .
+      'CIOFS/MODELS/YYYY/MM/DD/' .
+      'ciofs.tHHz.YYYYMMDD.fields.nNNN.nc.dods?' .
+      'lon_rho,lat_rho,mask_rho,ocean_time,Pair'
+  },
+  {
+    'name' => 'ciofs.wind',
+    'units' => 'm/s',
+    'min' => -100.0,
+    'max' => 100.0,
+    'start_date' => '2019-04-04',
+    'hourly_date' => '2019-04-04T00',
+    'base_hour_query' => 0,
+    'hours_per_query' => 6,
+    'layers' => 1,
+    'layer_1_is_surface' => 0,
+    'convert_lon' => 0,
+    'longitude_minimum' => -156.5,
+    'longitude_maximum' => -148.5,
+    'latitude_minimum' => 56.5,
+    'latitude_maximum' => 61.5,
+    'description' => 'Cook Inlet, Alaska Operational Forecast System modeled ' .
+                     'wind-u,v.',
+    'hourly_query' =>
+      'https://opendap.co-ops.nos.noaa.gov/thredds/dodsC/NOAA/' .
+      'CIOFS/MODELS/YYYY/MM/DD/' .
+      'ciofs.tHHz.YYYYMMDD.fields.nNNN.nc.dods?' .
+      'lon_rho,lat_rho,angle,mask_rho,ocean_time,Uwind,Vwind'
+  },
+  {
+    'name' => 'ciofs.current',
+    'units' => 'm/s',
+    'min' => -50.0,
+    'max' => 50.0,
+    'start_date' => '2019-04-04',
+    'hourly_date' => '2019-04-04T00',
+    'base_hour_query' => 0,
+    'hours_per_query' => 6,
+    'layers' => 30,
+    'layer_1_is_surface' => 0,
+    'convert_lon' => 0,
+    'longitude_minimum' => -156.5,
+    'longitude_maximum' => -148.5,
+    'latitude_minimum' => 56.5,
+    'latitude_maximum' => 61.5,
+    'description' => 'Cook Inlet, Alaska Operational Forecast System modeled ' .
+                     'current-u,v,w.',
+    'hourly_query' =>
+      'https://opendap.co-ops.nos.noaa.gov/thredds/dodsC/NOAA/' .
+      'CIOFS/MODELS/YYYY/MM/DD/' .
+      'ciofs.tHHz.YYYYMMDD.fields.nNNN.nc.dods?' .
+      's_rho[LAYER],' .
+      'h,lon_rho,lat_rho,angle,mask_rho,mask_u,mask_v,ocean_time,zeta,' .
+      'u[0][LAYER][0:1:1043][0:1:722],' .
+      'v[0][LAYER][0:1:1042][0:1:723],' .
+      'w[0][LAYER:1:LAYER1][0:1:1043][0:1:723]'
+  },
+  {
+    'name' => 'ciofs.water_temperature',
+    'units' => 'C',
+    'min' => 0.0,
+    'max' => 50.0,
+    'start_date' => '2019-04-04',
+    'hourly_date' => '2019-04-04T00',
+    'base_hour_query' => 0,
+    'hours_per_query' => 6,
+    'layers' => 30,
+    'layer_1_is_surface' => 0,
+    'convert_lon' => 0,
+    'longitude_minimum' => -156.5,
+    'longitude_maximum' => -148.5,
+    'latitude_minimum' => 56.5,
+    'latitude_maximum' => 61.5,
+    'description' => 'Cook Inlet, Alaska Operational Forecast System modeled ' .
+                     'water temperature.',
+    'hourly_query' =>
+      'https://opendap.co-ops.nos.noaa.gov/thredds/dodsC/NOAA/' .
+      'CIOFS/MODELS/YYYY/MM/DD/' .
+      'ciofs.tHHz.YYYYMMDD.fields.nNNN.nc.dods?' .
+      's_rho[LAYER],' .
+      'h,lon_rho,lat_rho,mask_rho,ocean_time,zeta,' .
+      'temp[0][LAYER][0:1:1043][0:1:723]'
+  },
+  {
+    'name' => 'ciofs.salinity',
+    'units' => 'PSU',
+    'min' => 0.0,
+    'max' => 50.0,
+    'start_date' => '2019-04-04',
+    'hourly_date' => '2019-04-04T00',
+    'base_hour_query' => 0,
+    'hours_per_query' => 6,
+    'layers' => 30,
+    'layer_1_is_surface' => 0,
+    'convert_lon' => 0,
+    'longitude_minimum' => -156.5,
+    'longitude_maximum' => -148.5,
+    'latitude_minimum' => 56.5,
+    'latitude_maximum' => 61.5,
+    'description' => 'Cook Inlet, Alaska Operational Forecast System modeled ' .
+                     'salinity.',
+    'hourly_query' =>
+      'https://opendap.co-ops.nos.noaa.gov/thredds/dodsC/NOAA/' .
+      'CIOFS/MODELS/YYYY/MM/DD/' .
+      'ciofs.tHHz.YYYYMMDD.fields.nNNN.nc.dods?' .
+      's_rho[LAYER],' .
+      'h,lon_rho,lat_rho,mask_rho,ocean_time,zeta,' .
+      'salt[0][LAYER][0:1:1043][0:1:723]'
+  },
+
+  # CREOFS: ------------------------------------------------------------------
+  # CREOFS replaced by SSCOFS 2024-10-01
+  # https://tidesandcurrents.noaa.gov/ofs/publications/pns24-34_sscofs.pdf
+
+   {
+    'name' => 'creofs.air_pressure',
+    'units' => 'hPa',
+    'min' => 500.0,
+    'max' => 1500.0,
+    'start_date' => '2012-10-01',
+    'hourly_date' => '2013-07-25T15',
+    'base_hour_query' => 3,
+    'hours_per_query' => 6,
+    'layers' => 36,
+    'layer_1_is_surface' => 0,
+    'convert_lon' => 0,
+    'longitude_minimum' => -128.0,
+    'longitude_maximum' => -121.9,
+    'latitude_minimum' => 39.0,
+    'latitude_maximum' => 50.05,
+    'description' =>
+      'Columbia River Estuary (Oregon) Operational Forecast System modeled ' .
+      'air pressure.',
+    'hourly_query' =>
+      'https://opendap.co-ops.nos.noaa.gov/thredds/dodsC/NOAA/' .
+      'CREOFS/MODELS/YYYY/MM/DD/' .
+      'nos.creofs.fields.nNNN.YYYYMMDD.tHHz.nc.dods?' .
+      'lon,lat,Pair'
+  },
+   {
+    'name' => 'creofs.wind',
+    'units' => 'm/s',
+    'min' => -100.0,
+    'max' => 100.0,
+    'start_date' => '2012-10-01',
+    'hourly_date' => '2013-07-25T15',
+    'base_hour_query' => 3,
+    'hours_per_query' => 6,
+    'layers' => 36,
+    'layer_1_is_surface' => 0,
+    'convert_lon' => 0,
+    'longitude_minimum' => -128.0,
+    'longitude_maximum' => -121.9,
+    'latitude_minimum' => 39.0,
+    'latitude_maximum' => 50.05,
+    'description' =>
+      'Columbia River Estuary (Oregon) Operational Forecast System modeled ' .
+      'wind-u,v.',
+    'hourly_query' =>
+      'https://opendap.co-ops.nos.noaa.gov/thredds/dodsC/NOAA/' .
+      'CREOFS/MODELS/YYYY/MM/DD/' .
+      'nos.creofs.fields.nNNN.YYYYMMDD.tHHz.nc.dods?' .
+      'lon,lat,uwind_speed,vwind_speed'
+  },
+  {
+    'name' => 'creofs.current',
+    'units' => 'm/s',
+    'min' => -50.0,
+    'max' => 50.0,
+    'start_date' => '2012-10-01',
+    'hourly_date' => '2013-07-25T15',
+    'base_hour_query' => 3,
+    'hours_per_query' => 6,
+    'layers' => 36,
+    'layer_1_is_surface' => 0,
+    'convert_lon' => 0,
+    'longitude_minimum' => -128.0,
+    'longitude_maximum' => -121.9,
+    'latitude_minimum' => 39.0,
+    'latitude_maximum' => 50.05,
+    'description' =>
+      'Columbia River Estuary (Oregon) Operational Forecast System modeled ' .
+      'current-u,v.',
+    'hourly_query' =>
+      'https://opendap.co-ops.nos.noaa.gov/thredds/dodsC/NOAA/' .
+      'CREOFS/MODELS/YYYY/MM/DD/' .
+      'nos.creofs.fields.nNNN.YYYYMMDD.tHHz.nc.dods?' .
+      'lon,lat,h,' .
+      'sigma[LAYER],' .
+      'zeta,' .
+      'u[0][LAYER][0:1:74060],' .
+      'v[0][LAYER][0:1:74060]'
+  },
+  {
+    'name' => 'creofs.water_temperature',
+    'units' => 'C',
+    'min' => 0.0,
+    'max' => 50.0,
+    'start_date' => '2012-10-01',
+    'hourly_date' => '2013-07-25T15',
+    'base_hour_query' => 3,
+    'hours_per_query' => 6,
+    'layers' => 36,
+    'layer_1_is_surface' => 0,
+    'convert_lon' => 0,
+    'longitude_minimum' => -128.0,
+    'longitude_maximum' => -121.9,
+    'latitude_minimum' => 39.0,
+    'latitude_maximum' => 50.05,
+    'description' =>
+      'Columbia River Estuary (Oregon) Operational Forecast System modeled ' .
+      'water temperature at depth.',
+    'hourly_query' =>
+      'https://opendap.co-ops.nos.noaa.gov/thredds/dodsC/NOAA/' .
+      'CREOFS/MODELS/YYYY/MM/DD/' .
+      'nos.creofs.fields.nNNN.YYYYMMDD.tHHz.nc.dods?' .
+      'lon,lat,h,' .
+      'sigma[LAYER],' .
+      'zeta,' .
+      'temp[0][LAYER][0:1:74060]'
+  },
+  {
+    'name' => 'creofs.salinity',
+    'units' => 'PSU',
+    'min' => 0.0,
+    'max' => 50.0,
+    'start_date' => '2012-10-01',
+    'hourly_date' => '2013-07-25T15',
+    'base_hour_query' => 3,
+    'hours_per_query' => 6,
+    'layers' => 36,
+    'layer_1_is_surface' => 0,
+    'convert_lon' => 0,
+    'longitude_minimum' => -128.0,
+    'longitude_maximum' => -121.9,
+    'latitude_minimum' => 39.0,
+    'latitude_maximum' => 50.05,
+    'description' =>
+      'Columbia River Estuary (Oregon) Operational Forecast System modeled ' .
+      'salinity at depth.',
+    'hourly_query' =>
+      'https://opendap.co-ops.nos.noaa.gov/thredds/dodsC/NOAA/' .
+      'CREOFS/MODELS/YYYY/MM/DD/' .
+      'nos.creofs.fields.nNNN.YYYYMMDD.tHHz.nc.dods?' .
+      'lon,lat,h,' .
+      'sigma[LAYER],' .
+      'zeta,' .
+      'salinity[0][LAYER][0:1:74060]'
+  },
+
+  # DBOFS: -------------------------------------------------------------------
+
+  {
+    'name' => 'dbofs.air_pressure',
+    'units' => 'hPa',
+    'min' => 500.0,
+    'max' => 1500.0,
+    'start_date' => '2012-09-22',
+    'hourly_date' => '2013-07-25T12',
+    'base_hour_query' => 0,
+    'hours_per_query' => 6,
+    'layers' => 10,
+    'layer_1_is_surface' => 0,
+    'convert_lon' => 0,
+    'longitude_minimum' => -75.9,
+    'longitude_maximum' => -73.26,
+    'latitude_minimum' => 37.8,
+    'latitude_maximum' => 40.21,
+    'description' => 'Delaware Bay Operational Forecast Model air pressure.',
+    'hourly_query' =>
+      'https://opendap.co-ops.nos.noaa.gov/thredds/dodsC/NOAA/' .
+      'DBOFS/MODELS/YYYY/MM/DD/' .
+      'dbofs.tHHz.YYYYMMDD.fields.nNNN.nc.dods?' .
+      'lon_rho,lat_rho,mask_rho,ocean_time,Pair'
+ },
+  {
+    'name' => 'dbofs.wind',
+    'units' => 'm/s',
+    'min' => -100.0,
+    'max' => 100.0,
+    'start_date' => '2012-09-22',
+    'hourly_date' => '2013-07-25T12',
+    'base_hour_query' => 0,
+    'hours_per_query' => 6,
+    'layers' => 10,
+    'layer_1_is_surface' => 0,
+    'convert_lon' => 0,
+    'longitude_minimum' => -75.9,
+    'longitude_maximum' => -73.26,
+    'latitude_minimum' => 37.8,
+    'latitude_maximum' => 40.21,
+    'description' => 'Delaware Bay Operational Forecast System modeled ' .
+                     'wind-u,v.',
+    'hourly_query' =>
+      'https://opendap.co-ops.nos.noaa.gov/thredds/dodsC/NOAA/' .
+      'DBOFS/MODELS/YYYY/MM/DD/' .
+      'dbofs.tHHz.YYYYMMDD.fields.nNNN.nc.dods?' .
+      'lon_rho,lat_rho,angle,mask_rho,ocean_time,Uwind,Vwind'
+  },
+  {
+    'name' => 'dbofs.current',
+    'units' => 'm/s',
+    'min' => -50.0,
+    'max' => 50.0,
+    'start_date' => '2012-09-22',
+    'hourly_date' => '2013-07-25T12',
+    'base_hour_query' => 0,
+    'hours_per_query' => 6,
+    'layers' => 10,
+    'layer_1_is_surface' => 0,
+    'convert_lon' => 0,
+    'longitude_minimum' => -75.9,
+    'longitude_maximum' => -73.26,
+    'latitude_minimum' => 37.8,
+    'latitude_maximum' => 40.21,
+    'description' => 'Delaware Bay Operational Forecast System modeled ' .
+                     'current-u,v,w.',
+    'hourly_query' =>
+      'https://opendap.co-ops.nos.noaa.gov/thredds/dodsC/NOAA/' .
+      'DBOFS/MODELS/YYYY/MM/DD/' .
+      'dbofs.tHHz.YYYYMMDD.fields.nNNN.nc.dods?' .
+      's_rho[LAYER],' .
+      'h,lon_rho,lat_rho,angle,mask_rho,mask_u,mask_v,ocean_time,zeta,' .
+      'u[0][LAYER][0:1:731][0:1:117],' .
+      'v[0][LAYER][0:1:730][0:1:118],' .
+      'w[0][LAYER:1:LAYER1][0:1:731][0:1:118]'
+  },
+  {
+    'name' => 'dbofs.water_temperature',
+    'units' => 'C',
+    'min' => 0.0,
+    'max' => 50.0,
+    'start_date' => '2012-09-22',
+    'hourly_date' => '2013-07-25T12',
+    'base_hour_query' => 0,
+    'hours_per_query' => 6,
+    'layers' => 10,
+    'layer_1_is_surface' => 0,
+    'convert_lon' => 0,
+    'longitude_minimum' => -75.9,
+    'longitude_maximum' => -73.26,
+    'latitude_minimum' => 37.8,
+    'latitude_maximum' => 40.21,
+    'description' => 'Delaware Bay Operational Forecast System modeled ' .
+                     'water temperature.',
+    'hourly_query' =>
+      'https://opendap.co-ops.nos.noaa.gov/thredds/dodsC/NOAA/' .
+      'DBOFS/MODELS/YYYY/MM/DD/' .
+      'dbofs.tHHz.YYYYMMDD.fields.nNNN.nc.dods?' .
+      's_rho[LAYER],' .
+      'h,lon_rho,lat_rho,mask_rho,ocean_time,zeta,' .
+      'temp[0][LAYER][0:1:731][0:1:118]'
+  },
+  {
+    'name' => 'dbofs.salinity',
+    'units' => 'PSU',
+    'min' => 0.0,
+    'max' => 50.0,
+    'start_date' => '2012-09-22',
+    'hourly_date' => '2013-07-25T12',
+    'base_hour_query' => 0,
+    'hours_per_query' => 6,
+    'layers' => 10,
+    'layer_1_is_surface' => 0,
+    'convert_lon' => 0,
+    'longitude_minimum' => -75.9,
+    'longitude_maximum' => -73.26,
+    'latitude_minimum' => 37.8,
+    'latitude_maximum' => 40.21,
+    'description' => 'Delaware Bay Operational Forecast System modeled ' .
+                     'salinity.',
+    'hourly_query' =>
+      'https://opendap.co-ops.nos.noaa.gov/thredds/dodsC/NOAA/' .
+      'DBOFS/MODELS/YYYY/MM/DD/' .
+      'dbofs.tHHz.YYYYMMDD.fields.nNNN.nc.dods?' .
+      's_rho[LAYER],' .
+      'h,lon_rho,lat_rho,mask_rho,ocean_time,zeta,' .
+      'salt[0][LAYER][0:1:731][0:1:118]'
+  },
+
+  # GOMOFS: -------------------------------------------------------------------
+
+  {
+    'name' => 'gomofs.air_pressure',
+    'units' => 'hPa',
+    'min' => 500.0,
+    'max' => 1500.0,
+    'start_date' => '2018-08-01',
+    'hourly_date' => '2018-08-01T00',
+    'base_hour_query' => 0,
+    'hours_per_query' => 6,
+    'layers' => 1,
+    'layer_1_is_surface' => 0,
+    'convert_lon' => 0,
+    'longitude_minimum' => -72.0,
+    'longitude_maximum' => -61.0,
+    'latitude_minimum' => 38.5,
+    'latitude_maximum' => 46.0,
+    'description' => 'Gulf of Maine Operational Forecast System modeled ' .
+                     'air pressure.',
+    'hourly_query' =>
+      'https://opendap.co-ops.nos.noaa.gov/thredds/dodsC/NOAA/' .
+      'GOMOFS/MODELS/YYYY/MM/DD/' .
+      'gomofs.tHHz.YYYYMMDD.fields.nNNN.nc.dods?' .
+      'lon_rho,lat_rho,mask_rho,ocean_time,Pair'
+  },
+  {
+    'name' => 'gomofs.wind',
+    'units' => 'm/s',
+    'min' => -100.0,
+    'max' => 100.0,
+    'start_date' => '2018-08-01',
+    'hourly_date' => '2018-08-01T00',
+    'base_hour_query' => 0,
+    'hours_per_query' => 6,
+    'layers' => 30,
+    'layer_1_is_surface' => 0,
+    'convert_lon' => 0,
+    'longitude_minimum' => -72.0,
+    'longitude_maximum' => -61.0,
+    'latitude_minimum' => 38.5,
+    'latitude_maximum' => 46.0,
+    'description' => 'Gulf of Maine Operational Forecast System modeled ' .
+                     'wind-u,v.',
+    'hourly_query' =>
+      'https://opendap.co-ops.nos.noaa.gov/thredds/dodsC/NOAA/' .
+      'GOMOFS/MODELS/YYYY/MM/DD/' .
+      'gomofs.tHHz.YYYYMMDD.fields.nNNN.nc.dods?' .
+      'lon_rho,lat_rho,angle,mask_rho,ocean_time,Uwind,Vwind'
+  },
+  {
+    'name' => 'gomofs.current',
+    'units' => 'm/s',
+    'min' => -50.0,
+    'max' => 50.0,
+    'start_date' => '2018-08-01',
+    'hourly_date' => '2018-08-01T00',
+    'base_hour_query' => 0,
+    'hours_per_query' => 6,
+    'layers' => 30,
+    'layer_1_is_surface' => 0,
+    'convert_lon' => 0,
+    'longitude_minimum' => -72.0,
+    'longitude_maximum' => -61.0,
+    'latitude_minimum' => 38.5,
+    'latitude_maximum' => 46.0,
+    'description' => 'Gulf of Maine Operational Forecast System modeled ' .
+                     'current-u,v,w.',
+    'hourly_query' =>
+      'https://opendap.co-ops.nos.noaa.gov/thredds/dodsC/NOAA/' .
+      'GOMOFS/MODELS/YYYY/MM/DD/' .
+      'gomofs.tHHz.YYYYMMDD.fields.nNNN.nc.dods?' .
+      's_rho[LAYER],' .
+      'h,lon_rho,lat_rho,angle,mask_rho,mask_u,mask_v,ocean_time,zeta,' .
+      'u[0][LAYER][0:1:776][0:1:1171],' .
+      'v[0][LAYER][0:1:775][0:1:1172],' .
+      'w[0][LAYER:1:LAYER1][0:1:776][0:1:1172]'
+  },
+  {
+    'name' => 'gomofs.water_temperature',
+    'units' => 'C',
+    'min' => 0.0,
+    'max' => 50.0,
+    'start_date' => '2018-08-01',
+    'hourly_date' => '2018-08-01T00',
+    'base_hour_query' => 0,
+    'hours_per_query' => 6,
+    'layers' => 30,
+    'layer_1_is_surface' => 0,
+    'convert_lon' => 0,
+    'longitude_minimum' => -72.0,
+    'longitude_maximum' => -61.0,
+    'latitude_minimum' => 38.5,
+    'latitude_maximum' => 46.0,
+    'description' => 'Gulf of Maine Operational Forecast System modeled ' .
+                     'water temperature.',
+    'hourly_query' =>
+      'https://opendap.co-ops.nos.noaa.gov/thredds/dodsC/NOAA/' .
+      'GOMOFS/MODELS/YYYY/MM/DD/' .
+      'gomofs.tHHz.YYYYMMDD.fields.nNNN.nc.dods?' .
+      's_rho[LAYER],' .
+      'h,lon_rho,lat_rho,mask_rho,ocean_time,zeta,' .
+      'temp[0][LAYER][0:1:776][0:1:1172]'
+ },
+  {
+    'name' => 'gomofs.salinity',
+    'units' => 'PSU',
+    'min' => 0.0,
+    'max' => 50.0,
+    'start_date' => '2018-08-01',
+    'hourly_date' => '2018-08-01T00',
+    'base_hour_query' => 0,
+    'hours_per_query' => 6,
+    'layers' => 30,
+    'layer_1_is_surface' => 0,
+    'convert_lon' => 0,
+    'longitude_minimum' => -72.0,
+    'longitude_maximum' => -61.0,
+    'latitude_minimum' => 38.5,
+    'latitude_maximum' => 46.0,
+    'description' => 'Gulf of Maine Operational Forecast System modeled ' .
+                     'salinity.',
+    'hourly_query' =>
+      'https://opendap.co-ops.nos.noaa.gov/thredds/dodsC/NOAA/' .
+      'GOMOFS/MODELS/YYYY/MM/DD/' .
+      'gomofs.tHHz.YYYYMMDD.fields.nNNN.nc.dods?' .
+      's_rho[LAYER],' .
+      'h,lon_rho,lat_rho,mask_rho,ocean_time,zeta,' .
+      'salt[0][LAYER][0:1:776][0:1:1172]'
+  },
+
+  # NGOFS2: -------------------------------------------------------------------
+
+   {
+    'name' => 'ngofs2.air_pressure',
+    'units' => 'hPa',
+    'min' => 500.0,
+    'max' => 1500.0,
+    'start_date'  => '2021-03-01',
+    'hourly_date' => '2021-03-01T00',
+    'base_hour_query' => 3,
+    'hours_per_query' => 6,
+    'layers' => 40,
+    'layer_1_is_surface' => 1,
+    'convert_lon' => 1,
+    'longitude_minimum' => -97.38,
+    'longitude_maximum' => -85.74,
+    'latitude_minimum' => 25.8,
+    'latitude_maximum' => 30.68,
+    'description' =>
+      'Northern Gulf (of Mexico) Operational Forecast System 2 modeled ' .
+      'air pressure.',
+    'hourly_query' =>
+      'https://opendap.co-ops.nos.noaa.gov/thredds/dodsC/NOAA/' .
+      'NGOFS2/MODELS/YYYY/MM/DD/' .
+      'ngofs2.tHHz.YYYYMMDD.fields.nNNN.nc.dods?' .
+      'lon,lat,time,atmos_press,wet_nodes'
+  },
+  {
+    'name' => 'ngofs2.wind',
+    'units' => 'm/s',
+    'min' => -100.0,
+    'max' => 100.0,
+    'start_date'  => '2021-03-01',
+    'hourly_date' => '2021-03-01T00',
+    'base_hour_query' => 3,
+    'hours_per_query' => 6,
+    'layers' => 40,
+    'layer_1_is_surface' => 1,
+    'convert_lon' => 1,
+    'longitude_minimum' => -97.38,
+    'longitude_maximum' => -85.74,
+    'latitude_minimum' => 25.8,
+    'latitude_maximum' => 30.68,
+    'description' =>
+      'Northern Gulf (of Mexico) Operational Forecast System 2 modeled ' .
+      'wind-u,v.',
+    'hourly_query' =>
+      'https://opendap.co-ops.nos.noaa.gov/thredds/dodsC/NOAA/' .
+      'NGOFS2/MODELS/YYYY/MM/DD/' .
+      'ngofs2.tHHz.YYYYMMDD.fields.nNNN.nc.dods?' .
+      'lonc,latc,time,uwind_speed,vwind_speed,wet_cells'
+  },
+  {
+    'name' => 'ngofs2.current',
+    'units' => 'm/s',
+    'min' => -50.0,
+    'max' => 50.0,
+    'start_date'  => '2021-03-01',
+    'hourly_date' => '2021-03-01T00',
+    'base_hour_query' => 3,
+    'hours_per_query' => 6,
+    'layers' => 40,
+    'layer_1_is_surface' => 1,
+    'convert_lon' => 1,
+    'longitude_minimum' => -97.38,
+    'longitude_maximum' => -85.74,
+    'latitude_minimum' => 25.8,
+    'latitude_maximum' => 30.68,
+    'description' =>
+      'Northern Gulf (of Mexico) Operational Forecast System 2 modeled ' .
+      'current-u,v.',
+    'hourly_query' =>
+      'https://opendap.co-ops.nos.noaa.gov/thredds/dodsC/NOAA/' .
+      'NGOFS2/MODELS/YYYY/MM/DD/' .
+      'ngofs2.tHHz.YYYYMMDD.fields.nNNN.nc.dods?' .
+      'lonc,latc,' .
+      'siglay[LAYER][0:1:303713],' .
+      'h,nv,time,zeta,' .
+      'u[0][LAYER][0:1:569404],' .
+      'v[0][LAYER][0:1:569404],' .
+      'wet_cells'
+  },
+  {
+    'name' => 'ngofs2.water_temperature',
+    'units' => 'C',
+    'min' => 0.0,
+    'max' => 50.0,
+    'start_date'  => '2021-03-01',
+    'hourly_date' => '2021-03-01T00',
+    'base_hour_query' => 3,
+    'hours_per_query' => 6,
+    'layers' => 40,
+    'layer_1_is_surface' => 1,
+    'convert_lon' => 1,
+    'longitude_minimum' => -97.38,
+    'longitude_maximum' => -85.74,
+    'latitude_minimum' => 25.8,
+    'latitude_maximum' => 30.68,
+    'description' =>
+      'Northern Gulf (of Mexico) Operational Forecast System 2 modeled ' .
+      'water temperature at depth.',
+    'hourly_query' =>
+      'https://opendap.co-ops.nos.noaa.gov/thredds/dodsC/NOAA/' .
+      'NGOFS2/MODELS/YYYY/MM/DD/' .
+      'ngofs2.tHHz.YYYYMMDD.fields.nNNN.nc.dods?' .
+      'lon,lat,time,' .
+      'siglay[LAYER][0:1:303713],' .
+      'h,zeta,' .
+      'temp[0][LAYER][0:1:303713],' .
+      'wet_nodes'
+  },
+  {
+    'name' => 'ngofs2.salinity',
+    'units' => 'PSU',
+    'min' => 0.0,
+    'max' => 50.0,
+    'start_date'  => '2021-03-01',
+    'hourly_date' => '2021-03-01',
+    'base_hour_query' => 3,
+    'hours_per_query' => 6,
+    'layers' => 40,
+    'layer_1_is_surface' => 1,
+    'convert_lon' => 1,
+    'longitude_minimum' => -97.38,
+    'longitude_maximum' => -85.74,
+    'latitude_minimum' => 25.8,
+    'latitude_maximum' => 30.68,
+    'description' =>
+      'Northern Gulf (of Mexico) Operational Forecast System 2 modeled ' .
+      'salinity at depth.',
+    'hourly_query' =>
+      'https://opendap.co-ops.nos.noaa.gov/thredds/dodsC/NOAA/' .
+      'NGOFS2/MODELS/YYYY/MM/DD/' .
+      'ngofs2.tHHz.YYYYMMDD.fields.nNNN.nc.dods?' .
+      'lon,lat,time,' .
+      'siglay[LAYER][0:1:303713],' .
+      'h,zeta,' .
+      'salinity[0][LAYER][0:1:303713],' .
+      'wet_nodes'
+  },
+  {
+    'name' => 'ngofs2.seabed_stress',
+    'units' => 'm2/s2',
+    'min' => 0.0,
+    'max' => 1.0,
+    'start_date'  => '2021-03-01',
+    'hourly_date' => '2021-03-01T00',
+    'base_hour_query' => 3,
+    'hours_per_query' => 6,
+    'layers' => 40,
+    'layer_1_is_surface' => 1,
+    'convert_lon' => 1,
+    'longitude_minimum' => -97.38,
+    'longitude_maximum' => -85.74,
+    'latitude_minimum' => 25.8,
+    'latitude_maximum' => 30.68,
+    'description' =>
+      'Northern Gulf (of Mexico) Operational Forecast System 2 modeled ' .
+      'seabed stress magnitude.',
+    'hourly_query' =>
+      'https://opendap.co-ops.nos.noaa.gov/thredds/dodsC/NOAA/' .
+      'NGOFS2/MODELS/YYYY/MM/DD/' .
+      'ngofs2.tHHz.YYYYMMDD.fields.nNNN.nc.dods?' .
+      'lonc,latc,time,tauc,wet_cells'
+  },
+  {
+    'name' => 'ngofs2.radiation',
+    'units' => 'W/m2',
+    'min' => 0.0,
+    'max' => 1500.0,
+    'start_date'  => '2021-03-01',
+    'hourly_date' => '2021-03-01T00',
+    'base_hour_query' => 3,
+    'hours_per_query' => 6,
+    'layers' => 40,
+    'layer_1_is_surface' => 1,
+    'convert_lon' => 1,
+    'longitude_minimum' => -97.38,
+    'longitude_maximum' => -85.74,
+    'latitude_minimum' => 25.8,
+    'latitude_maximum' => 30.68,
+    'description' =>
+      'Northern Gulf (of Mexico) Operational Forecast System 2 modeled ' .
+      'short wave radiation.',
+    'hourly_query' =>
+      'https://opendap.co-ops.nos.noaa.gov/thredds/dodsC/NOAA/' .
+      'NGOFS2/MODELS/YYYY/MM/DD/' .
+      'ngofs2.tHHz.YYYYMMDD.fields.nNNN.nc.dods?' .
+      'lon,lat,time,short_wave,wet_nodes'
+  },
+  {
+    'name' => 'ngofs2.net_heat_flux',
+    'units' => 'W/m2',
+    'min' => -1500.0,
+    'max' => 1500.0,
+    'start_date'  => '2021-03-01',
+    'hourly_date' => '2021-03-01T00',
+    'base_hour_query' => 3,
+    'hours_per_query' => 6,
+    'layers' => 40,
+    'layer_1_is_surface' => 1,
+    'convert_lon' => 1,
+    'longitude_minimum' => -97.38,
+    'longitude_maximum' => -85.74,
+    'latitude_minimum' => 25.8,
+    'latitude_maximum' => 30.68,
+    'description' =>
+      'Northern Gulf (of Mexico) Operational Forecast System 2 modeled ' .
+      'surface net heat flux.',
+    'hourly_query' =>
+      'https://opendap.co-ops.nos.noaa.gov/thredds/dodsC/NOAA/' .
+      'NGOFS2/MODELS/YYYY/MM/DD/' .
+      'ngofs2.tHHz.YYYYMMDD.fields.nNNN.nc.dods?' .
+      'lon,lat,time,net_heat_flux,wet_nodes'
+  },
+  {
+    'name' => 'ngofs2.sensible_heat_flux',
+    'units' => 'W/m2',
+    'min' => -1500.0,
+    'max' => 1500.0,
+    'start_date'  => '2021-03-01',
+    'hourly_date' => '2021-03-01T00',
+    'base_hour_query' => 3,
+    'hours_per_query' => 6,
+    'layers' => 40,
+    'layer_1_is_surface' => 1,
+    'convert_lon' => 1,
+    'longitude_minimum' => -97.38,
+    'longitude_maximum' => -85.74,
+    'latitude_minimum' => 25.8,
+    'latitude_maximum' => 30.68,
+    'description' =>
+      'Northern Gulf (of Mexico) Operational Forecast System 2 modeled ' .
+      'surface sensible heat flux.',
+    'hourly_query' =>
+      'https://opendap.co-ops.nos.noaa.gov/thredds/dodsC/NOAA/' .
+      'NGOFS2/MODELS/YYYY/MM/DD/' .
+      'ngofs2.tHHz.YYYYMMDD.fields.nNNN.nc.dods?' .
+      'lon,lat,time,sensible_heat_flux,wet_nodes'
+  },
+  {
+    'name' => 'ngofs2.latent_heat_flux',
+    'units' => 'W/m2',
+    'min' => -1500.0,
+    'max' => 1500.0,
+    'start_date'  => '2021-03-01',
+    'hourly_date' => '2021-03-01T00',
+    'base_hour_query' => 3,
+    'hours_per_query' => 6,
+    'layers' => 40,
+    'layer_1_is_surface' => 1,
+    'convert_lon' => 1,
+    'longitude_minimum' => -97.38,
+    'longitude_maximum' => -85.74,
+    'latitude_minimum' => 25.8,
+    'latitude_maximum' => 30.68,
+    'description' =>
+      'Northern Gulf (of Mexico) Operational Forecast System 2 modeled ' .
+      'surface latent heat flux.',
+    'hourly_query' =>
+      'https://opendap.co-ops.nos.noaa.gov/thredds/dodsC/NOAA/' .
+      'NGOFS2/MODELS/YYYY/MM/DD/' .
+      'ngofs2.tHHz.YYYYMMDD.fields.nNNN.nc.dods?' .
+      'lon,lat,time,latent_heat_flux,wet_nodes'
+  },
+
+  # NYOFS: -------------------------------------------------------------------
+
+  {
+    'name' => 'nyofs.wind',
+    'units' => 'm/s',
+    'min' => -100.0,
+    'max' => 100.0,
+    'start_date' => '2012-01-01',
+    'base_hour_query' => 5,
+    'hours_per_query' => 6,
+    'layers' => 7,
+    'layer_1_is_surface' => 1,
+    'convert_lon' => 0,
+    'longitude_minimum' => -74.22,
+    'longitude_maximum' => -74.02,
+    'latitude_minimum' => 40.63,
+    'latitude_maximum' => 40.69,
+    'description' =>
+      'New York New Jersey Operational Forecast System modeled ' .
+      'wind-u,v.',
+    'query' =>
+      'https://opendap.co-ops.nos.noaa.gov/thredds/dodsC/NOAA/' .
+      'NYOFS/MODELS/YYYY/MM/DD/' .
+      'nyofs.tHHz.YYYYMMDD.fields.nowcast.nc.dods?' .
+      'time,lon,lat,mask,air_u,air_v'
+  },
+  {
+    'name' => 'nyofs.current',
+    'units' => 'm/s',
+    'min' => -50.0,
+    'max' => 50.0,
+    'start_date' => '2012-01-01',
+    'base_hour_query' => 5,
+    'hours_per_query' => 6,
+    'layers' => 7,
+    'layer_1_is_surface' => 1,
+    'convert_lon' => 0,
+    'longitude_minimum' => -74.22,
+    'longitude_maximum' => -74.02,
+    'latitude_minimum' => 40.63,
+    'latitude_maximum' => 40.69,
+    'description' =>
+      'New York New Jersey Operational Forecast System modeled ' .
+      'current-u,v,w.',
+    'query' =>
+      'https://opendap.co-ops.nos.noaa.gov/thredds/dodsC/NOAA/' .
+      'NYOFS/MODELS/YYYY/MM/DD/' .
+      'nyofs.tHHz.YYYYMMDD.fields.nowcast.nc.dods?' .
+      'time,lon,lat,mask,depth,' .
+      'sigma[LAYER],' .
+      'zeta,' .
+      'u[0:1:5][LAYER][0:1:133][0:1:72],' .
+      'v[0:1:5][LAYER][0:1:133][0:1:72],' .
+      'w[0:1:5][LAYER][0:1:133][0:1:72]'
+  },
+
+  # SFBOFS: -------------------------------------------------------------------
+
+  {
+    'name' => 'sfbofs.air_pressure',
+    'units' => 'hPa',
+    'min' => 500.0,
+    'max' => 1500.0,
+    'start_date' => '2013-09-01',
+    'hourly_date' => '2013-09-01T00',
+    'base_hour_query' => 3,
+    'hours_per_query' => 6,
+    'layers' => 20,
+    'layer_1_is_surface' => 1,
+    'convert_lon' => 1,
+    'longitude_minimum' => -123.1,
+    'longitude_maximum' => -121.4,
+    'latitude_minimum' => 37.4,
+    'latitude_maximum' => 38.3,
+    'description' =>
+      'San Francisco Bay Operational Forecast System modeled ' .
+      'air pressure.',
+    'hourly_query' =>
+      'https://opendap.co-ops.nos.noaa.gov/thredds/dodsC/NOAA/' .
+      'SFBOFS/MODELS/YYYY/MM/DD/' .
+      'sfbofs.tHHz.YYYYMMDD.fields.nNNN.nc.dods?' .
+      'lon,lat,time,atmos_press,wet_nodes'
+  },
+   {
+    'name' => 'sfbofs.wind',
+    'units' => 'm/s',
+    'min' => -100.0,
+    'max' => 100.0,
+    'start_date' => '2013-09-01',
+    'hourly_date' => '2013-09-01T00',
+    'base_hour_query' => 3,
+    'hours_per_query' => 6,
+    'layers' => 20,
+    'layer_1_is_surface' => 1,
+    'convert_lon' => 1,
+    'longitude_minimum' => -123.1,
+    'longitude_maximum' => -121.4,
+    'latitude_minimum' => 37.4,
+    'latitude_maximum' => 38.3,
+    'description' =>
+      'San Francisco Bay Operational Forecast System modeled ' .
+      'wind-u,v.',
+    'hourly_query' =>
+      'https://opendap.co-ops.nos.noaa.gov/thredds/dodsC/NOAA/' .
+      'SFBOFS/MODELS/YYYY/MM/DD/' .
+      'sfbofs.tHHz.YYYYMMDD.fields.nNNN.nc.dods?' .
+      'lonc,latc,time,uwind_speed,vwind_speed,wet_cells'
+  },
+  {
+    'name' => 'sfbofs.current',
+    'units' => 'm/s',
+    'min' => -50.0,
+    'max' => 50.0,
+    'start_date' => '2013-09-01',
+    'hourly_date' => '2013-09-01T00',
+    'base_hour_query' => 3,
+    'hours_per_query' => 6,
+    'layers' => 20,
+    'layer_1_is_surface' => 1,
+    'convert_lon' => 1,
+    'longitude_minimum' => -123.1,
+    'longitude_maximum' => -121.4,
+    'latitude_minimum' => 37.4,
+    'latitude_maximum' => 38.3,
+    'description' =>
+      'San Francisco Bay Operational Forecast System modeled ' .
+      'current-u,v.',
+    'hourly_query' =>
+      'https://opendap.co-ops.nos.noaa.gov/thredds/dodsC/NOAA/' .
+      'SFBOFS/MODELS/YYYY/MM/DD/' .
+      'sfbofs.tHHz.YYYYMMDD.fields.nNNN.nc.dods?' .
+      'lonc,latc,time,' .
+      'siglay[LAYER][0:1:54119],' .
+      'h,nv,zeta,' .
+      'u[0][LAYER][0:1:102263],' .
+      'v[0][LAYER][0:1:102263],' .
+      'wet_cells'
+  },
+  {
+    'name' => 'sfbofs.water_temperature',
+    'units' => 'C',
+    'min' => 0.0,
+    'max' => 50.0,
+    'start_date' => '2013-09-01',
+    'hourly_date' => '2013-09-01T00',
+    'base_hour_query' => 3,
+    'hours_per_query' => 6,
+    'layers' => 20,
+    'layer_1_is_surface' => 1,
+    'convert_lon' => 1,
+    'longitude_minimum' => -123.1,
+    'longitude_maximum' => -121.4,
+    'latitude_minimum' => 37.4,
+    'latitude_maximum' => 38.3,
+    'description' =>
+      'San Francisco Bay Operational Forecast System modeled ' .
+      'water temperature at depth.',
+    'hourly_query' =>
+      'https://opendap.co-ops.nos.noaa.gov/thredds/dodsC/NOAA/' .
+      'SFBOFS/MODELS/YYYY/MM/DD/' .
+      'sfbofs.tHHz.YYYYMMDD.fields.nNNN.nc.dods?' .
+      'lon,lat,time,' .
+      'siglay[LAYER][0:1:54119],' .
+      'h,zeta,' .
+      'temp[0][LAYER][0:1:54119],' .
+      'wet_nodes'
+  },
+  {
+    'name' => 'sfbofs.salinity',
+    'units' => 'PSU',
+    'min' => 0.0,
+    'max' => 50.0,
+    'start_date' => '2013-09-01',
+    'hourly_date' => '2013-09-01T00',
+    'base_hour_query' => 3,
+    'hours_per_query' => 6,
+    'layers' => 20,
+    'layer_1_is_surface' => 1,
+    'convert_lon' => 1,
+    'longitude_minimum' => -123.1,
+    'longitude_maximum' => -121.4,
+    'latitude_minimum' => 37.4,
+    'latitude_maximum' => 38.3,
+    'description' =>
+      'San Francisco Bay Operational Forecast System modeled ' .
+      'salinity at depth.',
+    'hourly_query' =>
+      'https://opendap.co-ops.nos.noaa.gov/thredds/dodsC/NOAA/' .
+      'SFBOFS/MODELS/YYYY/MM/DD/' .
+      'sfbofs.tHHz.YYYYMMDD.fields.nNNN.nc.dods?' .
+      'lon,lat,time,' .
+      'siglay[LAYER][0:1:54119],' .
+      'h,zeta,' .
+      'salinity[0][LAYER][0:1:54119],' .
+      'wet_nodes'
+  },
+  {
+    'name' => 'sfbofs.seabed_stress',
+    'units' => 'm2/s2',
+    'min' => 0.0,
+    'max' => 1.0,
+    'start_date' => '2013-09-01',
+    'hourly_date' => '2013-09-01T00',
+    'base_hour_query' => 3,
+    'hours_per_query' => 6,
+    'layers' => 20,
+    'layer_1_is_surface' => 1,
+    'convert_lon' => 1,
+    'longitude_minimum' => -123.1,
+    'longitude_maximum' => -121.4,
+    'latitude_minimum' => 37.4,
+    'latitude_maximum' => 38.3,
+    'description' =>
+      'San Francisco Bay Operational Forecast System modeled ' .
+      'seabed stress magnitude.',
+    'hourly_query' =>
+      'https://opendap.co-ops.nos.noaa.gov/thredds/dodsC/NOAA/' .
+      'SFBOFS/MODELS/YYYY/MM/DD/' .
+      'sfbofs.tHHz.YYYYMMDD.fields.nNNN.nc.dods?' .
+      'lonc,latc,time,tauc,wet_cells'
+ },
+  {
+    'name' => 'sfbofs.radiation',
+    'units' => 'W/m2',
+    'min' => 0.0,
+    'max' => 1500.0,
+    'start_date' => '2013-09-01',
+    'hourly_date' => '2013-09-01T00',
+    'base_hour_query' => 3,
+    'hours_per_query' => 6,
+    'layers' => 20,
+    'layer_1_is_surface' => 1,
+    'convert_lon' => 1,
+    'longitude_minimum' => -123.1,
+    'longitude_maximum' => -121.4,
+    'latitude_minimum' => 37.4,
+    'latitude_maximum' => 38.3,
+    'description' =>
+      'San Francisco Bay Operational Forecast System modeled ' .
+      'short wave radiation.',
+    'hourly_query' =>
+      'https://opendap.co-ops.nos.noaa.gov/thredds/dodsC/NOAA/' .
+      'SFBOFS/MODELS/YYYY/MM/DD/' .
+      'sfbofs.tHHz.YYYYMMDD.fields.nNNN.nc.dods?' .
+      'lon,lat,time,short_wave,wet_nodes'
+  },
+  {
+    'name' => 'sfbofs.net_heat_flux',
+    'units' => 'W/m2',
+    'min' => -1500.0,
+    'max' => 1500.0,
+    'start_date' => '2013-09-01',
+    'hourly_date' => '2013-09-01T00',
+    'base_hour_query' => 3,
+    'hours_per_query' => 6,
+    'layers' => 20,
+    'layer_1_is_surface' => 1,
+    'convert_lon' => 1,
+    'longitude_minimum' => -123.1,
+    'longitude_maximum' => -121.4,
+    'latitude_minimum' => 37.4,
+    'latitude_maximum' => 38.3,
+    'description' =>
+      'San Francisco Bay Operational Forecast System modeled ' .
+      'surface net heat flux.',
+    'hourly_query' =>
+      'https://opendap.co-ops.nos.noaa.gov/thredds/dodsC/NOAA/' .
+      'SFBOFS/MODELS/YYYY/MM/DD/' .
+      'sfbofs.tHHz.YYYYMMDD.fields.nNNN.nc.dods?' .
+      'lon,lat,time,net_heat_flux,wet_nodes'
+  },
+  {
+    'name' => 'sfbofs.sensible_heat_flux',
+    'units' => 'W/m2',
+    'min' => -1500.0,
+    'max' => 1500.0,
+    'start_date' => '2013-09-01',
+    'hourly_date' => '2013-09-01T00',
+    'base_hour_query' => 3,
+    'hours_per_query' => 6,
+    'layers' => 20,
+    'layer_1_is_surface' => 1,
+    'convert_lon' => 1,
+    'longitude_minimum' => -123.1,
+    'longitude_maximum' => -121.4,
+    'latitude_minimum' => 37.4,
+    'latitude_maximum' => 38.3,
+    'description' =>
+      'San Francisco Bay Operational Forecast System modeled ' .
+      'surface sensible heat flux.',
+    'hourly_query' =>
+      'https://opendap.co-ops.nos.noaa.gov/thredds/dodsC/NOAA/' .
+      'SFBOFS/MODELS/YYYY/MM/DD/' .
+      'sfbofs.tHHz.YYYYMMDD.fields.nNNN.nc.dods?' .
+      'lon,lat,time,sensible_heat_flux,wet_nodes'
+  },
+  {
+    'name' => 'sfbofs.latent_heat_flux',
+    'units' => 'W/m2',
+    'min' => -1500.0,
+    'max' => 1500.0,
+    'start_date' => '2013-09-01',
+    'hourly_date' => '2013-09-01T00',
+    'base_hour_query' => 3,
+    'hours_per_query' => 6,
+    'layers' => 20,
+    'layer_1_is_surface' => 1,
+    'convert_lon' => 1,
+    'longitude_minimum' => -123.1,
+    'longitude_maximum' => -121.4,
+    'latitude_minimum' => 37.4,
+    'latitude_maximum' => 38.3,
+    'description' =>
+      'San Francisco Bay Operational Forecast System modeled ' .
+      'surface latent heat flux.',
+    'hourly_query' =>
+      'https://opendap.co-ops.nos.noaa.gov/thredds/dodsC/NOAA/' .
+      'SFBOFS/MODELS/YYYY/MM/DD/' .
+      'sfbofs.tHHz.YYYYMMDD.fields.nNNN.nc.dods?' .
+      'lon,lat,time,latent_heat_flux,wet_nodes'
+  },
+
+  # SJROFS: ------------------------------------------------------------------
+
+   {
+    'name' => 'sjrofs.wind',
+    'units' => 'm/s',
+    'min' => -100.0,
+    'max' => 100.0,
+    'start_date' => '2012-04-01',
+    'base_hour_query' => 5,
+    'hours_per_query' => 6,
+    'layers' => 6,
+    'layer_1_is_surface' => 1,
+    'convert_lon' => 0,
+    'longitude_minimum' => -81.762,
+    'longitude_maximum' => -81.307,
+    'latitude_minimum' => 29.562,
+    'latitude_maximum' => 30.5,
+    'description' =>
+      'Saint John River (Florida) Operational Forecast System modeled ' .
+      'wind-u,v.',
+    'query' =>
+      'https://opendap.co-ops.nos.noaa.gov/thredds/dodsC/NOAA/' .
+      'SJROFS/MODELS/YYYY/MM/DD/' .
+      'sjrofs.tHHz.YYYYMMDD.fields.nowcast.nc.dods?' .
+      'time,lon,lat,mask,depth,air_u,air_v'
+  },
+  {
+    'name' => 'sjrofs.current',
+    'units' => 'm/s',
+    'min' => -50.0,
+    'max' => 50.0,
+    'start_date' => '2012-04-01',
+    'base_hour_query' => 5,
+    'hours_per_query' => 6,
+    'layers' => 6,
+    'layer_1_is_surface' => 1,
+    'convert_lon' => 0,
+    'longitude_minimum' => -81.762,
+    'longitude_maximum' => -81.307,
+    'latitude_minimum' => 29.562,
+    'latitude_maximum' => 30.5,
+    'description' =>
+      'Saint John River (Florida) Operational Forecast System modeled ' .
+      'current-u,v.',
+    'query' =>
+      'https://opendap.co-ops.nos.noaa.gov/thredds/dodsC/NOAA/' .
+      'SJROFS/MODELS/YYYY/MM/DD/' .
+      'sjrofs.tHHz.YYYYMMDD.fields.nowcast.nc.dods?' .
+      'time,lon,lat,mask,depth,' .
+      'sigma[LAYER],' .
+      'zeta,' .
+      'u[0:1:5][LAYER][0:1:104][0:1:187],' .
+      'v[0:1:5][LAYER][0:1:104][0:1:187]'
+  },
+  {
+    'name' => 'sjrofs.water_temperature',
+    'units' => 'C',
+    'min' => 0.0,
+    'max' => 50.0,
+    'start_date' => '2012-04-01',
+    'base_hour_query' => 5,
+    'hours_per_query' => 6,
+    'layers' => 6,
+    'layer_1_is_surface' => 1,
+    'convert_lon' => 0,
+    'longitude_minimum' => -81.762,
+    'longitude_maximum' => -81.307,
+    'latitude_minimum' => 29.562,
+    'latitude_maximum' => 30.5,
+    'description' =>
+      'Saint John River (Florida) Operational Forecast System modeled ' .
+      'water temperature at depth.',
+    'query' =>
+      'https://opendap.co-ops.nos.noaa.gov/thredds/dodsC/NOAA/' .
+      'SJROFS/MODELS/YYYY/MM/DD/' .
+      'sjrofs.tHHz.YYYYMMDD.fields.nowcast.nc.dods?' .
+      'time,lon,lat,mask,depth,' .
+      'sigma[LAYER],' .
+      'zeta,' .
+      'temp[0:1:5][LAYER][0:1:104][0:1:187]'
+  },
+  {
+    'name' => 'sjrofs.salinity',
+    'units' => 'PSU',
+    'min' => 0.0,
+    'max' => 50.0,
+    'start_date' => '2012-04-01',
+    'base_hour_query' => 5,
+    'hours_per_query' => 6,
+    'layers' => 6,
+    'layer_1_is_surface' => 1,
+    'convert_lon' => 0,
+    'longitude_minimum' => -81.762,
+    'longitude_maximum' => -81.307,
+    'latitude_minimum' => 29.562,
+    'latitude_maximum' => 30.5,
+    'description' =>
+      'Saint John River (Florida) Operational Forecast System modeled ' .
+      'salinity at depth.',
+    'query' =>
+      'https://opendap.co-ops.nos.noaa.gov/thredds/dodsC/NOAA/' .
+      'SJROFS/MODELS/YYYY/MM/DD/' .
+      'sjrofs.tHHz.YYYYMMDD.fields.nowcast.nc.dods?' .
+      'time,lon,lat,mask,depth,' .
+      'sigma[LAYER],' .
+      'zeta,' .
+      'salt[0:1:5][LAYER][0:1:104][0:1:187]'
+  },
+
+  # SSCOFS: ------------------------------------------------------------------
+  # https://tidesandcurrents.noaa.gov/ofs/publications/pns24-34_sscofs.pdf
+
+   {
+    'name' => 'sscofs.air_pressure',
+    'units' => 'hPa',
+    'min' => 500.0,
+    'max' => 1500.0,
+    'start_date' => '2024-09-15',
+    'hourly_date' => '2024-09-15T00',
+    'base_hour_query' => 3,
+    'hours_per_query' => 6,
+    'layers' => 10,
+    'layer_1_is_surface' => 1,
+    'convert_lon' => 1,
+    'longitude_minimum' => -130.0,
+    'longitude_maximum' => -122.0,
+    'latitude_minimum' => 44.0,
+    'latitude_maximum' => 52.0,
+    'description' =>
+      'Salish Sea and Columbia River (WA) Operational Forecast System modeled ' .
+      'air pressure.',
+    'hourly_query' =>
+      'https://opendap.co-ops.nos.noaa.gov/thredds/dodsC/NOAA/' .
+      'SSCOFS/MODELS/YYYY/MM/DD/' .
+      'sscofs.tHHz.YYYYMMDD.fields.nNNN.nc.dods?' .
+      'lon,lat,time,atmos_press,wet_nodes'
+  },
+   {
+    'name' => 'sscofs.wind',
+    'units' => 'm/s',
+    'min' => -100.0,
+    'max' => 100.0,
+    'start_date' => '2024-09-15',
+    'hourly_date' => '2024-09-15T00',
+    'base_hour_query' => 3,
+    'hours_per_query' => 6,
+    'layers' => 10,
+    'layer_1_is_surface' => 1,
+    'convert_lon' => 1,
+    'longitude_minimum' => -130.0,
+    'longitude_maximum' => -122.0,
+    'latitude_minimum' => 44.0,
+    'latitude_maximum' => 52.0,
+    'description' =>
+      'Salish Sea and Columbia River (WA) Operational Forecast System modeled ' .
+      'wind-u,v.',
+    'hourly_query' =>
+      'https://opendap.co-ops.nos.noaa.gov/thredds/dodsC/NOAA/' .
+      'SSCOFS/MODELS/YYYY/MM/DD/' .
+      'sscofs.tHHz.YYYYMMDD.fields.nNNN.nc.dods?' .
+      'lonc,latc,time,uwind_speed,vwind_speed,wet_cells'
+  },
+   {
+    'name' => 'sscofs.current',
+    'units' => 'm/s',
+    'min' => -50.0,
+    'max' => 50.0,
+    'start_date' => '2024-09-15',
+    'hourly_date' => '2024-09-15T00',
+    'base_hour_query' => 3,
+    'hours_per_query' => 6,
+    'layers' => 10,
+    'layer_1_is_surface' => 1,
+    'convert_lon' => 1,
+    'longitude_minimum' => -130.0,
+    'longitude_maximum' => -122.0,
+    'latitude_minimum' => 44.0,
+    'latitude_maximum' => 52.0,
+    'description' =>
+      'Salish Sea and Columbia River (WA) Operational Forecast System modeled ' .
+      'current-u,v.',
+    'hourly_query' =>
+      'https://opendap.co-ops.nos.noaa.gov/thredds/dodsC/NOAA/' .
+      'SSCOFS/MODELS/YYYY/MM/DD/' .
+      'sscofs.tHHz.YYYYMMDD.fields.nNNN.nc.dods?' .
+      'lonc,latc,' .
+      'siglay[LAYER][0:1:239733],' .
+      'h,nv,time,zeta,' .
+      'u[0][LAYER][0:1:433409],' .
+      'v[0][LAYER][0:1:433409],' .
+      'wet_cells'
+  },
+  {
+    'name' => 'sscofs.water_temperature',
+    'units' => 'C',
+    'min' => 0.0,
+    'max' => 50.0,
+    'start_date' => '2024-09-15',
+    'hourly_date' => '2024-09-15T00',
+    'base_hour_query' => 3,
+    'hours_per_query' => 6,
+    'layers' => 10,
+    'layer_1_is_surface' => 1,
+    'convert_lon' => 1,
+    'longitude_minimum' => -130.0,
+    'longitude_maximum' => -122.0,
+    'latitude_minimum' => 44.0,
+    'latitude_maximum' => 52.0,
+    'description' =>
+      'Salish Sea and Columbia River (WA) Operational Forecast System modeled ' .
+      'water temperature at depth.',
+    'hourly_query' =>
+      'https://opendap.co-ops.nos.noaa.gov/thredds/dodsC/NOAA/' .
+      'SSCOFS/MODELS/YYYY/MM/DD/' .
+      'sscofs.tHHz.YYYYMMDD.fields.nNNN.nc.dods?' .
+      'lon,lat,time,' .
+      'siglay[LAYER][0:1:239733],' .
+      'h,zeta,' .
+      'temp[0][LAYER][0:1:239733],' .
+      'wet_nodes'
+  },
+  {
+    'name' => 'sscofs.salinity',
+    'units' => 'PSU',
+    'min' => 0.0,
+    'max' => 50.0,
+    'start_date' => '2024-09-15',
+    'hourly_date' => '2024-09-15T00',
+    'base_hour_query' => 3,
+    'hours_per_query' => 6,
+    'layers' => 10,
+    'layer_1_is_surface' => 1,
+    'convert_lon' => 1,
+    'longitude_minimum' => -130.0,
+    'longitude_maximum' => -122.0,
+    'latitude_minimum' => 44.0,
+    'latitude_maximum' => 52.0,
+    'description' =>
+      'Salish Sea and Columbia River (WA) Operational Forecast System modeled ' .
+      'salinity at depth.',
+    'hourly_query' =>
+      'https://opendap.co-ops.nos.noaa.gov/thredds/dodsC/NOAA/' .
+      'SSCOFS/MODELS/YYYY/MM/DD/' .
+      'sscofs.tHHz.YYYYMMDD.fields.nNNN.nc.dods?' .
+      'lon,lat,time,' .
+      'siglay[LAYER][0:1:239733],' .
+      'h,zeta,' .
+      'salinity[0][LAYER][0:1:239733],' .
+      'wet_nodes'
+  },
+  {
+    'name' => 'sscofs.seabed_stress',
+    'units' => 'm2/s2',
+    'min' => 0.0,
+    'max' => 1.0,
+    'start_date' => '2024-09-15',
+    'hourly_date' => '2024-09-15T00',
+    'base_hour_query' => 3,
+    'hours_per_query' => 6,
+    'layers' => 10,
+    'layer_1_is_surface' => 1,
+    'convert_lon' => 1,
+    'longitude_minimum' => -130.0,
+    'longitude_maximum' => -122.0,
+    'latitude_minimum' => 44.0,
+    'latitude_maximum' => 52.0,
+    'description' =>
+      'Salish Sea and Columbia River (WA) Operational Forecast System modeled ' .
+      'seabed stress magnitude.',
+    'hourly_query' =>
+      'https://opendap.co-ops.nos.noaa.gov/thredds/dodsC/NOAA/' .
+      'SSCOFS/MODELS/YYYY/MM/DD/' .
+      'sscofs.tHHz.YYYYMMDD.fields.nNNN.nc.dods?' .
+      'lonc,latc,time,tauc,wet_cells'
+  },
+  {
+    'name' => 'sscofs.radiation',
+    'units' => 'W/m2',
+    'min' => 0.0,
+    'max' => 1500.0,
+    'start_date' => '2024-09-15',
+    'hourly_date' => '2024-09-15T00',
+    'base_hour_query' => 3,
+    'hours_per_query' => 6,
+    'layers' => 10,
+    'layer_1_is_surface' => 1,
+    'convert_lon' => 1,
+    'longitude_minimum' => -130.0,
+    'longitude_maximum' => -122.0,
+    'latitude_minimum' => 44.0,
+    'latitude_maximum' => 52.0,
+    'description' =>
+      'Salish Sea and Columbia River (WA) Operational Forecast System modeled ' .
+      'short wave radiation.',
+    'hourly_query' =>
+      'https://opendap.co-ops.nos.noaa.gov/thredds/dodsC/NOAA/' .
+      'SSCOFS/MODELS/YYYY/MM/DD/' .
+      'sscofs.tHHz.YYYYMMDD.fields.nNNN.nc.dods?' .
+      'lon,lat,time,short_wave,wet_nodes'
+  },
+  {
+    'name' => 'sscofs.net_heat_flux',
+    'units' => 'W/m2',
+    'min' => -1500.0,
+    'max' => 1500.0,
+    'start_date' => '2024-09-15',
+    'hourly_date' => '2024-09-15T00',
+    'base_hour_query' => 3,
+    'hours_per_query' => 6,
+    'layers' => 10,
+    'layer_1_is_surface' => 1,
+    'convert_lon' => 1,
+    'longitude_minimum' => -130.0,
+    'longitude_maximum' => -122.0,
+    'latitude_minimum' => 44.0,
+    'latitude_maximum' => 52.0,
+    'description' =>
+      'Salish Sea and Columbia River (WA) Operational Forecast System modeled ' .
+      'surface net heat flux.',
+    'hourly_query' =>
+      'https://opendap.co-ops.nos.noaa.gov/thredds/dodsC/NOAA/' .
+      'SSCOFS/MODELS/YYYY/MM/DD/' .
+      'sscofs.tHHz.YYYYMMDD.fields.nNNN.nc.dods?' .
+      'lon,lat,time,net_heat_flux,wet_nodes'
+  },
+  {
+    'name' => 'sscofs.sensible_heat_flux',
+    'units' => 'W/m2',
+    'min' => -1500.0,
+    'max' => 1500.0,
+    'start_date' => '2024-09-15',
+    'hourly_date' => '2024-09-15T00',
+    'base_hour_query' => 3,
+    'hours_per_query' => 6,
+    'layers' => 10,
+    'layer_1_is_surface' => 1,
+    'convert_lon' => 1,
+    'longitude_minimum' => -130.0,
+    'longitude_maximum' => -122.0,
+    'latitude_minimum' => 44.0,
+    'latitude_maximum' => 52.0,
+    'description' =>
+      'Salish Sea and Columbia River (WA) Operational Forecast System modeled ' .
+      'surface sensible heat flux.',
+    'hourly_query' =>
+      'https://opendap.co-ops.nos.noaa.gov/thredds/dodsC/NOAA/' .
+      'SSCOFS/MODELS/YYYY/MM/DD/' .
+      'sscofs.tHHz.YYYYMMDD.fields.nNNN.nc.dods?' .
+      'lon,lat,time,sensible_heat_flux,wet_nodes'
+  },
+  {
+    'name' => 'sscofs.latent_heat_flux',
+    'units' => 'W/m2',
+    'min' => -1500.0,
+    'max' => 1500.0,
+    'start_date' => '2024-09-15',
+    'hourly_date' => '2024-09-15T00',
+    'base_hour_query' => 3,
+    'hours_per_query' => 6,
+    'layers' => 10,
+    'layer_1_is_surface' => 1,
+    'convert_lon' => 1,
+    'longitude_minimum' => -130.0,
+    'longitude_maximum' => -122.0,
+    'latitude_minimum' => 44.0,
+    'latitude_maximum' => 52.0,
+    'description' =>
+      'Salish Sea and Columbia River (WA) Operational Forecast System modeled ' .
+      'surface latent heat flux.',
+    'hourly_query' =>
+      'https://opendap.co-ops.nos.noaa.gov/thredds/dodsC/NOAA/' .
+      'SSCOFS/MODELS/YYYY/MM/DD/' .
+      'sscofs.tHHz.YYYYMMDD.fields.nNNN.nc.dods?' .
+      'lon,lat,time,latent_heat_flux,wet_nodes'
+  },
+
+  # TBOFS: -------------------------------------------------------------------
+
+  {
+    'name' => 'tbofs.air_pressure',
+    'units' => 'hPa',
+    'min' => 500.0,
+    'max' => 1500.0,
+    'start_date' => '2012-09-22',
+    'hourly_date' => '2013-07-25T12',
+    'base_hour_query' => 0,
+    'hours_per_query' => 6,
+    'layers' => 11,
+    'layer_1_is_surface' => 0,
+    'convert_lon' => 0,
+    'longitude_minimum' => -83.17,
+    'longitude_maximum' => -82.38,
+    'latitude_minimum' => 27.08,
+    'latitude_maximum' => 28.03,
+    'description' => 'Tampa Bay Operational Forecast Model air pressure.',
+    'hourly_query' =>
+      'https://opendap.co-ops.nos.noaa.gov/thredds/dodsC/NOAA/' .
+      'TBOFS/MODELS/YYYY/MM/DD/' .
+      'tbofs.tHHz.YYYYMMDD.fields.nNNN.nc.dods?' .
+      'lon_rho,lat_rho,mask_rho,ocean_time,Pair'
+  },
+  {
+    'name' => 'tbofs.wind',
+    'units' => 'm/s',
+    'min' => -100.0,
+    'max' => 100.0,
+    'start_date' => '2012-09-22',
+    'hourly_date' => '2013-07-25T12',
+    'base_hour_query' => 0,
+    'hours_per_query' => 6,
+    'layers' => 11,
+    'layer_1_is_surface' => 0,
+    'convert_lon' => 0,
+    'longitude_minimum' => -83.17,
+    'longitude_maximum' => -82.38,
+    'latitude_minimum' => 27.08,
+    'latitude_maximum' => 28.03,
+    'description' => 'Tampa Bay Operational Forecast System modeled ' .
+                     'wind-u,v.',
+    'hourly_query' =>
+      'https://opendap.co-ops.nos.noaa.gov/thredds/dodsC/NOAA/' .
+      'TBOFS/MODELS/YYYY/MM/DD/' .
+      'tbofs.tHHz.YYYYMMDD.fields.nNNN.nc.dods?' .
+      'lon_rho,lat_rho,angle,mask_rho,ocean_time,Uwind,Vwind'
+  },
+  {
+    'name' => 'tbofs.current',
+    'units' => 'm/s',
+    'min' => -50.0,
+    'max' => 50.0,
+    'start_date' => '2012-09-22',
+    'hourly_date' => '2013-07-25T12',
+    'base_hour_query' => 0,
+    'hours_per_query' => 6,
+    'layers' => 11,
+    'layer_1_is_surface' => 0,
+    'convert_lon' => 0,
+    'longitude_minimum' => -83.17,
+    'longitude_maximum' => -82.38,
+    'latitude_minimum' => 27.08,
+    'latitude_maximum' => 28.03,
+    'description' => 'Tampa Bay Operational Forecast System modeled ' .
+                     'current-u,v,w.',
+    'hourly_query' =>
+      'https://opendap.co-ops.nos.noaa.gov/thredds/dodsC/NOAA/' .
+      'TBOFS/MODELS/YYYY/MM/DD/' .
+      'tbofs.tHHz.YYYYMMDD.fields.nNNN.nc.dods?' .
+      's_rho[LAYER],' .
+      'h,lon_rho,lat_rho,angle,mask_rho,mask_u,mask_v,ocean_time,zeta,' .
+      'u[0:1:0][LAYER][0:1:289][0:1:174],' .
+      'v[0:1:0][LAYER][0:1:288][0:1:175],' .
+      'w[0:1:0][LAYER:1:LAYER1][0:1:289][0:1:175]'
+  },
+  {
+    'name' => 'tbofs.water_temperature',
+    'units' => 'C',
+    'min' => 0.0,
+    'max' => 50.0,
+    'start_date' => '2012-09-22',
+    'hourly_date' => '2013-07-25T12',
+    'base_hour_query' => 0,
+    'hours_per_query' => 6,
+    'layers' => 11,
+    'layer_1_is_surface' => 0,
+    'convert_lon' => 0,
+    'longitude_minimum' => -83.17,
+    'longitude_maximum' => -82.38,
+    'latitude_minimum' => 27.08,
+    'latitude_maximum' => 28.03,
+    'description' => 'Tampa Bay Operational Forecast System modeled ' .
+                     'water temperature.',
+    'hourly_query' =>
+      'https://opendap.co-ops.nos.noaa.gov/thredds/dodsC/NOAA/' .
+      'TBOFS/MODELS/YYYY/MM/DD/' .
+      'tbofs.tHHz.YYYYMMDD.fields.nNNN.nc.dods?' .
+      's_rho[LAYER],' .
+      'h,lon_rho,lat_rho,mask_rho,ocean_time,zeta,' .
+      'temp[0][LAYER][0:1:289][0:1:175]'
+  },
+  {
+    'name' => 'tbofs.salinity',
+    'units' => 'PSU',
+    'min' => 0.0,
+    'max' => 50.0,
+    'start_date' => '2012-09-22',
+    'hourly_date' => '2013-07-25T12',
+    'base_hour_query' => 0,
+    'hours_per_query' => 6,
+    'layers' => 11,
+    'layer_1_is_surface' => 0,
+    'convert_lon' => 0,
+    'longitude_minimum' => -83.17,
+    'longitude_maximum' => -82.38,
+    'latitude_minimum' => 27.08,
+    'latitude_maximum' => 28.03,
+    'description' => 'Tampa Bay Operational Forecast System modeled ' .
+                     'salinity.',
+    'hourly_query' =>
+      'https://opendap.co-ops.nos.noaa.gov/thredds/dodsC/NOAA/' .
+      'TBOFS/MODELS/YYYY/MM/DD/' .
+      'tbofs.tHHz.YYYYMMDD.fields.nNNN.nc.dods?' .
+      's_rho[LAYER],' .
+      'h,lon_rho,lat_rho,mask_rho,ocean_time,zeta,' .
+      'salt[0][LAYER][0:1:289][0:1:175]'
+  },
+
+ # WCOFS: -------------------------------------------------------------------
+
+  {
+    'name' => 'wcofs.current',
+    'units' => 'm/s',
+    'min' => -50.0,
+    'max' => 50.0,
+    'start_date'  => '2021-03-01',
+    'hourly_date' => '2021-03-01T00',
+    'base_hour_query' => 3,
+    'hours_per_query' => 24,
+    'layers' => 40,
+    'layer_1_is_surface' => 0,
+    'convert_lon' => 0,
+    'longitude_minimum' => -77.33,
+    'longitude_maximum' => -74.8,
+    'latitude_minimum' => 36.19,
+    'latitude_maximum' => 39.62,
+    'description' => 'West Coast Operational Forecast System modeled ' .
+                     'current-u,v,w.',
+    'hourly_query' =>
+      'https://opendap.co-ops.nos.noaa.gov/thredds/dodsC/NOAA/' .
+      'WCOFS/MODELS/YYYY/MM/DD/' .
+      'wcofs.tHHz.YYYYMMDD.fields.nNNN.nc.dods?' .
+      's_rho[LAYER],' .
+      'h,lon_rho,lat_rho,angle,mask_rho,mask_u,mask_v,' .
+      'ocean_time,zeta,' .
+      'u[0][LAYER][0:1:1015][0:1:346],' .
+      'v[0][LAYER][0:1:1014][0:1:347],' .
+      'w[0][LAYER:1:LAYER1][0:1:1015][0:1:347]'
+  },
+  {
+    'name' => 'wcofs.water_temperature',
+    'units' => 'C',
+    'min' => 0.0,
+    'max' => 50.0,
+    'start_date'  => '2021-03-01',
+    'hourly_date' => '2021-03-01T00',
+    'base_hour_query' => 3,
+    'hours_per_query' => 24,
+    'layers' => 40,
+    'layer_1_is_surface' => 0,
+    'convert_lon' => 0,
+    'longitude_minimum' => -77.33,
+    'longitude_maximum' => -74.8,
+    'latitude_minimum' => 36.19,
+    'latitude_maximum' => 39.62,
+    'description' => 'West Coast Operational Forecast System modeled ' .
+                     'water temperature.',
+    'hourly_query' =>
+      'https://opendap.co-ops.nos.noaa.gov/thredds/dodsC/NOAA/' .
+      'WCOFS/MODELS/YYYY/MM/DD/' .
+      'wcofs.tHHz.YYYYMMDD.fields.nNNN.nc.dods?' .
+      's_rho[LAYER],' .
+      'h,lon_rho,lat_rho,mask_rho,ocean_time,zeta,' .
+      'temp[0][LAYER][0:1:1015][0:1:347]'
+  },
+  {
+    'name' => 'wcofs.salinity',
+    'units' => 'PSU',
+    'min' => 0.0,
+    'max' => 50.0,
+    'start_date'  => '2021-03-01',
+    'hourly_date' => '2021-03-01T00',
+    'base_hour_query' => 3,
+    'hours_per_query' => 24,
+    'layers' => 40,
+    'layer_1_is_surface' => 0,
+    'convert_lon' => 0,
+    'longitude_minimum' => -77.33,
+    'longitude_maximum' => -74.8,
+    'latitude_minimum' => 36.19,
+    'latitude_maximum' => 39.62,
+    'description' => 'West Coast Operational Forecast System modeled ' .
+                     'salinity.',
+    'hourly_query' =>
+      'https://opendap.co-ops.nos.noaa.gov/thredds/dodsC/NOAA/' .
+      'WCOFS/MODELS/YYYY/MM/DD/' .
+      'wcofs.tHHz.YYYYMMDD.fields.nNNN.nc.dods?' .
+      's_rho[LAYER],' .
+      'h,lon_rho,lat_rho,mask_rho,ocean_time,zeta,' .
+      'salt[0][LAYER][0:1:1015][0:1:347]'
+  }
+);
+
+
+################################## VARIABLES #################################
+
+
+# Parsed from the URL query string:
+
+my $service  = ''; # wcs.
+my $version  = ''; # 1.0.0.
+my $request  = ''; # getcapabilities or describecoverage or getcoverage.
+my $coverage = ''; # Saved until time has been parsed.
+my $variable = ''; # o3, ...
+my $format   = ''; # ascii.
+my $time     = ''; # E.g., 2001-08-29t00:00:00z/2001-08-31t23:59:59z.
+my $bbox     = ''; # E.g., -90,28,-80,32,1,1. Where 1,1 means layer 1 only.
+my $depth    = ''; # E.g., 1 or 20.
+
+# Derived from the above parsed values:
+
+my @bounds = split( /,/, '-180,-90,180,90' );
+my $starting_timestamp = 0;  # yyyymmddhh, e.g., 2005082600.
+my $hours              = 0;  # E.g., 5 days = 5 x 24 = 120.
+my $days               = 0;  # E.g., 5.
+my $ending_yyyymmdd    = 0;  # yyyymmdd, e.g., 20050826.
+my $coverage_units = '';
+my $remote_queries = 0; # Number of calls to remote NOAA web service.
+my $temp_files = ''; # newline-delimited sequence of temp files.
+
+################################## ROUTINES ##################################
+
+
+main();
+
+
+sub main {
+  my $result = 0;
+
+  if ( ! parse_url() ) {
+    print "Content-type: text/plain; charset=iso-8859-1\n\n"; # For webserver
+  } elsif ( $request eq 'getcapabilities' ) {
+    print "Content-type: text/xml; charset=iso-8859-1\n\n"; # For webserver
+    print_capabilities();
+    $result = 1;
+  } elsif ( $request eq 'describecoverage' ) {
+    print "Content-type: text/xml; charset=iso-8859-1\n\n"; # For webserver
+    print_coverage_description();
+    $result = 1;
+  } elsif ( $request eq 'getcoverage' ) {
+    compute_time_range();
+    print "Content-type: $content_types{ $format }; charset=iso-8859-1\n\n";
+    $result = execute_remote_queries();
+    $result = $result && execute_subsetter();
+
+    # Remove temp dods files and list file:
+    
+    my @files = split( /\n/, $temp_files );
+    my $count = @files;
+
+    for ( my $index = 0; $index < $count; ++$index ) {
+
+      if ( $debugging == 0 ) {
+        debug( "unlink( '$files[$index]' )" );
+        unlink( $files[$index] );
+      }
+    }
+
+    if ( $debugging == 0 ) {
+      debug( "unlink( '$list_file' )" );
+      unlink( $list_file );
+
+      if ( $concurrent_queries > 0 ) {
+        debug( "unlink( '$temp_script' )" );
+        unlink( $temp_script );
+      }
+    }
+  }
+
+  $result = 1 - $result; # UNIX: zero is success, non-zero is failure.
+  debug( "exit result = $result" );
+  exit $result;
+}
+
+
+
+# Print web server capabilities metadata.
+
+sub print_capabilities {
+  print '<?xml version="1.0" encoding="UTF-8" ?>' . "\n";
+  print '<WCS_Capabilities version="1.0.0" ';
+  print 'xmlns="https://www.opengeospatial.org/standards/wcs" ';
+  print 'xmlns:gml="https://www.opengis.net//gml" ';
+  print 'xmlns:xlink="https://www.w3.org/1999/xlink">';
+  print '
+    <Service>
+        <metadataLink xlink:type="simple" xlink:href=" https://www.epa.gov/rsig/" metadataType="other" />
+        <description>EPA OFS Web Server 1.0.0</description>
+        <name>EPA_OFS_OGC_WCS_1.0.0</name>
+        <label>EPA OFS Web Server 1.0.0</label>
+        <keywords>
+            <keyword>EPA</keyword>
+            <keyword>OFS</keyword>
+            <keyword>interoperability</keyword>
+        </keywords>
+        <responsibleParty>
+            <individualName>Todd Plessel</individualName>
+            <organisationName>EPA Vislab</organisationName>
+            <contactInfo>
+                <onlineResource xlink:type="simple" xlink:href="mailto:plessel.todd@epa.gov" />
+            </contactInfo>
+        </responsibleParty>
+        <fees>NONE</fees>
+        <accessConstraints>NONE</accessConstraints>
+    </Service>
+    <Capability>
+        <Request>
+            <GetCapabilities>
+                <DCPType>
+                    <HTTP>
+                        <Get>
+                            <OnlineResource xlink:type="simple" xlink:href="https://ofmpub.epa.gov/rsig/ofsserver?" />
+                        </Get>
+                        <Post>
+                            <OnlineResource xlink:type="simple" xlink:href="https://ofmpub.epa.gov/rsig/ofsserver" />
+                        </Post>
+                    </HTTP>
+                </DCPType>
+            </GetCapabilities>
+            <DescribeCoverage>
+                <DCPType>
+                    <HTTP>
+                        <Get>
+                            <OnlineResource xlink:type="simple" xlink:href="https://ofmpub.epa.gov/rsig/ofsserver?" />
+                        </Get>
+                        <Post>
+                            <OnlineResource xlink:type="simple" xlink:href="https://ofmpub.epa.gov/rsig/ofsserver" />
+                        </Post>
+                    </HTTP>
+                </DCPType>
+            </DescribeCoverage>
+            <GetCoverage>
+                <DCPType>
+                    <HTTP>
+                        <Get>
+                            <OnlineResource xlink:type="simple" xlink:href="https://ofmpub.epa.gov/rsig/ofsserver?" />
+                        </Get>
+                        <Post>
+                            <OnlineResource xlink:type="simple" xlink:href="https://ofmpub.epa.gov/rsig/ofsserver" />
+                        </Post>
+                    </HTTP>
+                </DCPType>
+            </GetCoverage>
+        </Request>
+        <Exception>
+            <Format>text/xml; charset="utf-8"</Format>
+        </Exception>
+    </Capability>
+    <ContentMetadata version="1.0.0">';
+  print "\n";
+
+  my $variable_count = @metadata;
+
+  for ( my $variable = 0; $variable < $variable_count; ++$variable ) {
+    my $name = $metadata[ $variable ]->{ name };
+
+    if ( $name ne '?' ) {
+      my $units = $metadata[ $variable ]->{ units };
+      my $label = last_name( $name );
+      my $description = $metadata[ $variable ]->{ description };
+      print "        <CoverageOfferingBrief>\n";
+      print "            <name>$name</name>\n";
+      print "            <label>$label($units)</label>\n";
+      print "            <description>$description</description>\n";
+      print '            <lonLatEnvelope srsName="WGS84(DD)">';
+      print "\n";
+      print "                <gml:pos>-126 22</gml:pos>\n";
+      print "                <gml:pos>-65 50</gml:pos>\n";
+      print "            </lonLatEnvelope>\n";
+      print "        </CoverageOfferingBrief>\n";
+    }
+  }
+
+  print "    </ContentMetadata>\n";
+  print "</WCS_Capabilities>\n";
+}
+
+
+
+# Print web server coverage description metadata.
+
+sub print_coverage_description {
+  print '<?xml version="1.0" encoding="UTF-8" ?>';
+  print '<CoverageDescription version="1.0.0" ';
+  print 'xmlns="https://www.opengeospatial.org/standards/wcs" ';
+  print 'xmlns:gml="https://www.opengis.net/gml" ';
+  print 'xmlns:xlink="https://www.w3.org/1999/xlink">';
+  print "\n";
+
+  my $variable_count = @metadata;
+
+  for ( my $variable = 0; $variable < $variable_count; ++$variable ) {
+    my $name = $metadata[ $variable ]->{ name };
+
+    if ( $name ne '?' ) {
+      my $units = $metadata[ $variable ]->{ units };
+      my $description = $metadata[ $variable ]->{ description };
+      my $start_date = $metadata[ $variable ]->{ start_date };
+      my $longitude_minimum = $metadata[ $variable ]->{ longitude_minimum };
+      my $longitude_maximum = $metadata[ $variable ]->{ longitude_maximum };
+      my $latitude_minimum = $metadata[ $variable ]->{ latitude_minimum };
+      my $latitude_maximum = $metadata[ $variable ]->{ latitude_maximum };
+
+      if ( $coverage eq '' || $coverage eq $name ) {
+        print "    <CoverageOffering>\n";
+        print "        <name>$name</name>\n";
+        print "        <label>$name($units)</label>\n";
+        print "        <description>$description</description>\n";
+        print "        <domainSet>\n";
+        print "            <spatialDomain>\n";
+        print '                <gml:Envelope srsName="WGS84(DD)">';
+        print "\n";
+        print "                    <gml:pos>";
+        print "$longitude_minimum $latitude_minimum</gml:pos>\n";
+        print "                    <gml:pos>";
+        print "$longitude_maximum $latitude_maximum</gml:pos>\n";
+        print "                </gml:Envelope>\n";
+        print "            </spatialDomain>\n";
+        print "            <temporalDomain>\n";
+        print "                <timePeriod>\n";
+        print "                    <beginPosition>$start_date";
+        print "T00:00:00Z</beginPosition>\n";
+        print "                    <timeResolution>PT1Y</timeResolution>\n";
+        print "                </timePeriod>\n";
+        print "            </temporalDomain>\n";
+        print "        </domainSet>\n";
+        print "        <rangeSet>\n";
+        print "            <RangeSet>\n";
+        print "                <name>$name</name>\n";
+        print "                <label>$name($units)</label>\n";
+        print "                <description>$description</description>";
+        print '
+                <nullValues>
+                    <singleValue>-9999</singleValue>
+                </nullValues>
+            </RangeSet>
+        </rangeSet>
+        <supportedCRSs>
+            <requestResponseCRSs>CRS:84</requestResponseCRSs>
+            <nativeCRSs>CRS:84</nativeCRSs>
+        </supportedCRSs>
+        <supportedFormats>
+            <formats>binary</formats>
+        </supportedFormats>
+        <supportedInterpolations>
+            <interpolationMethod>mean</interpolationMethod>
+        </supportedInterpolations>
+    </CoverageOffering>
+';
+
+      }
+    }
+  }
+
+  print "</CoverageDescription>\n";
+}
+
+
+
+# Parse URL parameters into variables.
+
+sub parse_url {
+  use CGI qw/ untaint /;     # Load Safe untainting CGI routines.
+  $CGI::DISABLE_UPLOADS = 1; # Disable uploads.
+  $CGI::POST_MAX = 1024;     # Limit posts to 1024 bytes.
+  my $query = new CGI;       # Parse QUERY_STRING.
+  %ENV = ();                 # Unset all environment variables.
+  my @names = $query->param; # Extract names of parameters.
+  my $count = @names;
+  my $result = 0;
+  debug( "$program_name @names ($count)" );
+
+  for ( my $parameter = 0; $parameter < $count; ++$parameter) {
+    $_ = $names[ $parameter ];                # $_ is tainted.
+    s/[^A-Za-z]/_/go;                         # Untaint $_.
+    my $option = $_;                          # $option is untainted.
+    $_ = $query->param( $option );            # $_ is tainted.
+    s/[^\w\-.,:\/]/_/go;                      # Untaint $_.
+    my $value = $_;                           # $value is untainted.
+    my $lowercase_option = lc( $option );
+    my $lowercase_value  = lc( $value );
+    debug( "$lowercase_option $lowercase_value" );
+
+    if ( $parsers{ $lowercase_option } ) {
+      $result = $parsers{ $lowercase_option }->( $lowercase_value );
+    } else {
+      print STDERR "\nInvalid option: '$option'\n";
+      $result = 0;
+    }
+
+    if ( ! $result ) {
+      $parameter = $count; # Finish looping.
+    }
+  }
+
+  $result = $result && required_options_specified();
+  return $result;
+}
+
+
+
+# Parse service option.
+
+sub parse_service_option {
+  my $value = shift;
+  my $result = parse_option( $service, $value, 'SERVICE', 'wcs' );
+  return $result;
+}
+
+
+
+# Parse version option.
+
+sub parse_version_option {
+  my $value = shift;
+  my $result = parse_option( $version, $value, 'VERSION', '1.0.0' );
+  return $result;
+}
+
+
+
+# Parse request option.
+
+sub parse_request_option {
+  my $value = shift;
+  my $result = parse_option( $request, $value, 'REQUEST',
+                             'getcoverage getcapabilities describecoverage' );
+  return $result;
+}
+
+
+
+# Parse format option:
+
+sub parse_format_option {
+  my $value = shift;
+  my $result =
+    parse_option( $format, $value, 'FORMAT', 'bin' );
+  return $result;
+}
+
+
+
+# Parse coverage option.
+
+sub parse_coverage_option {
+  my $value = shift;
+  my $result = 0;
+
+  if ( $coverage ne '' ) {
+    print STDERR "\nRedundant COVERAGE option: '$value'\n";
+  } else {
+    my $variable_count = @metadata;
+
+    for ( my $variable = 0; $coverage eq '' && $variable < $variable_count;
+          ++$variable ) {
+      my $name = $metadata[ $variable ]->{ name };
+
+      if ( $name ne '?' ) {
+
+        if ( $name eq $value ) {
+          $coverage = $name;
+          $coverage_units = $metadata[ $variable ]->{ units };
+          $result = 1;
+        }
+      }
+    }
+
+    if ( ! $result ) {
+      print STDERR "\nInvalid COVERAGE option: '$value'\n";
+    }
+  }
+
+  return $result;
+}
+
+
+
+# Parse time option.
+
+sub parse_time_option {
+  my $value = shift;
+  my $result = 0;
+
+  if ( $time ne '' ) {
+    print STDERR "\nRedundant TIME option: '$value'\n";
+  } else {
+    $time = $value;
+    my $is_valid = is_valid_time( $time );
+
+    if ( ! $is_valid ) {
+      print STDERR "\nInvalid TIME option: '$value'\n";
+    } else {
+      $result = 1;
+    }
+  }
+
+  return $result;
+}
+
+
+
+# Parse bbox option.
+
+sub parse_bbox_option {
+  my $value = shift;
+  my $result = 0;
+
+  if ( $bbox ne '' ) {
+    print STDERR "\nRedundant BBOX option: '$value'\n";
+  } else {
+    $bbox = $value;
+    @bounds = split( /,/, $bbox );
+    my $bounds_count = @bounds;
+
+    if ( $bounds_count != 4 && $bounds_count != 6 ) {
+      print STDERR "\nInvalid bbox option: '$value'\n";
+    } elsif ( ! in_range( $bounds[ 0 ], -180.0, 180.0 ) ) {
+      print STDERR "\nInvalid bbox option: '$bounds[ 0 ]'\n";
+    } elsif ( ! in_range( $bounds[ 1 ], -90.0, 90.0 ) ) {
+      print STDERR "\nInvalid bbox option: '$bounds[ 1 ]'\n";
+    } elsif ( ! in_range( $bounds[ 2 ], $bounds[ 0 ], 180.0 ) ) {
+      print STDERR "\nInvalid bbox option: '$bounds[ 2 ]'\n";
+    } elsif ( ! in_range( $bounds[ 3 ], $bounds[ 1 ], 90.0 ) ) {
+      print STDERR "\nInvalid bbox option: '$bounds[ 3 ]'\n";
+    } elsif ( $bounds_count == 6 ) {
+      $result = $bounds[ 4 ] eq $bounds[ 5 ] &&
+                in_range( $bounds[ 4 ], 1, $maximum_model_layers );
+      $depth = $bounds[ 4 ];
+    } else {
+      $depth = 1;
+      $result = 1;
+    }
+  }
+
+  return $result;
+}
+
+
+# Check that all required 'options' have been specified:
+
+sub required_options_specified {
+  my $result = 0;
+
+  if ( $service eq '' ) {
+    print STDERR "\nMissing option: 'SERVICE'\n";
+  } elsif ( $version eq '' ) {
+    print STDERR "\nMissing option: 'VERSION'\n";
+  } elsif ( $request eq '' ) {
+    print STDERR "\nMissing option: 'REQUEST'\n";
+  } elsif ( $request eq 'getcoverage' ) {
+
+    if ( $format eq '' ) {
+      print STDERR "\nMissing option: 'FORMAT'\n";
+    } elsif ( $time eq '' ) {
+      print STDERR "\nMissing option: 'TIME'\n";
+    } elsif ( $bbox eq '' ) {
+      print STDERR "\nMissing option: 'BBOX'\n";
+    } elsif ( $coverage eq '' ) {
+      print STDERR "\nMissing option: 'COVERAGE'\n";
+    } else {
+      $result = 1;
+    }
+  } else {
+    $result = 1;
+  }
+
+  return $result;
+}
+
+
+
+# Compute starting_timestamp and hours.
+# inputs:  $time = '2001-08-26t00:00:00z/2001-08-31t23:59:59z'
+# outputs: $starting_timestamp = 2005082600
+#          $hours = 120
+#          $days = 5
+
+sub compute_time_range {
+  my $yyyy1 = substr( $time, 0, 4 );
+  my $mm1   = substr( $time, 5, 2 );
+  my $dd1   = substr( $time, 8, 2 );
+  my $hh1   = substr( $time, 11, 2 );
+  my $i     = index( $time, '/' );
+
+  $starting_timestamp = integer_timestamp( $yyyy1, $mm1, $dd1, $hh1 );
+  $ending_yyyymmdd = $starting_timestamp / 100;
+  $hours = 1;
+  $days = 1;
+
+  if ( $i != -1 ) {
+    ++$i;
+    my $yyyy2 = substr( $time, $i + 0, 4 );
+    my $mm2   = substr( $time, $i + 5, 2 );
+    my $dd2   = substr( $time, $i + 8, 2 );
+    my $hh2   = substr( $time, $i + 11, 2 );
+    my $yyyy  = $yyyy1;
+    my $mm    = $mm1;
+    my $dd    = $dd1;
+    my $hh    = $hh1;
+    my $previous_dd = $dd1;
+
+    while ( integer_timestamp( $yyyy, $mm, $dd, $hh ) !=
+            integer_timestamp( $yyyy2, $mm2, $dd2, $hh2 ) ) {
+      increment_timestamp( $yyyy, $mm, $dd, $hh );
+
+      if ( $dd ne $previous_dd ) {
+        ++$days;
+        $previous_dd = $dd;
+        $ending_yyyymmdd = $yyyy * 10000 + $mm * 100 + $dd;
+      }
+
+      ++$hours;
+    }
+  }
+}
+
+
+# Execute query of remote web service:
+
+sub execute_remote_queries {
+  my $result = 0;
+  my $variable = lookup_variable( $coverage );
+  my $variable_info = $metadata[ $variable ];
+  my $query = $variable_info->{ query };
+  my $hourly_query = $variable_info->{ hourly_query };
+  my $hourly_date = $variable_info->{ hourly_date };
+  my $hours_per_query = $variable_info->{ hours_per_query };
+  my $base_hour_query = $variable_info->{ base_hour_query };
+  my $layers = $variable_info->{ layers };
+  my $invert_layer = $variable_info->{ layer_1_is_surface } == 0;
+  my $yyyy = substr( $starting_timestamp, 0, 4 );
+  my $mm   = substr( $starting_timestamp, 4, 2 );
+  my $dd   = substr( $starting_timestamp, 6, 2 );
+  my $hh   = substr( $starting_timestamp, 8, 2 );
+  my $timestep = 0;
+  my $h = 0;
+  my $is_creofs = index( $coverage, 'creofs.' ) != -1;
+  my $yyyy_mm_dd_hh = sprintf( "%04d-%02d-%02dT%02d", $yyyy, $mm, $dd, $hh );
+  my $after_hourly_date = ( $hourly_date && ( $yyyy_mm_dd_hh ge $hourly_date));
+  my $is_hourly_query = ( $is_creofs || $after_hourly_date );
+  my $nnn = 0;
+  my $end_h = $hours + $hours_per_query;
+
+  # After a certain date/time, OFS dods data is hourly with a different query.
+  # Non-hourly OFS dods data is for previous hours up to the 'file name'
+  # timestamp so query starting with the next file:
+
+  if ( $is_hourly_query ) {
+    $hh = $base_hour_query;
+    
+    if ( $after_hourly_date ) {
+      $query = $variable_info->{ hourly_query };
+    }
+
+  } elsif ( $base_hour_query != 0 || $hours_per_query != 1 ) {
+
+    if ( $hh == $base_hour_query ) {
+      increment_timestamp_hours( $yyyy, $mm, $dd, $hh, $hours_per_query );    
+    } elsif ( $hh < $base_hour_query ) {
+      $hh = $base_hour_query;
+    } else {
+      my $old_dd = $dd;
+      $h = $base_hour_query;
+
+      while ( $h < $hh && $dd == $old_dd ) {
+        increment_timestamp_hours( $yyyy, $mm, $dd, $h, $hours_per_query );    
+      }
+
+      $hh = $h;
+      $h = 0;
+    }
+  }
+
+  debug( "end_h = $end_h" );
+  my $script_file = 0;
+
+  if ( $concurrent_queries > 0 ) {
+    open ( script_file, "> $temp_script" ) or die "Couldn't open file $temp_script";
+    print script_file "#!/bin/sh\n";
+  }
+
+  my $query_count = 0;
+
+  do {
+    my $temp_file = sprintf( $temp_file_format, $timestep );
+
+    # Substitute values for YYYY, MM, DD, HH, NNN in the query:
+
+    my $yyyymm = sprintf( "%04d%02d", $yyyy, $mm );
+    my $yyyymmdd = sprintf( "%04d%02d%02d", $yyyy, $mm, $dd );
+    $hh = sprintf( "%02d", $hh );
+    $query =~ s/YYYYMMDD/$yyyymmdd/g;
+    $query =~ s/YYYYMM/$yyyymm/g;
+    $query =~ s/YYYY/$yyyy/g;
+    $query =~ s/MM/$mm/g;
+    $query =~ s/DD/$dd/g;
+    $query =~ s/tHH/t$hh/g;
+
+    if ( $is_hourly_query ) {
+
+      if ( $is_creofs && ! $after_hourly_date ) {
+        $nnn = sprintf( "%02d", $nnn );
+        $query =~ s/nNN/n$nnn/g;
+      } else {
+        $nnn = sprintf( "%03d", $nnn );
+        $query =~ s/nNNN/n$nnn/g;
+      }
+    }
+
+    my $depth0 = $depth - 1;
+    my $depth1 = $depth;
+
+    if ( $invert_layer ) {
+      $depth0 = $layers - $depth0 - 1;
+      $depth1 = $depth0 + 1;
+    }
+
+    $query =~ s/LAYER1/$depth1/g;
+    $query =~ s/LAYER/$depth0/g;
+
+    # New version of NOAA webservice requires full HTML-URL-encoding of
+    # portion of URL after '?'.
+    # So encode '[]:,' characters in part of query after '?':
+
+    my @query_parts = split( /\?/, $query );
+    my $query_parts1 = $query_parts[ 0 ];
+    my $query_parts2 = $query_parts[ 1 ];
+    debug( "filled query = $query" );
+    $query_parts2 =~ s/\[/%5B/g;
+    $query_parts2 =~ s/\]/%5D/g;
+    $query_parts2 =~ s/:/%3A/g;
+    $query_parts2 =~ s/,/%2C/g;
+    $query = "$query_parts1?$query_parts2";
+
+    my $command = "$wget_command '$query' > $temp_file";
+
+    # If using concurrent queries then append backgrounded query to script:
+
+    if ( $concurrent_queries > 0 ) {
+      print script_file "$command &\n";
+      $result = 1;
+      $query_count += 1; 
+
+      if ( $query_count % $concurrent_queries == 0 ) {
+        print script_file "wait\n";
+      }
+
+    } else {
+      $result = execute_command( $command ) || $result;
+    }
+
+    if ( $concurrent_queries > 0 || -s $temp_file > 200 ) {
+      $temp_files .= "$temp_file\n";
+    }
+
+    if ( $is_hourly_query ) {
+      $nnn += 1;
+
+      if ( $nnn > $hours_per_query ) {
+        $nnn = 0;
+        increment_timestamp_hours( $yyyy, $mm, $dd, $hh, $hours_per_query );
+        $h += $hours_per_query;
+      }
+    } else {
+      increment_timestamp_hours( $yyyy, $mm, $dd, $hh, $hours_per_query );
+      $h += $hours_per_query;
+    }
+
+    $yyyy_mm_dd_hh = sprintf( "%04d-%02d-%02dT%02d", $yyyy, $mm, $dd, $hh );
+    $after_hourly_date = ( $hourly_date && ( $yyyy_mm_dd_hh ge $hourly_date ));
+    $is_hourly_query = ( $is_creofs || $after_hourly_date );
+
+    if ( $after_hourly_date ) {
+      $query = $variable_info->{ hourly_query };
+    } else {
+      $query = $variable_info->{ query };
+    }
+
+    ++$timestep;
+  } while ( $h < $end_h );
+
+  # If using concurrent remote queries then append a wait (until queries finish)
+  # then execute temp script:
+
+  if ( $concurrent_queries > 0 ) {
+    print script_file "wait\n";
+    close script_file or die "Cannot close $temp_script: $!";
+    chmod 0755, $temp_script;
+    $result = execute_command( $temp_script );
+  }
+
+  # Create list_file for subsetter to read:
+
+  if ( $result ) {
+    open ( FH, "> $list_file" ) or die "Couldn't open file $list_file";
+    #print FH $temp_files;
+
+    # Only write valid dods files:
+
+    for my $dods_file_name ( split( '\n', $temp_files ) ) {
+      open my $dods_file, '<', $dods_file_name;
+      my $first_line = <$dods_file>;
+      close $dods_file;
+
+      if ( index( $first_line, 'Dataset {' ) == 0 ) {
+        print FH "$dods_file_name\n";
+      }
+    }
+
+    close FH or die "Cannot close $list_file: $!";
+  }
+
+  debug( "execute_remote_queries result = $result" );
+  return $result;
+}
+
+
+
+# execute_subsetter
+
+sub execute_subsetter {
+  my $variable = lookup_variable( $coverage );
+  my $variable_info = $metadata[ $variable ];
+  my $source = first_name( $variable_info->{ name } );
+  my $name = last_name(  $variable_info->{ name } );
+  my $units = $variable_info->{ units };
+  my $min = $variable_info->{ min };
+  my $max = $variable_info->{ max };
+  my @bounds = split( /,/, $bbox );
+  my $lonmin = $bounds[ 0 ];
+  my $latmin = $bounds[ 1 ];
+  my $lonmax = $bounds[ 2 ];
+  my $latmax = $bounds[ 3 ];
+
+  my $command =
+    "$subsetter $source $name $units $min $max " .
+    "$lonmin $latmin $lonmax $latmax $starting_timestamp $hours $list_file";
+
+  my $result = execute_command( $command );
+  debug( "execute_subsetter result = $result" );
+  return $result;
+}
+
+
+
+# Execute command and echo its output to STDOUT. E.g., execute_command( 'ls' );
+
+sub execute_command {
+  my $command = shift;
+  my $result = 0;
+  my $the_pipe = 0;
+
+  # Untaint command (match expression is arbitrary as far as -T is concerned):
+
+  if ( $command =~ m#^(/[\w-]+/[\w -/.,':?=&<>\[\]\(\)|]+)$# ) {
+    $command = $1; # Re-assign first match, which is enough to satisfy -T.
+    debug( "$0 executing command = $command" );
+    %ENV = (); # Unset all environment variables prior to popen.
+    # Complicated, supposedly safer way to open a readable pipe to command:
+    my $pid = open( the_pipe, "-|" );
+
+    if ( ! defined( $pid ) ) {
+      die "Couldn't open pipe to subprocess";
+    } elsif ( $pid ) { # Parent process.
+
+      while ( <the_pipe> ) {
+        print;
+      }
+
+      close( the_pipe );
+      $result = ! $?;
+    } else { # Child process.
+      exec( $command ) or die "can't exec program: $!";
+    }
+  } else {
+    print STDERR "\n$0: '$command' contains invalid characters.\n";
+  }
+
+  return $result;
+}
+
+
+
+
+# my $variable = lookup_variable( $coverage );
+
+sub lookup_variable {
+  my $result = -1;
+  my $variable_count = @metadata;
+
+  for ( my $variable = 0; $variable < $variable_count;
+        ++$variable ) {
+    my $name = $metadata[ $variable ]->{ name };
+
+    if ( $coverage eq $name ) {
+      $result = $variable;
+      $variable = $variable_count; # Stop looping.
+    }
+  }
+
+  return $result;
+}
+
+
+
+# First part of dotted name:
+# my $name = last_name( 'cbofs.current' );
+# $name is 'cbofs'
+
+sub first_name {
+  my $name = shift;
+  my @parts = split( /\./, $name );
+  my $label = $parts[ 0 ];
+  return $label;
+}
+
+
+
+# Last part of dotted name:
+# my $name = last_name( 'cbofs.current' );
+# $name is 'current'
+
+sub last_name {
+  my $name = shift;
+  my @parts = split( /\./, $name );
+  my $count = @parts;
+  my $label = $parts[ $count - 1 ];
+  return $label;
+}
+
+
+
+
+############################### HELPER ROUTINES ##############################
+
+
+
+# debug( message );
+
+sub debug {
+  my $message = shift;
+
+  if ( $debugging ) {
+    print STDERR "\n$message\n";
+####print STDOUT "\n$message\n";
+  }
+}
+
+
+
+# my $result = parse_option( $option, $value, $option_name, $valid_values );
+# my $result = parse_option( $variable, $value, 'COVERAGE', 'ozone pm25' );
+
+sub parse_option {
+  my ( $option, $value, $option_name, $valid_values ) = @_;
+  my $result = 0;
+
+  if ( $option ne '' ) {
+    print STDERR "\nRedundant $option_name option: '$value'\n";
+  } else {
+    $result = index( " $valid_values ", " $value " ) != -1;
+
+    if ( $result ) {
+      $_[ 0 ] = $value;
+    } else {
+      print STDERR "\nInvalid $option_name option: '$value'\n";
+    }
+  }
+
+  return $result;
+}
+
+
+
+# my $ok = in_range( $value, $minimum, $maximum );
+
+sub in_range {
+  my ( $value, $minimum, $maximum ) = @_;
+  my $result = $value >= $minimum && $value <= $maximum;
+  return $result;
+}
+
+
+
+# my $is_valid = is_valid_time( '2001-08-26t20:00:00z/2001-08-27t23:59:59z' );
+
+sub is_valid_time {
+  my $time = shift;
+  my $result = 0;
+  my $length = length( $time );
+
+  if ( $length == 41 ) {
+    $result = is_valid_time( substr( $time, 0, 20 ) );
+    $result = $result && substr( $time, 20, 1 ) eq '/';
+    $result = $result && is_valid_time( substr( $time, 21, 20 ) );
+    $result = $result && substr( $time, 0, 20 ) le substr( $time, 21, 20 );
+  } elsif ( $length == 20 ) {
+    my $year   = substr( $time, 0, 4 );
+    my $month  = substr( $time, 5, 2 );
+    my $day    = substr( $time, 8, 2 );
+    my $hour   = substr( $time, 11, 2 );
+    my $minute = substr( $time, 14, 2 );
+    my $second = substr( $time, 17, 2 );
+    $result = in_range( $year, 1900, 3000 );
+    $result = $result && in_range( $month, 1, 12 );
+    $result = $result && in_range( $day, 1, days_in_month( $year, $month ) );
+    $result = $result && in_range( $hour, 0, 23 );
+    $result = $result && in_range( $minute, 0, 59 );
+    $result = $result && in_range( $second, 0, 59 );
+    $result = $result && substr( $time, 4, 1 ) eq '-';
+    $result = $result && substr( $time, 7, 1 ) eq '-';
+    $result = $result && substr( $time, 10, 1 ) eq 't';
+    $result = $result && substr( $time, 13, 1 ) eq ':';
+    $result = $result && substr( $time, 16, 1 ) eq ':';
+    $result = $result && substr( $time, 19, 1 ) eq 'z';
+  }
+
+  return $result;
+}
+
+
+
+# increment_timestamp_hours( $yyyy, $mm, $dd, $hh, $hours );
+
+sub increment_timestamp_hours {
+  my ( $yyyy, $mm, $dd, $hh, $hours ) = @_;
+
+  while ( $hours-- ) {
+    increment_timestamp( $yyyy, $mm, $dd, $hh );
+  }
+
+  $_[ 0 ] = $yyyy;
+  $_[ 1 ] = $mm;
+  $_[ 2 ] = $dd;
+  $_[ 3 ] = $hh;
+}
+
+
+
+# increment_timestamp( $yyyy, $mm, $dd, $hh );
+
+sub increment_timestamp {
+  my ( $yyyy, $mm, $dd, $hh ) = @_;
+  my $hours_per_day   = 23;
+  my $months_per_year = 12;
+  my $days_this_month = days_in_month( $yyyy, $mm );
+  ++$hh;
+
+  if ( $hh > $hours_per_day ) {
+    $hh = 0;
+    ++$dd;
+
+    if ( $dd > $days_this_month ) {
+      $dd = 1;
+      ++$mm;
+
+      if ( $mm > $months_per_year ) {
+        $mm = 1;
+        ++$yyyy;
+      }
+    }
+  }
+
+  $_[ 0 ] = $yyyy;
+  $_[ 1 ] = $mm;
+  $_[ 2 ] = $dd;
+  $_[ 3 ] = $hh;
+}
+
+
+
+# my $yyyymmddhh = integer_timestamp( $yyyy, $mm, $dd, $hh );
+
+sub integer_timestamp {
+  my ( $yyyy, $mm, $dd, $hh ) = @_;
+  my $result = int( $yyyy * 1000000 + $mm * 10000 + $dd * 100 + $hh );
+  return $result;
+}
+
+
+
+# my $leap = is_leap_year( $year );
+
+sub is_leap_year {
+  my $year = shift;
+  my $result = $year % 4 == 0 && ( $year % 100 != 0 || $year % 400 == 0 );
+  return $result;
+}
+
+
+
+# my $days = days_in_month( $year, $month );
+
+sub days_in_month {
+  my $year  = shift;
+  my $month = shift;
+
+  # 30 days hath September, April, June and November...
+
+  my @days_per_month = ( 31, 28, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31 );
+  my $result = $days_per_month[ $month - 1 ];
+
+  if ( $month == 2 ) {
+
+    if ( is_leap_year( $year ) ) {
+      ++$result;
+    }
+  }
+
+  return $result;
+}
+
+

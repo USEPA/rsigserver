@@ -1,0 +1,141 @@
+#!/bin/csh -f
+
+# Given an ESDR apiKey, download data RETIGO from ESDR
+# and reconstruct the associated RETIGO file.
+# Returns 0 is successful.
+
+if ( $#argv != 14 ) then
+  echo
+  echo "Usage: download_data apiKey fileName projectCode keywords firstname lastname org email phone reason quality instrument datatype origFile"
+  echo
+  exit 1
+endif
+
+set apiKey      = $1
+set fileName    = $2
+set projectCode = $3
+set keywords    = $4
+set firstname   = $5
+set lastname    = $6
+set org         = $7
+set email       = $8
+set phone       = $9
+set reason      = $10
+set quality     = $11
+set instrument  = $12
+set datatype    = $13
+set origFile    = $14
+
+set repository = /data/RETIGO
+set script_dir = /rsig/retigo/esdr/scripts
+
+set file_feed        = ${repository}/esdr/${apiKey}_Feed.txt
+set file_channelSpec = ${repository}/esdr/${apiKey}_ChannelSpecs.txt
+set file_channelName = ${repository}/esdr/${apiKey}_ChannelNames.txt
+
+set file_data        = ${repository}/esdr/${apiKey}_Data.txt
+
+# Define untaint command. Remove all characters except:
+# octal 11: tab
+# octal 12: linefeed
+# octal 15: carriage return
+# octal 40: space
+# octal 42: double quote
+# octal 43: hash
+# octal 47-133: safe characters
+# octal 135-175: safe characters
+
+set untaint_cmd =  "/usr/bin/tr -cd '\11\12\15\40\42\43\47-\133\135-\175'"
+
+# get the file feed from ESDR
+/usr/bin/curl -s https://esdr.cmucreatelab.org/api/v1/feeds/$apiKey | $untaint_cmd > $file_feed
+#set fetchstatus = $status
+#echo feed fetch status: $fetchstatus
+
+# extract the channelSpecs
+/bin/cat $file_feed | python2 -c 'import simplejson as json,sys;obj=json.load(sys.stdin);print obj["data"]["channelSpecs"];' > $file_channelSpec
+
+# extract the channelNames
+/bin/cat $file_feed | python2 -c 'import simplejson as json,sys;obj=json.load(sys.stdin);print obj["data"]["channelBounds"]["channels"];' > $file_channelName
+
+
+# get data ---------------------------------------------------
+
+set numColumns = `cat ${file_channelName} | awk -F"Column" '{print NF}'`
+@ nChannels = $numColumns
+
+set channel_list = Timestring
+@ channelInd = 1
+while ($channelInd <= $nChannels)
+  set thisChannel = "Column"${channelInd}
+  set channel_list = ${channel_list},$thisChannel
+  @ channelInd += 1
+end
+
+#echo channel_list = $channel_list
+
+# get data from ESDR
+/usr/bin/curl -s https://esdr.cmucreatelab.org/api/v1/feeds/${apiKey}/channels/${channel_list}/export | $untaint_cmd |awk '{FS=","; OFS=","; $1=""; print $0}' | awk '{if(NR>1)print}' | cut -c 2- | sed 's/.$//' > $file_data
+
+#set lat = `cat $file_feed | python -c 'import simplejson as json,sys;obj=json.load(sys.stdin);print obj["data"]["latitude"];'`
+#set lon = `cat $file_feed | python -c 'import simplejson as json,sys;obj=json.load(sys.stdin);print obj["data"]["longitude"];'`
+#set timestamp = `cat $file_data | grep -v "#" |grep -v Timestamp | grep "," | head -1 |awk -F "," '{print $1}'`
+#set file_prefix = ${repository}/${timestamp}_${lat}_${lon}
+
+# write comments to file
+set comments = `cat $file_feed | python2 -c 'import simplejson as json,sys;obj=json.load(sys.stdin);print obj["data"]["channelSpecs"]["comments"]' | sed 's/\[//g' | sed 's/\]//g' | sed "s/'//g" | sed "s/,//g"`
+echo -n "##" > ${repository}/${fileName}.csv
+echo $comments | sed 's/##/\n##/g' >> ${repository}/${fileName}.csv
+
+# write header to file
+@ channelInd = 1
+#echo -n "Timestamp(UTC)" >> ${repository}/${fileName}.csv
+while ($channelInd <= $nChannels)
+  set thisChannel = "Column"${channelInd}
+  set thisPrettyName = `cat $file_feed | python2 -c "import simplejson as json,sys;obj=json.load(sys.stdin);print obj['data']['channelSpecs']['channels']['${thisChannel}']['prettyName']";`
+  echo -n $thisPrettyName >> ${repository}/${fileName}.csv
+  if ($channelInd != $nChannels) then
+    echo -n , >> ${repository}/${fileName}.csv
+  endif
+  @ channelInd += 1
+end
+echo >> ${repository}/${fileName}.csv
+
+# md5sums of existing data files in repository
+set md5s = `/usr/bin/md5sum ${repository}/*.csv`
+
+# write data to file
+/bin/cat $file_data >> ${repository}/${fileName}.csv
+
+# compute md5sum of file and compare to others in repository.
+set this_md5 = `/usr/bin/md5sum ${repository}/${fileName}.csv | awk '{print $1}'`
+echo $md5s | grep $this_md5 > /dev/null
+set md5_found = $status
+
+# 0 if md5 was found, 1 if it was not
+if ($md5_found == 0) then
+  # delete file 
+  /bin/rm ${repository}/${fileName}.csv
+  echo THE FILE ${repository}/${fileName}.csv NOT WRITTEN BECAUSE IT ALREADY EXISTS IN THE REPOSITORY > /dev/stderr
+  echo > /dev/stderr
+  exit 1
+else
+  # write metadata file
+  echo APIKEY $apiKey > ${repository}/${fileName}_METADATA.txt
+  echo PROJECT $projectCode >> ${repository}/${fileName}_METADATA.txt
+  echo KEYWORDS $keywords >> ${repository}/${fileName}_METADATA.txt
+  echo FIRSTNAME $firstname >> ${repository}/${fileName}_METADATA.txt
+  echo LASTNAME $lastname >> ${repository}/${fileName}_METADATA.txt
+  echo ORG $org >> ${repository}/${fileName}_METADATA.txt
+  echo EMAIL $email >> ${repository}/${fileName}_METADATA.txt
+  echo PHONE $phone >> ${repository}/${fileName}_METADATA.txt
+  echo REASON $reason >> ${repository}/${fileName}_METADATA.txt
+  echo QUALITY $quality >> ${repository}/${fileName}_METADATA.txt
+  echo INSTRUMENT $instrument >> ${repository}/${fileName}_METADATA.txt
+  echo DATATYPE $datatype >> ${repository}/${fileName}_METADATA.txt
+  echo ORIGFILE $origFile >> ${repository}/${fileName}_METADATA.txt
+endif
+
+# create list of all available files
+${script_dir}/create_filelist
+

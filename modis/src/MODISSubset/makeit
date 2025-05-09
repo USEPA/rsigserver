@@ -1,0 +1,10 @@
+#!/bin/sh
+
+# Compile MODISSubset:
+
+gcc -m64 -Wall -D_FILE_OFFSET_BITS=64 -D_LARGEFILE_SOURCE -DNDEBUG -O -I. -o MODISSubset MODISSubset.c ReadData.c Utilities.c -L. -lhdfeos -lmfhdf -ldf -lsz -lz -ljpeg -lm
+strip MODISSubset
+ls -l MODISSubset
+file  MODISSubset
+ldd   MODISSubset
+

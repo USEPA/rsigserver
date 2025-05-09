@@ -1,0 +1,20 @@
+
+Utilities Library: Reusable C routines.
+
+README - This file.
+makeit - C Shell script to compile this code into
+         ../../../lib/$platform/libUtility.a
+         ../../../lib/$platform/libUtility.debug.a
+Assertions.h       - Assertions macros for implementing Design By Contract.
+BasicNumerics.[hc] - Basic numeric types and routines.
+Failure.[hc]       - Failure message reporting routines.
+DateTime.[hc]      - Date-time routines.
+ImageFile.[hc]     - .bin image file routines.
+KMLFile.[hc]       - KML graphics file helper routines.
+PNGFile.[hc]       - PNG image file helper routines.
+Shapefile.[hc]     - ESRI Shapefile helper routines.
+albers.[hc]        - Albers equal area map projection routines.
+lambert.[hc]       - Lambert conformal conic map projection routines.
+projections.h      - Map projection common routines.
+Utilities.[hc]     - Miscellaneous C utility routines.
+test/              - Directory of test code.

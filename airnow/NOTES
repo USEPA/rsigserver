@@ -1,0 +1,25 @@
+2025-05-04
+To: dmc@airnowtech.org
+
+Hi,
+When retrieving data from www.aqcsv.airnowgetway.org/AQCSVWebService/AQCSV.svc.queryRawData
+The data lines returned contain a string site id in the first column, like these:
+840530610021
+840MMFS1CCLV
+CK2010001
+
+Is there a way to have the query return globally unique site ids that are integers in the range [1, 2147483647]
+like AQS and other webservices do?
+If not, is there a query that will provide the complete list of all airnow string site ids (both historic and current)?
+Thanks,
+Todd
+
+----------------------------------------------------------------
+
+I’d recommend looking at files.airnowtech.org
+If you go to the ‘today/’ folder, there’s a file called Monitoring_Site_Locations_V2.dat which has site IDs for all active and inactive sites, along with information about the sites if you need it. Please let me know if that will work or if you’re looking for something else.
+
+Thanks,
+Meg Taylor (she/her), AirNow DMC Analyst
+Meg.Taylor@TDEnviro.com | www.TDEnviro.com
+

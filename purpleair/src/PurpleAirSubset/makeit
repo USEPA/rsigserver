@@ -1,0 +1,15 @@
+#!/bin/sh
+
+clear
+
+echo
+echo "Compiling PurpleAirSubset"
+gcc -m64 -Wall -D_FILE_OFFSET_BITS=64 -D_LARGEFILE_SOURCE -DNDEBUG -O -I. -o PurpleAirSubset PurpleAirSubset.c Utilities.c -L. -lm -lc
+strip PurpleAirSubset
+ls -l PurpleAirSubset
+file  PurpleAirSubset
+ldd   PurpleAirSubset
+
+ls -Fsalt | head
+echo Done
+

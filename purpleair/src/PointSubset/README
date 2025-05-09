@@ -1,0 +1,23 @@
+
+2025-02-28
+plessel.todd@epa.gov 919-541-5500
+
+This directory contains the C source code for the PointSubset program.
+
+It uses the following standard libraries: m c.
+To compile: ./makeit
+
+Files:
+------
+README     - This file.
+*.[hc]     - C source files for PointSubset program.
+makeit     - C Shell script to compile the program.
+
+
+Running and Program Usage Documentation:
+----------------------------------------
+For PointSubset program usage documentation simply execute 
+PointSubset |& more
+to see what command-line options are required/available and
+the format of the resulting output files.
+

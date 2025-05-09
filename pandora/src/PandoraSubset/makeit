@@ -1,0 +1,16 @@
+#!/bin/sh
+
+clear
+
+echo
+echo "Compiling PandoraSubset..."
+
+gcc -m64 -Wall -D_FILE_OFFSET_BITS=64 -D_LARGEFILE_SOURCE -DNDEBUG -O -I. -o PandoraSubset PandoraSubset.c Utilities.c -lm -lc
+strip PandoraSubset
+ls -l PandoraSubset
+file  PandoraSubset
+ldd   PandoraSubset
+
+ls -Fsalt | head
+echo Done
+

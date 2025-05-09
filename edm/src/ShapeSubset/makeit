@@ -1,0 +1,29 @@
+#!/bin/sh
+
+clear
+
+echo
+echo "Compiling GPC"
+cd GPC
+gcc -m64 -D_FILE_OFFSET_BITS=64 -D_LARGEFILE_SOURCE -DNDEBUG -DCUSTOM_EPSILON=1e-6 -O -I. -c gpc.c
+ls -l *.o
+cd ..
+
+echo
+echo "Compiling Utilities..."
+cd Utilities
+gcc -m64 -Wall -D_FILE_OFFSET_BITS=64 -D_LARGEFILE_SOURCE -DNO_ASSERTIONS -DNO_LIBCURL -O -I. -I../GPC -I../shapelib-1.3.0 -I../png -I../z -c albers.c BasicNumerics.c DateTime.c Failure.c http_connection.c ImageFile.c KMLFile.c lambert.c PNGFile.c projections.c Shapefile.c Utilities.c 
+ls -l *.o
+cd ..
+
+echo
+echo "Compiling ShapeSubset"
+gcc -m64 -Wall -D_FILE_OFFSET_BITS=64 -D_LARGEFILE_SOURCE -DNO_ASSERTIONS -O -I. -IGPC -Ishapelib-1.3.0 -Ipng -Iz -IUtilities -o ShapeSubset ShapeSubset.c -L. Utilities/*.o GPC/*.o -lShapefile -lPNG -lZ -lm -lc
+strip ShapeSubset
+ls -l ShapeSubset
+file  ShapeSubset
+ldd   ShapeSubset
+
+ls -Fsalt | head
+echo Done
+

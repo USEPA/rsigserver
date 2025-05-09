@@ -1,0 +1,438 @@
+#!/usr/bin/perl -wT
+
+##############################################################################
+# PURPOSE: cmaqappserver - Serve CMAQ-Application requests.
+#
+# NOTES:   Used by CMAQ-Application (Kristen Foley, PI).
+#          Example usage:
+#
+#          curl --silent --max-time 0 --retry 0 -L --tcp-nodelay \
+#            'https://ofmpub.epa.gov/rsig/rsigserver?\
+#            SERVICE=cmaqapp&REQUEST=download&\
+#            SOURCE=amad.conus&VAR=o3&YYYYMMDDHH=2012083100' > image.png
+#
+# HISTORY: 2016-12-22 Matt Freeman
+#
+# STATUS: reviewed tested
+##############################################################################
+
+
+use strict;
+package main;
+$| = 1; # Turn off output buffering so messages appear in correct order.
+alarm( 3600 ); # Kill process after 1 hour. Legitimate usage could be an hour!
+# Restrict PATH and ENV. (But before popen, ENV is cleared!)
+delete @ENV{ 'PATH', 'IFS', 'CDPATH', 'ENV', 'BASH_ENV' };
+
+
+############################## TUNABLE CONSTANTS #############################
+
+
+my $debugging = 0; # 1 = print debug messages to STDERR logs/error_log.
+
+# Directory where data files reside:
+
+my $data_directory = '/data/CMAQ/application_images';
+
+# Server where this program is installed:
+
+my $server_path = 'https://YOUR_WEBSERVER_HOST/cgi-bin';
+
+# Query string parsing routine dispatch table:
+
+my %parsers = (
+  'service'    => \&parse_service_option,
+  'request'    => \&parse_request_option,
+  'source'     => \&parse_source_option,
+  'var'        => \&parse_var_option,
+  'yyyymmddhh' => \&parse_yyyymmddhh_option
+
+);
+
+# Full URL path to this program:
+
+my @pathed_program_parts = split( /\//, $0 );
+my $program_name = $pathed_program_parts[ @pathed_program_parts - 1 ];
+my $program = "$server_path/$program_name";
+
+    
+################################## VARIABLES #################################
+
+# Parsed from the URL query string:
+
+my $service    = ''; # e.g. cmaqapp
+my $request    = ''; # e.g. download
+my $source     = ''; # e.g. cdc.conus
+my $var        = ''; # e.g. o3
+my $yyyymmddhh = ''; # e.g. 2012083100
+
+################################## ROUTINES ##################################
+
+
+main();
+
+
+sub main {
+  my $result = 0;
+  #print "Access-Control-Allow-Origin: * \n\n";
+  print "Content-type: text/plain; charset=iso-8859-1; \n\n"; # Read by httpd.
+  if ( parse_url() ) {
+
+    if ( $request eq 'download' ) {
+  
+        my $sourcedir = $source;
+	$sourcedir =~ s/\./\//;
+	$sourcedir = uc $sourcedir;
+
+        my $year = substr($yyyymmddhh, 0, 4);
+
+	if ($var eq 'wind') {
+	    my $download_command = "/bin/cat $data_directory/$sourcedir/$year/WIND/json/cmaq_$yyyymmddhh.json";
+            $result = execute_command( $download_command );
+	} elsif ($var eq 'windvector') {
+	    my $download_command = "/bin/cat $data_directory/$sourcedir/$year/WIND/png_webmercator/cmaq_$yyyymmddhh.png";
+            $result = execute_command( $download_command );
+	} elsif ($var eq 'o3') {
+	    my $download_command = "/bin/cat $data_directory/$sourcedir/$year/O3/png_webmercator/cmaq_$yyyymmddhh.png";
+            $result = execute_command( $download_command );
+	} elsif ($var eq 'o3legend') {
+	    my $download_command = "/bin/cat $data_directory/$sourcedir/$year/O3/legend.png";
+            $result = execute_command( $download_command );
+	} elsif ($var eq 'o3_fire') {
+	    my $download_command = "/bin/cat $data_directory/$sourcedir/$year/O3_Fire/png_webmercator/cmaq_$yyyymmddhh.png";
+            $result = execute_command( $download_command );
+	} elsif ($var eq 'o3_firelegend') {
+	    my $download_command = "/bin/cat $data_directory/$sourcedir/$year/O3_Fire/legend.png";
+            $result = execute_command( $download_command );
+	} elsif ($var eq 'pm25') {
+	    my $download_command = "/bin/cat $data_directory/$sourcedir/$year/PM25/png_webmercator/cmaq_$yyyymmddhh.png";
+            $result = execute_command( $download_command );
+	} elsif ($var eq 'pm25legend') {
+	    my $download_command = "/bin/cat $data_directory/$sourcedir/$year/PM25/legend.png";
+            $result = execute_command( $download_command );
+	} elsif ($var eq 'ec') {
+	    my $download_command = "/bin/cat $data_directory/$sourcedir/$year/EC/png_webmercator/cmaq_$yyyymmddhh.png";
+            $result = execute_command( $download_command );
+	} elsif ($var eq 'eclegend') {
+	    my $download_command = "/bin/cat $data_directory/$sourcedir/$year/EC/legend.png";
+            $result = execute_command( $download_command );
+	} elsif ($var eq 'ec_fire') {
+	    my $download_command = "/bin/cat $data_directory/$sourcedir/$year/EC_Fire/png_webmercator/cmaq_$yyyymmddhh.png";
+            $result = execute_command( $download_command );
+	} elsif ($var eq 'ec_firelegend') {
+	    my $download_command = "/bin/cat $data_directory/$sourcedir/$year/EC_Fire/legend.png";
+            $result = execute_command( $download_command );
+	} elsif ($var eq 'co') {
+	    my $download_command = "/bin/cat $data_directory/$sourcedir/$year/CO/png_webmercator/cmaq_$yyyymmddhh.png";
+            $result = execute_command( $download_command );
+	} elsif ($var eq 'colegend') {
+	    my $download_command = "/bin/cat $data_directory/$sourcedir/$year/CO/legend.png";
+            $result = execute_command( $download_command );
+	} elsif ($var eq 'co_fire') {
+	    my $download_command = "/bin/cat $data_directory/$sourcedir/$year/CO_Fire/png_webmercator/cmaq_$yyyymmddhh.png";
+            $result = execute_command( $download_command );
+	} elsif ($var eq 'co_firelegend') {
+	    my $download_command = "/bin/cat $data_directory/$sourcedir/$year/CO_Fire/legend.png";
+            $result = execute_command( $download_command );
+	} elsif ($var eq 'poa') {
+	    my $download_command = "/bin/cat $data_directory/$sourcedir/$year/POA/png_webmercator/cmaq_$yyyymmddhh.png";
+            $result = execute_command( $download_command );
+	} elsif ($var eq 'poalegend') {
+	    my $download_command = "/bin/cat $data_directory/$sourcedir/$year/POA/legend.png";
+            $result = execute_command( $download_command );
+	} elsif ($var eq 'poa_fire') {
+	    my $download_command = "/bin/cat $data_directory/$sourcedir/$year/POA_Fire/png_webmercator/cmaq_$yyyymmddhh.png";
+            $result = execute_command( $download_command );
+	} elsif ($var eq 'poa_firelegend') {
+	    my $download_command = "/bin/cat $data_directory/$sourcedir/$year/POA_Fire/legend.png";
+            $result = execute_command( $download_command );
+	} elsif ($var eq 'so4') {
+	    my $download_command = "/bin/cat $data_directory/$sourcedir/$year/SO4/png_webmercator/cmaq_$yyyymmddhh.png";
+            $result = execute_command( $download_command );
+	} elsif ($var eq 'so4legend') {
+	    my $download_command = "/bin/cat $data_directory/$sourcedir/$year/SO4/legend.png";
+            $result = execute_command( $download_command );
+	} elsif ($var eq 'so4_fire') {
+	    my $download_command = "/bin/cat $data_directory/$sourcedir/$year/SO4_Fire/png_webmercator/cmaq_$yyyymmddhh.png";
+            $result = execute_command( $download_command );
+	} elsif ($var eq 'so4_firelegend') {
+	    my $download_command = "/bin/cat $data_directory/$sourcedir/$year/SO4_Fire/legend.png";
+            $result = execute_command( $download_command );
+	} elsif ($var eq 'dust') {
+	    my $download_command = "/bin/cat $data_directory/$sourcedir/$year/DUST/png_webmercator/cmaq_$yyyymmddhh.png";
+            $result = execute_command( $download_command );
+	} elsif ($var eq 'dustlegend') {
+	    my $download_command = "/bin/cat $data_directory/$sourcedir/$year/DUST/legend.png";
+            $result = execute_command( $download_command );
+	}
+   
+    }
+  }
+
+  $result = 1 - $result; # UNIX: zero is success, non-zero is failure.
+  debug( "exit result = $result" );
+  exit $result;
+}
+
+
+
+# Parse URL parameters into variables.
+
+sub parse_url {
+  use CGI qw/ untaint /;     # Load Safe untainting CGI routines.
+  $CGI::DISABLE_UPLOADS = 1; # Disable uploads.
+  $CGI::POST_MAX = 2048;     # Limit posts to 2048 bytes.
+  my $query = new CGI;       # Parse QUERY_STRING.
+  %ENV = ();                 # Unset all environment variables.
+  my @names = $query->param; # Extract names of parameters.
+  my $count = @names;
+  my $result = 0;
+  debug( "$program_name @names ($count)" );
+
+  for ( my $parameter = 0; $parameter < $count; ++$parameter) {
+      $_ = $names[ $parameter ];                # $_ is tainted.
+      s/[^A-Za-z]/_/go;                      # Untaint $_.
+      my $option = $_;                          # $option is untainted.
+      $_ = $query->param( $option );            # $_ is tainted.
+      #s/[^\(\)\w\.#@,-]/_/go;                         # Untaint $_.
+      s/[^\w\-.,:\/]/_/go;                      # Untaint $_.
+      my $value = $_;                           # $value is untainted.
+      my $lowercase_option = lc( $option );
+      my $lowercase_value  = lc( $value );
+      debug( "$lowercase_option $lowercase_value" );
+      
+      if ( $parsers{ $lowercase_option } ) {
+	  $result = $parsers{ $lowercase_option }->( $lowercase_value );
+      } else {
+	  print STDERR "\nInvalid option: '$option'\n";
+	  $result = 0;
+      }
+      
+      if ( ! $result ) {
+	  $parameter = $count; # Finish looping.
+      }
+  }
+
+  $result = $result && required_options_specified();
+  return $result;
+}
+
+
+
+# Parse service option.
+
+sub parse_service_option {
+  my $value = shift;
+  my $result = parse_option( $service, $value, 'SERVICE', 'cmaqapp' );
+  return $result;
+}
+
+
+
+# Parse request option.
+
+sub parse_request_option {
+  my $value = shift;
+  my $result = parse_option( $request, $value, 'REQUEST', 'download' );
+  return $result;
+}
+
+
+# Parse source option.
+
+sub parse_source_option {
+  my $value = shift;
+  my $result = parse_option( $source, $value, 'SOURCE', 'amad.conus foley isam' );
+  return $result;
+}
+
+
+# Parse var option.
+
+sub parse_var_option {
+  my $value = shift;
+  my $result = parse_option( $var, $value, 'VAR', 'o3 o3_fire o3legend o3_firelegend pm25 pm25legend ec ec_fire eclegend ec_firelegend co co_fire colegend co_firelegend so4 so4_fire so4legend so4_firelegend poa poa_fire poalegend poa_firelegend dust dustlegend wind windvector' );
+  return $result;
+}
+
+
+
+# Parse yyyymmddhh option.
+
+sub parse_yyyymmddhh_option {
+  my $value = shift;
+  my $result = 0;
+  my $length = length( $value );
+
+  if ( $length == 10 ) {
+    my $yyyy = substr( $value, 0, 4 );
+    my $mm   = substr( $value, 4, 2 );
+    my $dd   = substr( $value, 6, 2 );
+    my $hh   = substr( $value, 8, 2 );
+    $result = in_range( $yyyy, 1900, 3000 );
+    $result = $result && in_range( $mm, 1, 12 );
+    $result = $result && in_range( $mm, 1, days_in_month( $yyyy, $mm ) );
+    $result = $result && in_range( $hh, 0, 23 );
+
+    if ( $result ) {
+      $yyyymmddhh = $value;
+    }
+  }
+
+  return $result;
+}
+
+
+
+# Check that all required 'options' have been specified:
+
+sub required_options_specified {
+
+  my $result = 1;
+  if ( $request eq '' ) {
+    print STDERR "\nMissing option: 'REQUEST'\n";
+    $result = 0;
+
+  }
+
+  if ( $source eq '' ) {
+    print STDERR "\nMissing option: 'SOURCE'\n";
+    $result = 0;
+
+  }
+
+  if ( $var eq '' ) {
+    print STDERR "\nMissing option: 'VAR'\n";
+    $result = 0;
+
+  }
+ 
+  if ( $yyyymmddhh eq '' ) { 
+    print STDERR "\nMissing option: 'YYYYMMDDHH'\n";
+    $result = 0;
+
+  }
+
+  return $result;
+}
+
+
+
+############################### HELPER ROUTINES ##############################
+
+
+
+# debug( message );
+
+sub debug {
+  my $message = shift;
+
+  if ( $debugging ) {
+    print STDERR "\n$message\n";
+####print STDOUT "\n$message\n";
+  }
+}
+
+
+
+# Execute command and echo its output to STDOUT. E.g., execute_command( 'ls' );
+
+sub execute_command {
+  my $command = shift;
+  my $result = 0;
+  my $the_pipe = 0;
+
+  # Untaint command (match expression is arbitrary as far as -T is concerned):
+
+  if ( $command =~ m#^(/[\w-]+/[\w -/\.@\#,]+)$# ) {
+    $command = $1; # Re-assign first match, which is enough to satisfy -T.
+    debug( "$0 executing command = $command" );
+    %ENV = (); # Unset all environment variables prior to popen.
+    # Complicated, supposedly safer way to open a readable pipe to command:
+    my $pid = open( the_pipe, "-|" );
+
+    if ( ! defined( $pid ) ) {
+      die "Couldn't open pipe to subprocess";
+    } elsif ( $pid ) { # Parent process.
+
+      while ( <the_pipe> ) {
+        print;
+      }
+
+      close( the_pipe ) or die $!;
+      $result = ! $?;
+    } else { # Child process.
+      exec( $command ) or die "can't exec program: $!";
+    }
+  } else {
+    print STDERR "\n$0: '$command' contains invalid characters.\n";
+  }
+
+  return $result;
+}
+
+
+
+
+sub parse_option {
+  my ( $option, $value, $option_name, $valid_values ) = @_;
+  my $result = 0;
+
+  if ( $option ne '' ) {
+    print STDERR "\nRedundant $option_name option: '$value'\n";
+  } else {
+    $result = index( " $valid_values ", " $value " ) != -1;
+
+    if ( $result ) {
+      $_[ 0 ] = $value;
+    } else {
+      print STDERR "\nInvalid $option_name option: '$value'\n";
+    }
+  }
+
+  return $result;
+}
+
+
+# my $ok = in_range( $value, $minimum, $maximum );
+
+sub in_range {
+  my ( $value, $minimum, $maximum ) = @_;
+  my $result = $value >= $minimum && $value <= $maximum;
+  return $result;
+}
+
+
+# my $leap = is_leap_year( $year );
+
+sub is_leap_year {
+  my $year = shift;
+  my $result = $year % 4 == 0 && ( $year % 100 != 0 || $year % 400 == 0 );
+  return $result;
+}
+
+
+
+# my $days = days_in_month( $year, $month );
+
+sub days_in_month {
+  my $year  = shift;
+  my $month = shift;
+
+  # 30 days hath September, April, June and November...
+
+  my @days_per_month = ( 31, 28, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31 );
+  my $result = $days_per_month[ $month - 1 ];
+
+  if ( $month == 2 ) {
+
+    if ( is_leap_year( $year ) ) {
+      ++$result;
+    }
+  }
+
+  return $result;
+}
+ 
+
+

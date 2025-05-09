@@ -1,0 +1,38 @@
+#!/bin/csh -f
+# reformat - Reformats all *.csv files to a uniform name and line length.
+# Based on Feb 2012 files downloaded from:
+# http://www.epa.gov/esd/land-sci/lcb/lcb_faqsd.html
+# sol1:/work/ROMO/users/rai/SurfFusion/CDC_2012Data/Results/
+
+if ( $#argv == 1 ) then
+  set input_files = "$1"
+else
+  set input_files = "*.csv"
+endif
+
+foreach input_file ( $input_files )
+  set variable = `echo $input_file | awk '{ if ( index( $1, "o3" ) || index( $1, "ozone" ) ) { print "ozone_daily_8hour_maximum" } else { print "pm25_daily_average" } }'`
+  set yyyy = `echo $input_file | awk '{ print substr( $1, index( $1, "20" ), 4 ) }'` 
+  set output_file = `echo $variable $yyyy | awk '{ printf "%04d_%s.txt", $2, $1 }'`
+  echo "Reformatting $input_file to $output_file ..."
+
+  if ( "$variable" == "ozone_daily_8hour_maximum" ) then
+    set units = "ppb"
+  else if ( "$variable" == "pm25_daily_average" ) then
+    set units = "ug/m3"
+  else
+    echo "Unrecognized file variable: $input_file"
+    exit 1
+  endif
+
+  cat $input_file | awk -F, -v variable=$variable -v units=$units '{ if ( NR == 1 ) { printf "Date,FIPS,Longitude,Latitude,%s(%s),%s_stderr(%s)\n", variable, units, variable, units } mmm = substr( $1, 1, 3 ); mm = int( index( "JanFebMarAprMayJunJulAugSepOctNovDec", mmm ) / 3 ) + 1; dd = substr( $1, 5, 2 ); yyyy = substr( $1, 8, 4 ); fips = $2; lat = $3; lon = $4; measure = $5; std = $6; printf "%04d/%02d/%02d,%011s,%010.5f,%09.5f,%09.3f,%010.4f\n", yyyy, mm, dd, fips, lon, lat, measure, std }' | grep -v '^0000/01/00' > $output_file
+
+# New input files are not sorted so we must sort output file!
+
+  head -1 $output_file > h
+  tail +2 $output_file | sort > d
+  cat h d > $output_file
+  \rm h d
+end
+
+

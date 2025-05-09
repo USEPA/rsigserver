@@ -1,0 +1,67 @@
+
+2009-10-26
+plessel.todd@epa.gov 919-541-5500
+
+This directory contains the C source code for the GASPSubset program used
+to subset data files from:
+http://www.ssd.noaa.gov/PS/FIRE/GASP/gasp.html
+
+It uses the ZLIB library:
+../../libs/zlib
+../../../lib/$platform/libz.a
+
+Files:
+------
+
+README       - This file.
+GASPSubset.c - C source file for GASPSubset program (has main())
+makeit       - C Shell script to compile the program.
+runit        - C Shell script to illustrate running the program.
+testit       - C Shell script to test the program.
+testdata/    - Directory containing test data files.
+subset.xdr   - Sample output file of a subset.
+
+
+Compiling:
+----------
+
+Run 'makeit' to compile the program with assertions-checking and debugging (-g).
+Run 'makeit optimized' to create an optimized executable (no assertions, -O).
+After running 'makeit', the executable is in ../../../bin/$platform/GASPSubset
+where $platform is determined by the following C Shell commands:
+
+set uname_ = "`uname`"
+set uname_m = "`uname -m`"
+set platform = "$uname_"
+if ( "$uname_" == "Linux" ) set platform = "$uname_.$uname_m"
+echo "platform is $platform"
+
+
+Running and Program Usage Documentation:
+----------------------------------------
+
+For GASPSubset program usage documentation simply execute 
+../../../bin/$platform/GASPSubset |& more
+to see what command-line options are required/available and
+the format of the resulting output files.
+
+See 'runit' script for examples.
+
+
+Notes:
+------
+
+1. The sample input data file is
+   testdata/2008174231515_i16_US.all.aod.gz
+
+2. Use 'head' to examine the headers of the binary output files:
+
+head -15 subset.xdr
+
+
+Plans for the next release:
+---------------------------
+
+1. TBD.
+
+

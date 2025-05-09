@@ -1,0 +1,47 @@
+#!/bin/sh
+
+clear
+
+echo
+echo "Compiling Utilities..."
+cd Utilities
+gcc -m64 -Wall -D_FILE_OFFSET_BITS=64 -D_LARGEFILE_SOURCE -DNO_ASSERTIONS -DSERIAL_REGRID -O -I. -c Utilities.c BasicNumerics.c DateTime.c Failure.c Memory.c Stream.c Projector.c Lambert.c Stereographic.c Mercator.c VoidList.c Grid.c elevation.c RegridQuadrilaterals.c
+ls -l *.o
+cd ..
+
+echo
+echo "Compiling GASPSubset..."
+gcc -m64 -Wall -D_FILE_OFFSET_BITS=64 -D_LARGEFILE_SOURCE -DNO_ASSERTIONS -O -I./Utilities -I. -o GASPSubset GASPSubset.c -L. Utilities/*.o -lz -lm -lc
+strip GASPSubset
+ls -l GASPSubset
+file  GASPSubset
+ldd   GASPSubset
+
+echo
+echo "Compiling GASPSubset13..."
+gcc -m64 -Wall -DGASP_13 -D_FILE_OFFSET_BITS=64 -D_LARGEFILE_SOURCE -DNO_ASSERTIONS -O -I./Utilities -I. -o GASPSubset13 GASPSubset.c -L. Utilities/*.o -lz -lm -lc
+strip GASPSubset13
+ls -l GASPSubset13
+file  GASPSubset13
+ldd   GASPSubset13
+
+echo
+echo "Compiling GASPSubset13new..."
+gcc -m64 -Wall -DGASP_13NEW -D_FILE_OFFSET_BITS=64 -D_LARGEFILE_SOURCE -DNO_ASSERTIONS -O -I./Utilities -I. -o GASPSubset13new GASPSubset.c -L. Utilities/*.o -lz -lm -lc
+strip GASPSubset13new
+ls -l GASPSubset13new
+file  GASPSubset13new
+ldd   GASPSubset13new
+
+echo
+echo "Compiling GASPSubset15..."
+gcc -m64 -Wall -DGASP_15 -D_FILE_OFFSET_BITS=64 -D_LARGEFILE_SOURCE -DNO_ASSERTIONS -O -I./Utilities -I. -o GASPSubset15 GASPSubset.c -L. Utilities/*.o -lz -lm -lc
+strip GASPSubset15
+ls -l GASPSubset15
+file  GASPSubset15
+ldd   GASPSubset15
+
+
+ls -Fsalt | head
+echo Done
+

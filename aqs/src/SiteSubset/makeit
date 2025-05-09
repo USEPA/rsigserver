@@ -1,0 +1,14 @@
+#!/bin/sh
+
+clear
+
+echo "Compiling SiteSubset"
+gcc -m64 -Wall -D_FILE_OFFSET_BITS=64 -D_LARGEFILE_SOURCE -DNO_ASSERTIONS -O -I. -o SiteSubset SiteSubset.c -L. -lm -lc
+strip SiteSubset
+ls -l SiteSubset
+file  SiteSubset
+ldd   SiteSubset
+
+ls -Fsalt | head
+echo Done
+

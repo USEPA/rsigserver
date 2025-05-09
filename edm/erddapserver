@@ -1,0 +1,3773 @@
+#!/usr/bin/perl -wT
+
+##############################################################################
+# PURPOSE: erddapserver - Serve a NOAA ERDDAP water data, subsetted by
+#          longitude-latitude box, in binary or ASCII format for use by
+#          EstuaryDataMapper (via wget).
+#
+# NOTES:   Server is WCS-compliant:
+#          https://www.opengeospatial.org/standards/wcs
+#          https://datafed.net/xs/OpenGIS/wcs/1.0.0/
+#          and modeled after a similar webserver application:
+#          https://webapps.datafed.net/ogc_EPA.wsfl
+#
+#          Connects to a subset of external web services listed here:
+#          https://coastwatch.pfeg.noaa.gov/erddap/info/index.html
+#
+#          Example usage:
+#
+#          wget -q -T 0 -O - 'https://ofmpub.epa.gov/rsig/erddapserver?\
+#                     SERVICE=wcs&\
+#                     VERSION=1.0.0&\
+#                     REQUEST=GetCoverage&\
+#                     COVERAGE=modis.chlorophyll&\
+#                     TIME=2006-07-18T00:00:00Z/2006-07-18T23:59:59Z&\
+#                     BBOX=-80,30,-60,50&\
+#                     FORMAT=bin'
+#
+# HISTORY: 2012/08/22, plessel.todd@epa.gov, 1-919-541-5500
+#
+# STATUS:  unreviewed, tested.
+##############################################################################
+
+
+use strict;
+package main;
+$| = 1; # Turn off output buffering so messages appear in correct order.
+alarm( 3600 ); # Kill process after 1 hour. Legitimate usage could be an hour!
+# Restrict PATH and ENV.
+delete @ENV{ 'PATH', 'IFS', 'CDPATH', 'ENV', 'BASH_ENV' };
+
+
+############################## TUNABLE CONSTANTS #############################
+
+
+my $debugging = 0; # 1 = print debug messages to STDERR logs/error_log.
+
+my $bindir = '/rsig/current/code/bin/Linux.x86_64';
+#my $wget_command = "$bindir/wget -q -t 1 -T 0 -O - ";
+my $wget_command = '/usr/bin/curl -k -g --silent --max-time 3600 --retry 0 -L --max-redirs 10 --tcp-nodelay ';
+
+my $dods2bin = "$bindir/dods2bin";
+
+# Server where this program is installed:
+
+my $server_path = 'https://YOUR_WEBSERVER_HOST/cgi-bin';
+
+# Query string parsing routine dispatch table:
+
+my %parsers = (
+  'service'  => \&parse_service_option,
+  'version'  => \&parse_version_option,
+  'request'  => \&parse_request_option,
+  'coverage' => \&parse_coverage_option,
+  'time'     => \&parse_time_option,
+  'bbox'     => \&parse_bbox_option,
+  'format'   => \&parse_format_option
+);
+
+# Webserver content types for each output format:
+
+my %content_types = (
+  'ascii' => 'text/plain',
+  'bin'   => 'application/octet-stream'
+);
+
+# Full URL path to this program:
+
+my @pathed_program_parts = split( /\//, $0 );
+my $program_name = $pathed_program_parts[ @pathed_program_parts - 1 ];
+my $program = "$server_path/$program_name";
+
+# Metadata:
+# name         - The COVERAGE= name used by this script.
+# units        - Units for the parameter, e.g., mg/m3.
+# min          - Minimum valid value.
+# max          - Maximum valid value.
+# previous_day - 1 to query previous day, else 0 for current day.
+# start_date   - Earliest date of available data.
+# end_date     - Latest date of available data.
+# description  - Parameter description.
+# query        - template for remote query.
+# negative_lon - 1 if query longitude range is [-180, 180], 0 if [0, 360].
+# swap_rows    - 1 if query latitude  range is [MAX_LAT, MIN_LAT], else 0.
+# format       - Format of data returned by the remote web service: grid or csv
+# header_lines - Number of result header lines to skip.
+# fields       - Number of result data fields separated by commas.
+# timestamp    - 0-based index of timestamp in result line.
+# longitude    - 0-based index of longitude in result line.
+# latitude     - 0-based index of latitude  in result line.
+# depth        - 0-based index of depth     in result line or -1 if none/ignore
+# id           - 0-based index of site-id   in result line or -1 if none/ignore
+# sid          - 0-based index of site-name in result line or -1 if none/ignore
+# value        - 0-based index of measure   in result line.
+# For a list of all potentially available servers/datasets:
+# https://coastwatch.pfeg.noaa.gov/erddap/info/index.html?page=1&itemsPerPage=5000
+
+my @metadata = (
+
+  # Gridded:
+
+  # MODIS 12-line DODS header looks like this:
+  # Dataset {
+  #  GRID {
+  #    ARRAY:
+  #      Float32 chlorophyll[time = 1][altitude = 1][latitude = 241][longitude = 241];
+  #    MAPS:
+  #      Float64 time[time = 1];
+  #      Float64 altitude[altitude = 1];
+  #      Float64 latitude[latitude = 241];
+  #      Float64 longitude[longitude = 241];
+  #  } chlorophyll;
+  #} erdMHchla1day;
+  #
+  {
+    'name' => 'modis.daytime_sea_surface_temperature',
+    'units' => 'C',
+    'min' => 0.0,
+    'max' => 50.0,
+    'start_date' => '2019-11-01',
+    'end_date'   => '',
+    'description' =>
+      'MODIS Aqua satellite-measured daytime daily composite ' .
+      'sea surface temperature.',
+    'query' => 'https://coastwatch.pfeg.noaa.gov/erddap/' .
+    # NRTMasked stopped returning data on 2024-05-14T15 EDT
+                   'griddap/erdMH1sstd1day_R2022NRTMasked.dods?' .
+                   'sstMasked' .
+    # Try this alternative SQMasked:
+    #           'griddap/erdMH1sstdmday_R2022SQMasked.dods?' .
+    #           'sstMask' .
+               '[(YYYY1-MM1-DD1T00:00:00Z):1:(YYYY2-MM2-DD2T23:59:59Z)]' .
+               '[(MIN_LAT):1:(MAX_LAT)]' .
+               '[(MIN_LON):1:(MAX_LON)]',
+    'negative_lon' => 1,
+    'swap_rows'    => 1,
+    'format'       => 'dods'
+  },
+  {
+    'name' => 'modis.attenuation_coefficient',
+    'units' => '/m', # range: [0, 5].
+    'min' => 0.0,
+    'max' => 10.0,
+    'start_date' => '2022-03-01',
+    'end_date'   => '',
+    'description' =>
+      'MODIS Aqua satellite-measured daily composite ' .
+      'diffuse attenuation coefficient K measured at 490nm wavelength.',
+    'query' => 'https://coastwatch.pfeg.noaa.gov/erddap/' .
+               #'griddap/erdMEk4901day.dods?' .
+               #'k490' .
+               'griddap/erdMH1kd4901day_R2022NRT.dods?' .
+               'Kd_490' .
+               '[(YYYY1-MM1-DD1T12:00:00Z):1:(YYYY2-MM2-DD2T12:00:00Z)]' .
+               #'[(0.0):1:(0.0)]' .
+               '[(MIN_LAT):1:(MAX_LAT)]' .
+               '[(MIN_LON):1:(MAX_LON)]',
+    'negative_lon' => 1,
+    'swap_rows'    => 1,
+    'format'       => 'dods'
+  },
+# FIX: No Atlantic dataset is available. erdMEcflh1day not listed on 2023-02-12.
+  {
+    'name' => 'modis.atlantic.fluorescence',
+    'units' => 'uW/cm2/s2/nm/sr',
+    'min' => 0.0,
+    'max' => 1.0,
+    'start_date' => '2002-07-04',
+    'end_date'   => '2012-07-03',
+    'description' =>
+      'MODIS Aqua satellite-measured daily composite fluorescence.',
+    'query' => 'https://coastwatch.pfeg.noaa.gov/erddap/' .
+               'griddap/erdMEcflh1day.dods?' .
+               'fluorescence' .
+               '[(YYYY1-MM1-DD1T12:00:00Z):1:(YYYY2-MM2-DD2T12:00:00Z)]' .
+               '[(0.0):1:(0.0)]' .
+               '[(MIN_LAT):1:(MAX_LAT)]' .
+               '[(MIN_LON):1:(MAX_LON)]',
+    'negative_lon' => 1,
+    'swap_rows'    => 0,
+    'format'       => 'dods'
+  },
+# FIX: No Gulf dataset is available. erdMGcflh1day not listed on 2023-02-12.
+  {
+    'name' => 'modis.gulf.fluorescence',
+    'units' => 'uW/cm2/s2/nm/sr',
+    'min' => 0.0,
+    'max' => 1.0,
+    'start_date' => '2002-07-04',
+    'end_date'   => '2012-06-13',
+    'description' =>
+      'MODIS Aqua satellite-measured daily composite fluorescence.',
+    'query' => 'https://coastwatch.pfeg.noaa.gov/erddap/' .
+               'griddap/erdMGcflh1day.dods?' .
+               'fluorescence' .
+               '[(YYYY1-MM1-DD1T12:00:00Z):1:(YYYY2-MM2-DD2T12:00:00Z)]' .
+               '[(0.0):1:(0.0)]' .
+               '[(MIN_LAT):1:(MAX_LAT)]' .
+               '[(MIN_LON):1:(MAX_LON)]',
+    'negative_lon' => 1,
+    'swap_rows'    => 0,
+    'format'       => 'dods'
+  },
+  {
+    'name' => 'modis.pacific.fluorescence',
+    'units' => 'uW/cm2/s2/nm/sr',
+    'min' => 0.0,
+    'max' => 1.0,
+    'start_date' => '2002-07-04',
+    'end_date'   => '2023-07-25',
+    'description' =>
+      'MODIS Aqua satellite-measured daily composite fluorescence.',
+    'query' => 'https://coastwatch.pfeg.noaa.gov/erddap/' .
+               'griddap/erdMWcflh1day.dods?' .
+               'fluorescence' .
+               '[(YYYY1-MM1-DD1T12:00:00Z):1:(YYYY2-MM2-DD2T12:00:00Z)]' .
+               '[(0.0):1:(0.0)]' .
+               '[(MIN_LAT):1:(MAX_LAT)]' .
+               '[(MIN_LON):1:(MAX_LON)]',
+    'negative_lon' => 0,
+    'swap_rows'    => 0,
+    'format'       => 'dods'
+  },
+  {
+    'name' => 'modis.chlorophyll',
+    'units' => 'mg/m3',
+    'min' => 0.0,
+    'max' => 1000.0,
+    'start_date' => '2002-07-04',
+    'end_date'   => '2023-09-29',
+    'description' =>
+      'MODIS Aqua satellite-measured daily composite chlorophyll-a.',
+    'query' => 'https://coastwatch.pfeg.noaa.gov/erddap/' .
+               'griddap/erdMH1chla1day_R2022SQ.dods?' .
+               'chlor_a' .
+               '[(YYYY1-MM1-DD1T12:00:00Z):1:(YYYY2-MM2-DD2T12:00:00Z)]' .
+               '[(MIN_LAT):1:(MAX_LAT)]' .
+               '[(MIN_LON):1:(MAX_LON)]',
+    'negative_lon' => 1,
+    'swap_rows'    => 1,
+    'format'       => 'dods'
+  },
+# FIX: This is only for West domain. No Atlantic or Gulf versions.
+  {
+    'name' => 'modis.cdom',
+    'units' => '/m', # Light absorbtion coefficient range: [0, 5].
+    'min' => 0.0,
+    'max' => 100.0,
+    'start_date' => '2012-03-11',
+    'end_date'   => '2016-07-18',
+    'description' =>
+      'MODIS Aqua satellite-measured daily composite ' .
+      'chromophoric dissolved organic material.',
+    'query' => 'https://coastwatch.pfeg.noaa.gov/erddap/' .
+               #'griddap/erdMEcdommday_Lon0360.dods?' .
+               'griddap/erdMWcdom1day.dods?' .
+               'cdom' .
+               '[(YYYY1-MM1-DD1T12:00:00Z):1:(YYYY2-MM2-DD2T12:00:00Z)]' .
+               '[(0.0):1:(0.0)]' .
+               '[(MIN_LAT):1:(MAX_LAT)]' .
+               '[(MIN_LON):1:(MAX_LON)]',
+    'negative_lon' => 0,
+    'swap_rows'    => 0,
+    'format'       => 'dods'
+  },
+
+  # SeaWiFS 12-line DODS header looks like this:
+  # Dataset {
+  #  GRID {
+  #    ARRAY:
+  #      Float32 chlorophyll[time = 1][altitude = 1][latitude = 241][longitude = 241];
+  #    MAPS:
+  #      Float64 time[time = 1];
+  #      Float64 altitude[altitude = 1];
+  #      Float64 latitude[latitude = 241];
+  #      Float64 longitude[longitude = 241];
+  #  } chlorophyll;
+  #} erdSWchla1day;
+  #
+  # erdSW1chla1day deprecated and superceded by erdSW2018chla1day.
+  {
+    'name' => 'seawifs.chlorophyll',
+    'units' => 'mg/m3',
+    'min' => 0.0,
+    'max' => 1000.0,
+    'start_date' => '1997-01-11',
+    'end_date'   => '2010-12-31',
+    'description' =>
+      'SeaWiFS Orbview-2 satellite-measured daily composite chlorophyll-a.',
+    'query' => 'https://coastwatch.pfeg.noaa.gov/erddap/' .
+               'griddap/erdSW2018chla1day.dods?' .
+               'chlorophyll' .
+               '[(YYYY1-MM1-DD1T12:00:00Z):1:(YYYY2-MM2-DD2T12:00:00Z)]' .
+               '[(MAX_LAT):1:(MIN_LAT)]' .
+               '[(MIN_LON):1:(MAX_LON)]',
+    'negative_lon' => 1,
+    'swap_rows'    => 1,
+    'format'       => 'dods'
+  },
+
+  # VIIRS Pacific 750m 13-line DODS header looks like this:
+  # Dataset {
+  #   GRID {
+  #     ARRAY:
+  #       Float32 chla[time = 1][altitude = 1][latitude = 11985][longitude = 9338];
+  #     MAPS:
+  #       Float64 time[time = 1];
+  #       Float64 altitude[altitude = 1];
+  #       Float64 latitude[latitude = 11985];
+  #       Float64 longitude[longitude = 9338];
+  #   } chla;
+  # } erdVHNchla1day;
+  #
+  # Data:
+  #
+  {
+    'name' => 'viirs.pacific.chlorophyll',
+    'units' => 'mg/m3',
+    'min' => 0.0,
+    'max' => 1000.0,
+    'start_date' => '2015-02-25',
+    'end_date'   => '2016-12-31',
+    'description' =>
+      'VIIRS North Pacific 750m satellite-measured daily composite chlorophyll-a.',
+    'query' => 'https://coastwatch.pfeg.noaa.gov/erddap/' .
+               'griddap/erdVHNchla1day.dods?' .
+               'chla' .
+               '[(YYYY1-MM1-DD1T12:00:00Z):1:(YYYY2-MM2-DD2T12:00:00Z)]' .
+               '[(0.0):1:(0.0)]' .
+               '[(MAX_LAT):1:(MIN_LAT)]' .
+               '[(MIN_LON):1:(MAX_LON)]',
+    'negative_lon' => 1,
+    'swap_rows'    => 1,
+    'format'       => 'dods'
+  },
+
+
+  # VIIRS Pacific Chlorophyll Bloom 13-line 750m DODS header looks like this:
+  # Dataset {
+  #   GRID {
+  #     ARRAY:
+  #       Float32 prc_chla[time = 1][altitude = 1][latitude = 1998][longitude = 1443];
+  #     MAPS:
+  #       Float64 time[time = 1];
+  #       Float64 altitude[altitude = 1];
+  #       Float64 latitude[latitude = 1998];
+  #       Float64 longitude[longitude = 1443];
+  #   } prc_chla;
+  # } osuBloomsViirsChla;
+  #
+  # Data:
+  #
+  {
+    'name' => 'viirs.pacific.chlorophyll_bloom',
+    'units' => 'mg/m3',
+    'min' => 0.0,
+    'max' => 1000.0,
+    'start_date' => '2015-02-25',
+   'end_date'   => '',
+    'description' =>
+      'VIIRS North Pacific Bloom satellite-measured daily composite chlorophyll-a bloom.',
+    'query' => 'https://coastwatch.pfeg.noaa.gov/erddap/' .
+                #'griddap/osuBloomsViirsChla.dods?' .
+                #'prc_chla' .
+               'griddap/erdVHNchla1day.dods?' .
+               'chla' .
+               '[(YYYY1-MM1-DD1T12:00:00Z):1:(YYYY2-MM2-DD2T12:00:00Z)]' .
+               '[(0.0):1:(0.0)]' .
+               '[(MIN_LAT):1:(MAX_LAT)]' .
+               '[(MIN_LON):1:(MAX_LON)]',
+    'negative_lon' => 1,
+    'swap_rows'    => 1,
+    #'previous_day' => 1,
+    'format'       => 'dods'
+  },
+
+
+  # VIIRS 4km Chlorophyll 12-line DODS header looks like this:
+  # Dataset {
+  #   GRID {
+  #     ARRAY:
+  #       Float32 chla[time = 1][latitude = 4320][longitude = 8640];
+  #     MAPS:
+  #       Float64 time[time = 1];
+  #       Float32 latitude[latitude = 4320];
+  #       Float32 longitude[longitude = 8640];
+  #   } chla;
+  # } erdVH2chla1day;
+  # 
+  # Data:
+  #
+  # erdVH2chla1day deprecated and superceded by erdVH2018chla1day.
+  {
+    'name' => 'viirs.chlorophyll',
+    'units' => 'mg/m3',
+    'min' => 0.0,
+    'max' => 1000.0,
+    'start_date' => '2012-01-02',
+    'end_date'   => '2022-07-26',
+    'description' =>
+      'VIIRS 4km satellite-measured daily composite chlorophyll-a.',
+    'query' => 'https://coastwatch.pfeg.noaa.gov/erddap/' .
+               'griddap/erdVH2018chla1day.dods?' .
+               'chla' .
+               '[(YYYY1-MM1-DD1T12:00:00Z):1:(YYYY2-MM2-DD2T12:00:00Z)]' .
+               '[(MAX_LAT):1:(MIN_LAT)]' .
+               '[(MIN_LON):1:(MAX_LON)]',
+    'negative_lon' => 1,
+    'swap_rows'    => 1,
+    'format'       => 'dods'
+  },
+
+
+  # VIIRS 4km K490 12-line DODS header looks like this:
+  # Dataset {
+  #   GRID {
+  #     ARRAY:
+  #       Float32 k490[time = 1][latitude = 4320][longitude = 8640];
+  #     MAPS:
+  #       Float64 time[time = 1];
+  #       Float32 latitude[latitude = 4320];
+  #       Float32 longitude[longitude = 8640];
+  #   } k490;
+  # } erdVH2k4901day;
+  # 
+  # Data:
+  #
+  {
+    'name' => 'viirs.k490',
+    'units' => '/m',
+    'min' => 0.0,
+    'max' => 0.5,
+    'start_date' => '2012-01-02',
+    'end_date'   => '2022-07-26',
+    'description' =>
+      'VIIRS 4km satellite-measured daily composite ' .
+      'diffuse attenuation coefficient in downwelling radiative flux ' .
+      'in sea water.',
+    'query' => 'https://coastwatch.pfeg.noaa.gov/erddap/' .
+               'griddap/erdVH2018k4901day.dods?' .
+               'k490' .
+               '[(YYYY1-MM1-DD1T12:00:00Z):1:(YYYY2-MM2-DD2T12:00:00Z)]' .
+               '[(MAX_LAT):1:(MIN_LAT)]' .
+               '[(MIN_LON):1:(MAX_LON)]',
+    'negative_lon' => 1,
+    'swap_rows'    => 1,
+    'format'       => 'dods'
+  },
+
+
+  # VIIRS 4km PAR 12-line DODS header looks like this:
+  # Dataset {
+  #   GRID {
+  #     ARRAY:
+  #       Float32 par[time = 1][latitude = 4320][longitude = 8640];
+  #     MAPS:
+  #       Float64 time[time = 1];
+  #       Float32 latitude[latitude = 4320];
+  #       Float32 longitude[longitude = 8640];
+  #   } par;
+  # } erdVH2par1day;
+  # 
+  # Data:
+  #
+  # erdVH2par1day deprecated and superceded by erdVH2018par1day.
+  {
+    'name' => 'viirs.par',
+    'units' => 'Einsteins/m2/dy',
+    'min' => 0.0,
+    'max' => 70.0,
+    'start_date' => '2012-01-02',
+    'end_date'   => '2022-07-26',
+    'description' =>
+      'VIIRS 4km satellite-measured daily composite ' .
+      'downwelling photosynthetic photon radiance in sea water.',
+    'query' => 'https://coastwatch.pfeg.noaa.gov/erddap/' .
+               'griddap/erdVH2018par1day.dods?' .
+               'par' .
+               '[(YYYY1-MM1-DD1T12:00:00Z):1:(YYYY2-MM2-DD2T12:00:00Z)]' .
+               '[(MAX_LAT):1:(MIN_LAT)]' .
+               '[(MIN_LON):1:(MAX_LON)]',
+    'negative_lon' => 1,
+    'swap_rows'    => 1,
+    'format'       => 'dods'
+  },
+
+
+  # VIIRS 4km PIC 12-line DODS header looks like this:
+  # Dataset {
+  #   GRID {
+  #     ARRAY:
+  #       Float32 pic[time = 1][latitude = 4320][longitude = 8640];
+  #     MAPS:
+  #       Float64 time[time = 1];
+  #       Float32 latitude[latitude = 4320];
+  #       Float32 longitude[longitude = 8640];
+  #   } pic;
+  # } erdVH2pic1day;
+  # 
+  # Data:
+  #
+  # erdVH2pic1day deprecated and superceded by erdVH2018pic1day.
+  {
+    'name' => 'viirs.pic',
+    'units' => 'mol/m3',
+    'min' => 0.0,
+    'max' => 0.001,
+    'start_date' => '2012-01-02',
+    'end_date'   => '2022-07-26',
+    'description' =>
+      'VIIRS 4km satellite-measured daily composite ' .
+      'particulate inorganic carbon.',
+    'query' => 'https://coastwatch.pfeg.noaa.gov/erddap/' .
+               'griddap/erdVH2018pic1day.dods?' .
+               'pic' .
+               '[(YYYY1-MM1-DD1T12:00:00Z):1:(YYYY2-MM2-DD2T12:00:00Z)]' .
+               '[(MAX_LAT):1:(MIN_LAT)]' .
+               '[(MIN_LON):1:(MAX_LON)]',
+    'negative_lon' => 1,
+    'swap_rows'    => 1,
+    'format'       => 'dods'
+  },
+
+
+  # VIIRS 4km POC 12-line DODS header looks like this:
+  # Dataset {
+  #   GRID {
+  #     ARRAY:
+  #       Float32 poc[time = 1][latitude = 4320][longitude = 8640];
+  #     MAPS:
+  #       Float64 time[time = 1];
+  #       Float32 latitude[latitude = 4320];
+  #       Float32 longitude[longitude = 8640];
+  #   } poc;
+  # } erdVH2poc1day;
+  # 
+  # Data:
+  #
+  # erdVH2poc1day deprecated and superceded by erdVH2018poc1day.
+  {
+    'name' => 'viirs.poc',
+    'units' => 'mg/m3',
+    'min' => 0.0,
+    'max' => 100.0,
+    'start_date' => '2012-01-02',
+    'end_date'   => '2022-07-26',
+    'description' =>
+      'VIIRS 4km satellite-measured daily composite ' .
+      'particulate organic carbon.',
+    'query' => 'https://coastwatch.pfeg.noaa.gov/erddap/' .
+               'griddap/erdVH2018poc1day.dods?' .
+               'poc' .
+               '[(YYYY1-MM1-DD1T12:00:00Z):1:(YYYY2-MM2-DD2T12:00:00Z)]' .
+               '[(MAX_LAT):1:(MIN_LAT)]' .
+               '[(MIN_LON):1:(MAX_LON)]',
+    'negative_lon' => 1,
+    'swap_rows'    => 1,
+    'format'       => 'dods'
+  },
+
+
+  # VIIRS 4km reflectance 12-line DODS header looks like this:
+  # Dataset {
+  #   GRID {
+  #     ARRAY:
+  #       Float32 r671[time = 1][latitude = 4320][longitude = 8640];
+  #     MAPS:
+  #       Float64 time[time = 1];
+  #       Float32 latitude[latitude = 4320];
+  #       Float32 longitude[longitude = 8640];
+  #   } r671;
+  # } erdVH2r6711day;
+  # 
+  # Data:
+  #
+  # erdVH2r6711day deprecated and superceded by erdVH2018r6711day.
+  {
+    'name' => 'viirs.reflectance',
+    'units' => '/sr',
+    'min' => 0.0,
+    'max' => 0.004,
+    'start_date' => '2012-01-02',
+    'end_date'   => '2022-07-26',
+    'description' =>
+      'VIIRS 4km satellite-measured daily composite ' .
+      'surface ratio of upwelling radiance emerging from sea water to ' .
+      'downwelling radiative flux in air at 671nm wavelength.',
+    'query' => 'https://coastwatch.pfeg.noaa.gov/erddap/' .
+               'griddap/erdVH2018r6711day.dods?' .
+               'r671' .
+               '[(YYYY1-MM1-DD1T12:00:00Z):1:(YYYY2-MM2-DD2T12:00:00Z)]' .
+               '[(MAX_LAT):1:(MIN_LAT)]' .
+               '[(MIN_LON):1:(MAX_LON)]',
+    'negative_lon' => 1,
+    'swap_rows'    => 1,
+    'format'       => 'dods'
+  },
+
+  # https://erddap.com/#search=WOA
+  # WOA 12-line DODS header looks like this:
+  #Dataset {
+  #  GRID {
+  #    ARRAY:
+  #      Float32 temperature_an[time = 2][depth = 14][latitude = 2][longitude = 2];
+  #    MAPS:
+  #      Float64 time[time = 2];
+  #      Float32 depth[depth = 14];
+  #      Float32 latitude[latitude = 2];
+  #      Float32 longitude[longitude = 2];
+  #  } temperature_an;
+  #} nodcWoa09mon1t;
+  #
+##{
+##  # DEPTH [0, 500]:
+##  # 0, 10, 20, 30, 50, 75, 100, 125, 150, 200, 250, 300, 400, 500
+##  # nodata_value 9.96921E36
+##  'name' => 'woa.monthly_water_temperature',
+##  'units' => 'C',
+##  'min' => 0.0,
+##  'max' => 50.0,
+##  'description' =>
+##    'World Ocean Atlas 1-degree monthly interpolated mean ' .
+##    'water temperature at depth down to 500m.',
+##  'query' => 'https://coastwatch.pfeg.noaa.gov/erddap/' .
+##             'griddap/nodcWoa09mon1t.dods?' .
+##             'temperature_an' .
+##             '[(0000-MM1-16T00:00:00Z):1:(0000-MM2-16T00:00:00Z)]' .
+##             '[(DEPTH):1:(DEPTH)]' .
+##             '[(MIN_LAT):1:(MAX_LAT)]' .
+##             '[(MIN_LON):1:(MAX_LON)]',
+##  'negative_lon' => 0,
+##  'swap_rows'    => 0,
+##  'format'       => 'dods'
+##},
+  {
+    # DEPTH [0, 500]:
+    # 0, 10, 20, 30, 50, 75, 100, 125, 150, 200, 250, 300, 400, 500
+    # nodata_value 9.96921E36
+    'name' => 'woa.monthly_water_temperature',
+    'units' => 'C',
+    'min' => 0.0,
+    'max' => 50.0,
+    'description' =>
+      'World Ocean Atlas 1-degree monthly interpolated mean ' .
+      'water temperature at depth down to 500m.',
+    'query' =>
+      #'https://cwcgom.aoml.noaa.gov/erddap/griddap/' .
+      #'WOA_TEMP_d48d_916b_3478.dods?t_an' .
+      #'[(1988-MM1-16T00:00:00Z):1:(1988-MM2-16T00:00:00Z)]' .
+     'https://apdrc.soest.hawaii.edu/erddap/griddap/' .
+     'hawaii_soest_b106_a44d_253d.dods?tmn' .
+     's_an' .
+     '[(0000-MM1-15T00:00:00Z):1:(0000-MM2-15T00:00:00Z)]' .
+     '[(DEPTH):1:(DEPTH)]' .
+     '[(MIN_LAT):1:(MAX_LAT)]' .
+     '[(MIN_LON):1:(MAX_LON)]',
+    'negative_lon' => 1,
+    'swap_rows'    => 0,
+    'format'       => 'dods'
+  },
+  {
+    # DEPTH [0, 500], nodata_value 9.96921E36
+    'name' => 'woa.monthly_salinity',
+    'units' => 'PSU',
+    'min' => 0.0,
+    'max' => 50.0,
+    'description' =>
+      'World Ocean Atlas 1-degree monthly interpolated mean ' .
+      'salinity at depth down to 500m.',
+    'query' =>
+      #'https://cwcgom.aoml.noaa.gov/erddap/griddap/' .
+      #'WOA_SAL_873e_726a_1b4d.dods?s_an' .
+      #'[(1988-MM1-16T00:00:00Z):1:(1988-MM2-16T00:00:00Z)]' .
+      'https://apdrc.soest.hawaii.edu/erddap/griddap/' .
+      'hawaii_soest_2044_b857_d5cd.dods?smn' .
+      '[(0000-MM1-15T00:00:00Z):1:(0000-MM2-15T00:00:00Z)]' .
+      '[(DEPTH):1:(DEPTH)]' .
+      '[(MIN_LAT):1:(MAX_LAT)]' .
+      '[(MIN_LON):1:(MAX_LON)]',
+    'negative_lon' => 1,
+    'swap_rows'    => 0,
+    'format'       => 'dods'
+  },
+  {
+    # DEPTH [0, 500], nodata_value 9.96921E36
+    'name' => 'woa.monthly_oxygen_saturation',
+    'units' => '%',
+    'min' => 0.0,
+    'max' => 200.0,
+    'description' =>
+      'World Ocean Atlas 1-degree monthly interpolated mean ' .
+      'oxygen saturation at depth down to 500m.',
+    'query' =>
+       #'https://coastwatch.pfeg.noaa.gov/erddap/' .
+       #'griddap/nodcWoa09mon1t.dods?oxygenSat_an' .
+       'https://apdrc.soest.hawaii.edu/erddap/griddap/' .
+       'hawaii_soest_36d7_70ba_cd73.dods?xmn' .
+       '[(0000-MM1-15T00:00:00Z):1:(0000-MM2-15T00:00:00Z)]' .
+       '[(DEPTH):1:(DEPTH)]' .
+       '[(MIN_LAT):1:(MAX_LAT)]' .
+       '[(MIN_LON):1:(MAX_LON)]',
+    'negative_lon' => 1,
+    'swap_rows'    => 0,
+    'format'       => 'dods'
+  },
+  {
+    # DEPTH [0, 500], nodata_value 9.96921E36
+    'name' => 'woa.monthly_dissolved_oxygen',
+    'units' => 'ml/l',
+    'min' => 0.0,
+    'max' => 1000.0,
+    'description' =>
+      'World Ocean Atlas 1-degree monthly interpolated mean ' .
+      'dissolved oxygen at depth down to 500m.',
+    'query' =>
+      #'https://coastwatch.pfeg.noaa.gov/erddap/' .
+      #'griddap/nodcWoa09mon1t.dods?disOxygen_an' .
+      'https://apdrc.soest.hawaii.edu/erddap/griddap/' .
+      'hawaii_soest_4455_15d9_7793.dods?omn' .
+      '[(0000-MM1-15T00:00:00Z):1:(0000-MM2-15T00:00:00Z)]' .
+      '[(DEPTH):1:(DEPTH)]' .
+      '[(MIN_LAT):1:(MAX_LAT)]' .
+      '[(MIN_LON):1:(MAX_LON)]',
+    'negative_lon' => 1,
+    'swap_rows'    => 0,
+    'format'       => 'dods'
+  },
+  {
+    # DEPTH [0, 500], nodata_value 9.96921E36
+    'name' => 'woa.monthly_oxygen_utilization',
+    'units' => 'ml/l',
+    'min' => -2.0,
+    'max' => 6.0,
+    'description' =>
+      'World Ocean Atlas 1-degree monthly interpolated mean ' .
+      'apparent oxygen utilization at depth down to 500m.',
+    'query' =>
+      #'https://coastwatch.pfeg.noaa.gov/erddap/' .
+      #'griddap/nodcWoa09mon1t.dods?AOU_an' .
+      'https://apdrc.soest.hawaii.edu/erddap/griddap/' .
+      'hawaii_soest_4b75_07cd_7a2e.dods?amn' .
+      '[(0000-MM1-15T00:00:00Z):1:(0000-MM2-15T00:00:00Z)]' .
+      '[(DEPTH):1:(DEPTH)]' .
+      '[(MIN_LAT):1:(MAX_LAT)]' .
+      '[(MIN_LON):1:(MAX_LON)]',
+    'negative_lon' => 1,
+    'swap_rows'    => 0,
+    'format'       => 'dods'
+  },
+  {
+    # DEPTH [0, 500], nodata_value 9.96921E36
+    'name' => 'woa.monthly_nitrate',
+    'units' => 'umol/l',
+    'min' => 0.0,
+    'max' => 1000.0,
+    'description' =>
+      'World Ocean Atlas 1-degree monthly interpolated mean ' .
+      'nitrate at depth down to 500m.',
+    'query' =>
+      #'https://coastwatch.pfeg.noaa.gov/erddap/' .
+      #'griddap/nodcWoa09mon1n.dods?nitrate_an' .
+      'https://apdrc.soest.hawaii.edu/erddap/griddap/' .
+      'hawaii_soest_c078_8362_ac30.dods?nmn' .
+      '[(0000-MM1-15T00:00:00Z):1:(0000-MM2-15T00:00:00Z)]' .
+      '[(DEPTH):1:(DEPTH)]' .
+      '[(MIN_LAT):1:(MAX_LAT)]' .
+      '[(MIN_LON):1:(MAX_LON)]',
+    'negative_lon' => 1,
+    'swap_rows'    => 0,
+    'format'       => 'dods'
+  },
+  {
+    # DEPTH [0, 500], nodata_value 9.96921E36
+    'name' => 'woa.monthly_phosphate',
+    'units' => 'umol/l',
+    'min' => 0.0,
+    'max' => 1000.0,
+    'description' =>
+      'World Ocean Atlas 1-degree monthly interpolated mean ' .
+      'phosphate at depth down to 500m.',
+    'query' =>
+      #'https://coastwatch.pfeg.noaa.gov/erddap/' .
+      #'griddap/nodcWoa09mon1n.dods?phosphate_an' .
+      'https://apdrc.soest.hawaii.edu/erddap/griddap/' .
+      'hawaii_soest_92c6_120b_eee0.dods?pmn' .
+      '[(0000-MM1-15T00:00:00Z):1:(0000-MM2-15T00:00:00Z)]' .
+      '[(DEPTH):1:(DEPTH)]' .
+      '[(MIN_LAT):1:(MAX_LAT)]' .
+      '[(MIN_LON):1:(MAX_LON)]',
+    'negative_lon' => 1,
+    'swap_rows'    => 0,
+    'format'       => 'dods'
+  },
+  {
+    # DEPTH [0, 500], nodata_value 9.96921E36
+    'name' => 'woa.monthly_silicate',
+    'units' => 'umol/l',
+    'min' => 0.0,
+    'max' => 1000.0,
+    'description' =>
+      'World Ocean Atlas 1-degree monthly interpolated mean ' .
+      'silicate at depth down to 500m.',
+    'query' =>
+      #'https://coastwatch.pfeg.noaa.gov/erddap/' .
+      #'griddap/nodcWoa09mon1n.dods?silicate_an' .
+      'https://apdrc.soest.hawaii.edu/erddap/griddap/' .
+      'hawaii_soest_d4c2_4a9d_5481.dods?imn' .
+      '[(0000-MM1-15T00:00:00Z):1:(0000-MM2-15T00:00:00Z)]' .
+      '[(DEPTH):1:(DEPTH)]' .
+      '[(MIN_LAT):1:(MAX_LAT)]' .
+      '[(MIN_LON):1:(MAX_LON)]',
+    'negative_lon' => 1,
+    'swap_rows'    => 0,
+    'format'       => 'dods'
+  },
+  {
+    # DEPTH [0, 500], nodata_value 9.96921E36
+    'name' => 'woa.annual_water_temperature',
+    'units' => 'C',
+    'min' => 0.0,
+    'max' => 50.0,
+    'description' =>
+      'World Ocean Atlas 1-degree annual interpolated mean ' .
+      'water temperature at depth down to 500m.',
+    'query' =>
+      #'https://coastwatch.pfeg.noaa.gov/erddap/' .
+      #'griddap/nodcWoa09ann1t.dods?temperature_an' .
+      #'[(0000-07-01T00:00:00Z)]' .
+      'https://apdrc.soest.hawaii.edu/erddap/griddap/' .
+      'hawaii_soest_c33f_ca3c_345f.dods?tmn' .
+      '[(0000-01-15T00:00:00Z):1:(0000-01-15T00:00:00Z)]' .
+      '[(DEPTH):1:(DEPTH)]' .
+      '[(MIN_LAT):1:(MAX_LAT)]' .
+      '[(MIN_LON):1:(MAX_LON)]',
+    'negative_lon' => 1,
+    'swap_rows'    => 0,
+    'format'       => 'dods'
+  },
+  {
+    # DEPTH [0, 500], nodata_value 9.96921E36
+    'name' => 'woa.annual_salinity',
+    'units' => 'PSU',
+    'min' => 0.0,
+    'max' => 50.0,
+    'description' =>
+      'World Ocean Atlas 1-degree annual interpolated mean ' .
+      'salinity at depth down to 500m.',
+    'query' =>
+      #'https://coastwatch.pfeg.noaa.gov/erddap/' .
+      #'griddap/nodcWoa09ann1t.dods?salinity_an' .
+      #'[(0000-07-01T00:00:00Z)]' .
+      'https://apdrc.soest.hawaii.edu/erddap/griddap/' .
+      'hawaii_soest_aacb_bf0f_e438.dods?smn' .
+      '[(0000-01-15T00:00:00Z):1:(0000-01-15T00:00:00Z)]' .
+      '[(DEPTH):1:(DEPTH)]' .
+      '[(MIN_LAT):1:(MAX_LAT)]' .
+      '[(MIN_LON):1:(MAX_LON)]',
+    'negative_lon' => 1,
+    'swap_rows'    => 0,
+    'format'       => 'dods'
+  },
+  {
+    # DEPTH [0, 500], nodata_value 9.96921E36
+    'name' => 'woa.annual_oxygen_saturation',
+    'units' => '%',
+    'min' => 0.0,
+    'max' => 200.0,
+    'description' =>
+      'World Ocean Atlas 1-degree annual interpolated mean ' .
+      'oxygen saturation at depth down to 500m.',
+    'query' =>
+      #'https://coastwatch.pfeg.noaa.gov/erddap/' .
+      #'griddap/nodcWoa09ann1t.dods?oxygenSat_an' .
+      #'[(0000-07-01T00:00:00Z)]' .
+      'https://apdrc.soest.hawaii.edu/erddap/griddap/' .
+      'hawaii_soest_dcc1_dd29_e0fa.dods?xmn' .
+      '[(0000-01-15T00:00:00Z):1:(0000-01-15T00:00:00Z)]' .
+      '[(DEPTH):1:(DEPTH)]' .
+      '[(MIN_LAT):1:(MAX_LAT)]' .
+      '[(MIN_LON):1:(MAX_LON)]',
+    'negative_lon' => 1,
+    'swap_rows'    => 0,
+    'format'       => 'dods'
+  },
+  {
+    # DEPTH [0, 500], nodata_value 9.96921E36
+    'name' => 'woa.annual_dissolved_oxygen',
+    'units' => 'ml/l',
+    'min' => 0.0,
+    'max' => 1000.0,
+    'description' =>
+      'World Ocean Atlas 1-degree annual interpolated mean ' .
+      'dissolved oxygen at depth down to 500m.',
+    'query' =>
+      #'https://coastwatch.pfeg.noaa.gov/erddap/' .
+      #'griddap/nodcWoa09ann1t.dods?disOxygen_an' .
+      #'[(0000-07-01T00:00:00Z)]' .
+      'https://apdrc.soest.hawaii.edu/erddap/griddap/' .
+      'hawaii_soest_fc8f_c3b4_6fd3.dods?omn' .
+      '[(0000-01-15T00:00:00Z):1:(0000-01-15T00:00:00Z)]' .
+      '[(DEPTH):1:(DEPTH)]' .
+      '[(MIN_LAT):1:(MAX_LAT)]' .
+      '[(MIN_LON):1:(MAX_LON)]',
+    'negative_lon' => 1,
+    'swap_rows'    => 0,
+    'format'       => 'dods'
+  },
+  {
+    # DEPTH [0, 500], nodata_value 9.96921E36
+    'name' => 'woa.annual_oxygen_utilization',
+    'units' => 'ml/l',
+    'min' => -2.0,
+    'max' => 6.0,
+    'description' =>
+      'World Ocean Atlas 1-degree annual interpolated mean ' .
+      'apparent oxygen utilization at depth down to 500m.',
+    'query' =>
+      #'https://coastwatch.pfeg.noaa.gov/erddap/' .
+      #'griddap/nodcWoa09ann1t.dods?AOU_an' .
+      #'[(0000-07-01T00:00:00Z)]' .
+      'https://apdrc.soest.hawaii.edu/erddap/griddap/' .
+      'hawaii_soest_8374_c708_88f1.dods?amn' .
+      '[(0000-01-15T00:00:00Z):1:(0000-01-15T00:00:00Z)]' .
+      '[(DEPTH):1:(DEPTH)]' .
+      '[(MIN_LAT):1:(MAX_LAT)]' .
+      '[(MIN_LON):1:(MAX_LON)]',
+    'negative_lon' => 1,
+    'swap_rows'    => 0,
+    'format'       => 'dods'
+  },
+  {
+    # DEPTH [0, 500], nodata_value 9.96921E36
+    'name' => 'woa.annual_nitrate',
+    'units' => 'umol/l',
+    'min' => 0.0,
+    'max' => 1000.0,
+    'description' =>
+      'World Ocean Atlas 1-degree annual interpolated mean ' .
+      'nitrate at depth down to 500m.',
+    'query' =>
+      #'https://coastwatch.pfeg.noaa.gov/erddap/' .
+      #'griddap/nodcWoa09ann1n.dods?nitrate_an' .
+      #'[(0000-07-01T00:00:00Z)]' .
+      'https://apdrc.soest.hawaii.edu/erddap/griddap/' .
+      'hawaii_soest_8faf_98ff_321f.dods?nmn' .
+      '[(0000-01-15T00:00:00Z):1:(0000-01-15T00:00:00Z)]' .
+      '[(DEPTH):1:(DEPTH)]' .
+      '[(MIN_LAT):1:(MAX_LAT)]' .
+      '[(MIN_LON):1:(MAX_LON)]',
+    'negative_lon' => 1,
+    'swap_rows'    => 0,
+    'format'       => 'dods'
+  },
+  {
+    # DEPTH [0, 500], nodata_value 9.96921E36
+    'name' => 'woa.annual_phosphate',
+    'units' => 'umol/l',
+    'min' => 0.0,
+    'max' => 1000.0,
+    'description' =>
+      'World Ocean Atlas 1-degree annual interpolated mean ' .
+      'phosphate at depth down to 500m.',
+    'query' =>
+      #'https://coastwatch.pfeg.noaa.gov/erddap/' .
+      #'griddap/nodcWoa09ann1n.dods?phosphate_an' .
+      #'[(0000-07-01T00:00:00Z)]' .
+      'https://apdrc.soest.hawaii.edu/erddap/griddap/' .
+      'hawaii_soest_8935_f9fb_2ea8.dods?pmn' .
+      '[(0000-01-15T00:00:00Z):1:(0000-01-15T00:00:00Z)]' .
+      '[(DEPTH):1:(DEPTH)]' .
+      '[(MIN_LAT):1:(MAX_LAT)]' .
+      '[(MIN_LON):1:(MAX_LON)]',
+    'negative_lon' => 1,
+    'swap_rows'    => 0,
+    'format'       => 'dods'
+  },
+  {
+    # DEPTH [0, 500], nodata_value 9.96921E36
+    'name' => 'woa.annual_silicate',
+    'units' => 'umol/l',
+    'min' => 0.0,
+    'max' => 1000.0,
+    'description' =>
+      'World Ocean Atlas 1-degree annual interpolated mean ' .
+      'silicate at depth down to 500m.',
+    'query' =>
+      #'https://coastwatch.pfeg.noaa.gov/erddap/' .
+      #'griddap/nodcWoa09ann1n.dods?silicate_an' .
+      #'[(0000-07-01T00:00:00Z)]' .
+      'https://apdrc.soest.hawaii.edu/erddap/griddap/' .
+      'hawaii_soest_c0e8_ac44_3ec8.dods?imn' .
+      '[(0000-01-15T00:00:00Z):1:(0000-01-15T00:00:00Z)]' .
+      '[(DEPTH):1:(DEPTH)]' .
+      '[(MIN_LAT):1:(MAX_LAT)]' .
+      '[(MIN_LON):1:(MAX_LON)]',
+    'negative_lon' => 1,
+    'swap_rows'    => 0,
+    'format'       => 'dods'
+  },
+
+  # MUR SST 12-line DODS header looks like this:
+  #Dataset {
+  #  GRID {
+  #    ARRAY:
+  #      Float64 analysed_sst[time = 3][latitude = 92][longitude = 92];
+  #    MAPS:
+  #      Float64 time[time = 3];
+  #      Float32 latitude[latitude = 92];
+  #      Float32 longitude[longitude = 92];
+  #  } analysed_sst;
+  #} jplMURSST;
+  #
+  # jplMURSST deprecated and superceded by jplMURSST41.
+  {
+    # DODS binary format, Missing data value = -7.768
+    'name' => 'mur.water_temperature',
+    'units' => 'C',
+    'min' => 0.0,
+    'max' => 50.0,
+    'start_date' => '2002-01-01',
+    'end_date'   => '',
+    'description' =>
+      'JPL Multi-scale Ultra-high Resolution 1km daily ' .
+      'sea surface temperature analysis.',
+    'query' => 'https://coastwatch.pfeg.noaa.gov/erddap/' .
+               'griddap/jplMURSST41.dods?' .
+               'analysed_sst' .
+               '[(YYYY1-MM1-DD1T12:00:00Z):1:(YYYY2-MM2-DD2T12:00:00Z)]' .
+               '[(MIN_LAT):1:(MAX_LAT)]' .
+               '[(MIN_LON):1:(MAX_LON)]',
+    'negative_lon' => 1,
+    'swap_rows'    => 0,
+    'format'       => 'dods'
+  },
+
+
+
+  ########################################################################
+  # Non-gridded: buoy stations ###########################################
+  # Note as of 2022 the erddap webservice now requires encoding of < and >
+  # as %3C and %3E.
+  # https://coastwatch.pfeg.noaa.gov/erddap/tabledap/documentation.html#PercentEncoded
+  #
+  # GTSPP data looks like this:
+  #time,station_id,longitude,latitude,depth,temperature,salinity
+  #UTC,,degrees_east,degrees_north,m,degree_C,PSU
+  #2006-07-18T00:00:00Z,3259901,-80.862,24.843,1.0,31.02,35.0
+  #2006-07-18T01:00:00Z,3259902,-80.862,24.843,1.0,30.97,34.86
+  #...
+  #2006-07-20T22:00:00Z,3262749,-80.862,24.843,1.0,29.75,34.8
+  #2006-07-20T23:00:00Z,3262750,-80.862,24.843,1.0,29.76,34.9
+  #2006-07-21T00:00:00Z,3262751,-80.862,24.843,1.0,29.71,34.97
+
+  {
+    'name' => 'gtspp.station',
+    'units' => '-',
+    'min' => '',
+    'max' => '',
+    'description' => 'GTSPP station id.',
+    'query' =>
+      'https://coastwatch.pfeg.noaa.gov/erddap/tabledap/erdGtsppBest.csv?' .
+      'station_id,longitude,latitude'.
+      '&longitude%3E=MIN_LON&longitude%3C=MAX_LON' .
+      '&latitude%3E=MIN_LAT&latitude%3C=MAX_LAT' .
+      '&distinct()',
+    'negative_lon' => 1,
+    'format'       => 'csv',
+    'header_lines' => 2,
+    'fields'       => 3,
+    'timestamp'    => -1,
+    'longitude'    => 1,
+    'latitude'     => 2,
+    'depth'        => -1,
+    'id'           => 0,
+    'sid'          => -1,
+    'value'        => -1
+  },
+  {
+    'name' => 'gtspp.water_temperature',
+    'units' => 'C',
+    'min' => 0.0,
+    'max' => 50.0,
+    'description' => 'GTSPP measured hourly water temperature.',
+    'query' => 'https://coastwatch.pfeg.noaa.gov/erddap/' .
+               'tabledap/erdGtsppBest.csv?' .
+               'time,station_id,longitude,latitude,depth,temperature'.
+               '&longitude%3E=MIN_LON&longitude%3C=MAX_LON' .
+               '&latitude%3E=MIN_LAT&latitude%3C=MAX_LAT' .
+               '&time%3E=START_TIME&time%3C=END_TIME' .
+               '&distinct()',
+    'negative_lon' => 1,
+    'format'       => 'csv',
+    'header_lines' => 2,
+    'fields'       => 6,
+    'timestamp'    => 0,
+    'longitude'    => 2,
+    'latitude'     => 3,
+    'depth'        => 4,
+    'id'           => 1,
+    'sid'          => -1,
+    'value'        => 5
+  },
+  {
+    'name' => 'gtspp.salinity',
+    'units' => 'PSU',
+    'min' => 0.0,
+    'max' => 50.0,
+    'description' => 'GTSPP measured hourly salinity.',
+    'query' => 'https://coastwatch.pfeg.noaa.gov/erddap/' .
+               'tabledap/erdGtsppBest.csv?' .
+               'time,station_id,longitude,latitude,depth,salinity'.
+               '&longitude%3E=MIN_LON&longitude%3C=MAX_LON' .
+               '&latitude%3E=MIN_LAT&latitude%3C=MAX_LAT' .
+               '&time%3E=START_TIME&time%3C=END_TIME' .
+               '&distinct()',
+    'negative_lon' => 1,
+    'format'       => 'csv',
+    'header_lines' => 2,
+    'fields'       => 6,
+    'timestamp'    => 0,
+    'longitude'    => 2,
+    'latitude'     => 3,
+    'depth'        => 4,
+    'id'           => 1,
+    'sid'          => -1,
+    'value'        => 5
+  },
+  {
+    'name' => 'gtspp.all',
+    'units' => '',
+    'minimums' => [
+      0.0, 0.0, 0.0, 0.0, # Unused: timestamp, station, longitude, latitude.
+      -500.0,
+      -50.0,
+      0.0
+    ],
+    'maximums' => [
+      0.0, 0.0, 0.0, 0.0, # Unused: timestamp, station, longitude, latitude.
+      0.0,
+      50.0,
+      50.0
+    ],
+    'factors' => [
+      0.0, 0.0, 0.0, 0.0, # Unused: timestamp, station, longitude, latitude.
+      1.0,
+      1.0,
+      1.0
+    ],
+    'output_header' =>
+      "\twater_temperature(C)" .
+      "\tsalinity(PSU)\n",
+    'description' => 'GTSPP measured hourly water temperature and salinity.',
+    'query' => 'https://coastwatch.pfeg.noaa.gov/erddap/' .
+               'tabledap/erdGtsppBest.csv?' .
+               'time,station_id,longitude,latitude,depth,temperature,salinity'.
+               '&longitude%3E=MIN_LON&longitude%3C=MAX_LON' .
+               '&latitude%3E=MIN_LAT&latitude%3C=MAX_LAT' .
+               '&time%3E=START_TIME&time%3C=END_TIME' .
+               '&distinct()',
+    'negative_lon' => 1,
+    'format'       => 'csv',
+    'header_lines' => 2,
+    'fields'       => 7,
+    'timestamp'    => 0,
+    'longitude'    => 2,
+    'latitude'     => 3,
+    'depth'        => 4,
+    'id'           => 1,
+    'sid'          => -1,
+    'value'        => 5
+  },
+
+  # NDBC buoy data looks like this:
+  #time,station,longitude,latitude,wd,wspd,gst,wvht,dpd,apd,mwd,bar,atmp,wtmp,dewp,vis,ptdy,tide,wspu,wspv
+  #UTC,,degrees_east,degrees_north,degrees_true,m s-1,m s-1,m,s,s,degrees_true,hPa,degree_C,degree_C,degree_C,km,hPa,m,m s-1,m s-1
+  #2006-07-18T00:00:00Z,41001,-72.698,34.675,91,1.7,2.7,1.09,8.33,5.51,NaN,1015.1,26.6,26.6,NaN,NaN,NaN,NaN,-1.7,0.0
+  #2006-07-18T01:00:00Z,41001,-72.698,34.675,102,1.9,2.4,1.09,6.25,5.29,NaN,1015.7,26.6,26.6,NaN,NaN,NaN,NaN,-1.9,0.4
+  #...
+  #2006-07-18T23:00:00Z,YKTV2,-76.478,37.227,100,3.6,4.0,NaN,NaN,NaN,NaN,1014.5,31.3,27.8,NaN,NaN,NaN,NaN,-3.5,0.6
+  #2006-07-19T00:00:00Z,YKTV2,-76.478,37.227,132,3.5,4.8,NaN,NaN,NaN,NaN,1014.7,31.3,27.8,NaN,NaN,NaN,NaN,-2.6,2.3
+  {
+    'name' => 'ndbc.station',
+    'units' => '-',
+    'min' => '',
+    'max' => '',
+    'description' => 'NDBC buoy id.',
+    'query' => 'https://coastwatch.pfeg.noaa.gov/erddap/' .
+               'tabledap/cwwcNDBCMet.csv?' .
+               'station,longitude,latitude'.
+               '&longitude%3E=MIN_LON&longitude%3C=MAX_LON' .
+               '&latitude%3E=MIN_LAT&latitude%3C=MAX_LAT' .
+               '&distinct()',
+    'negative_lon' => 1,
+    'format'       => 'csv',
+    'header_lines' => 2,
+    'fields'       => 3,
+    'timestamp'    => -1,
+    'longitude'    => 1,
+    'latitude'     => 2,
+    'depth'        => -1,
+    'id'           => -1,
+    'sid'          => 0,
+    'value'        => -1
+  },
+  {
+    'name' => 'ndbc.air_temperature',
+    'units' => 'C',
+    'min' => -50.0,
+    'max' => 50.0,
+    'description' => 'NDBC buoy-measured hourly air temperature.',
+    'query' => 'https://coastwatch.pfeg.noaa.gov/erddap/' .
+               'tabledap/cwwcNDBCMet.csv?' .
+               'time,station,longitude,latitude,atmp'.
+               '&longitude%3E=MIN_LON&longitude%3C=MAX_LON' .
+               '&latitude%3E=MIN_LAT&latitude%3C=MAX_LAT' .
+               '&time%3E=START_TIME&time%3C=END_TIME' .
+               '&distinct()',
+    'negative_lon' => 1,
+    'format'       => 'csv',
+    'header_lines' => 2,
+    'fields'       => 5,
+    'timestamp'    => 0,
+    'longitude'    => 2,
+    'latitude'     => 3,
+    'depth'        => -1,
+    'id'           => -1,
+    'sid'          => 1,
+    'value'        => 4
+  },
+  {
+    'name' => 'ndbc.dew_point',
+    'units' => 'C',
+    'min' => -50.0,
+    'max' => 50.0,
+    'description' => 'NDBC buoy-measured hourly dew point temperature.',
+    'query' => 'https://coastwatch.pfeg.noaa.gov/erddap/' .
+               'tabledap/cwwcNDBCMet.csv?' .
+               'time,station,longitude,latitude,dewp'.
+               '&longitude%3E=MIN_LON&longitude%3C=MAX_LON' .
+               '&latitude%3E=MIN_LAT&latitude%3C=MAX_LAT' .
+               '&time%3E=START_TIME&time%3C=END_TIME' .
+               '&distinct()',
+    'negative_lon' => 1,
+    'format'       => 'csv',
+    'header_lines' => 2,
+    'fields'       => 5,
+    'timestamp'    => 0,
+    'longitude'    => 2,
+    'latitude'     => 3,
+    'depth'        => -1,
+    'id'           => -1,
+    'sid'          => 1,
+    'value'        => 4
+  },
+  {
+    'name' => 'ndbc.pressure',
+    'units' => 'hPa',
+    'min' => 500.0,
+    'max' => 1500.0,
+    'description' => 'NDBC buoy-measured hourly air pressure.',
+    'query' => 'https://coastwatch.pfeg.noaa.gov/erddap/' .
+               'tabledap/cwwcNDBCMet.csv?' .
+               'time,station,longitude,latitude,bar'.
+               '&longitude%3E=MIN_LON&longitude%3C=MAX_LON' .
+               '&latitude%3E=MIN_LAT&latitude%3C=MAX_LAT' .
+               '&time%3E=START_TIME&time%3C=END_TIME' .
+               '&distinct()',
+    'negative_lon' => 1,
+    'format'       => 'csv',
+    'header_lines' => 2,
+    'fields'       => 5,
+    'timestamp'    => 0,
+    'longitude'    => 2,
+    'latitude'     => 3,
+    'depth'        => -1,
+    'id'           => -1,
+    'sid'          => 1,
+    'value'        => 4
+  },
+  {
+    'name' => 'ndbc.pressure_tendency',
+    'units' => 'hPa',
+    'min' => -500.0,
+    'max' => 500.0,
+    'description' =>
+      'NDBC buoy-measured hourly air pressure tendency (plus or minus) ' .
+      'for a three hour period ending at the time of measurement.',
+    'query' => 'https://coastwatch.pfeg.noaa.gov/erddap/' .
+               'tabledap/cwwcNDBCMet.csv?' .
+               'time,station,longitude,latitude,ptdy'.
+               '&longitude%3E=MIN_LON&longitude%3C=MAX_LON' .
+               '&latitude%3E=MIN_LAT&latitude%3C=MAX_LAT' .
+               '&time%3E=START_TIME&time%3C=END_TIME' .
+               '&distinct()',
+    'negative_lon' => 1,
+    'format'       => 'csv',
+    'header_lines' => 2,
+    'fields'       => 5,
+    'timestamp'    => 0,
+    'longitude'    => 2,
+    'latitude'     => 3,
+    'depth'        => -1,
+    'id'           => -1,
+    'sid'          => 1,
+    'value'        => 4
+  },
+  {
+    'name' => 'ndbc.air_visibility',
+    'units' => 'm',
+    'factor' => 1000.0, # km to meters.
+    'min' => 0.0,
+    'max' => 100000.0,
+    'description' => 'NDBC buoy-measured hourly atmospheric visibility.',
+    'query' => 'https://coastwatch.pfeg.noaa.gov/erddap/' .
+               'tabledap/cwwcNDBCMet.csv?' .
+               'time,station,longitude,latitude,vis'.
+               '&longitude%3E=MIN_LON&longitude%3C=MAX_LON' .
+               '&latitude%3E=MIN_LAT&latitude%3C=MAX_LAT' .
+               '&time%3E=START_TIME&time%3C=END_TIME' .
+               '&distinct()',
+    'negative_lon' => 1,
+    'format'       => 'csv',
+    'header_lines' => 2,
+    'fields'       => 5,
+    'timestamp'    => 0,
+    'longitude'    => 2,
+    'latitude'     => 3,
+    'depth'        => -1,
+    'id'           => -1,
+    'sid'          => 1,
+    'value'        => 4
+  },
+  {
+    'name' => 'ndbc.wind_speed',
+    'units' => 'm/s',
+    'min' => 0.0,
+    'max' => 100.0,
+    'description' => 'NDBC buoy-measured hourly average wind speed.',
+    'query' => 'https://coastwatch.pfeg.noaa.gov/erddap/' .
+               'tabledap/cwwcNDBCMet.csv?' .
+               'time,station,longitude,latitude,wspd'.
+               '&longitude%3E=MIN_LON&longitude%3C=MAX_LON' .
+               '&latitude%3E=MIN_LAT&latitude%3C=MAX_LAT' .
+               '&time%3E=START_TIME&time%3C=END_TIME' .
+               '&distinct()',
+    'negative_lon' => 1,
+    'format'       => 'csv',
+    'header_lines' => 2,
+    'fields'       => 5,
+    'timestamp'    => 0,
+    'longitude'    => 2,
+    'latitude'     => 3,
+    'depth'        => -1,
+    'id'           => -1,
+    'sid'          => 1,
+    'value'        => 4
+  },
+  {
+    'name' => 'ndbc.wind_gust_speed',
+    'units' => 'm/s',
+    'min' => 0.0,
+    'max' => 100.0,
+    'description' => 'NDBC buoy-measured hourly peak wind gust speed.',
+    'query' => 'https://coastwatch.pfeg.noaa.gov/erddap/' .
+               'tabledap/cwwcNDBCMet.csv?' .
+               'time,station,longitude,latitude,gst'.
+               '&longitude%3E=MIN_LON&longitude%3C=MAX_LON' .
+               '&latitude%3E=MIN_LAT&latitude%3C=MAX_LAT' .
+               '&time%3E=START_TIME&time%3C=END_TIME' .
+               '&distinct()',
+    'negative_lon' => 1,
+    'format'       => 'csv',
+    'header_lines' => 2,
+    'fields'       => 5,
+    'timestamp'    => 0,
+    'longitude'    => 2,
+    'latitude'     => 3,
+    'depth'        => -1,
+    'id'           => -1,
+    'sid'          => 1,
+    'value'        => 4
+  },
+  {
+    'name' => 'ndbc.wind_direction',
+    'units' => 'bearing',
+    'min' => 0.0,
+    'max' => 360.0,
+    'description' =>
+       'NDBC buoy-measured hourly average wind bearing direction ' .
+       '(bearing angle).',
+    'query' => 'https://coastwatch.pfeg.noaa.gov/erddap/' .
+               'tabledap/cwwcNDBCMet.csv?' .
+               'time,station,longitude,latitude,wd'.
+               '&longitude%3E=MIN_LON&longitude%3C=MAX_LON' .
+               '&latitude%3E=MIN_LAT&latitude%3C=MAX_LAT' .
+               '&time%3E=START_TIME&time%3C=END_TIME' .
+               '&distinct()',
+    'negative_lon' => 1,
+    'format'       => 'csv',
+    'header_lines' => 2,
+    'fields'       => 5,
+    'timestamp'    => 0,
+    'longitude'    => 2,
+    'latitude'     => 3,
+    'depth'        => -1,
+    'id'           => -1,
+    'sid'          => 1,
+    'value'        => 4
+  },
+  {
+    'name' => 'ndbc.wind_u',
+    'units' => 'm/s',
+    'min' => -100.0,
+    'max' => 100.0,
+    'description' =>
+       'NDBC buoy-measured hourly average wind speed eastward component.',
+    'query' => 'https://coastwatch.pfeg.noaa.gov/erddap/' .
+               'tabledap/cwwcNDBCMet.csv?' .
+               'time,station,longitude,latitude,wspu'.
+               '&longitude%3E=MIN_LON&longitude%3C=MAX_LON' .
+               '&latitude%3E=MIN_LAT&latitude%3C=MAX_LAT' .
+               '&time%3E=START_TIME&time%3C=END_TIME' .
+               '&distinct()',
+    'negative_lon' => 1,
+    'format'       => 'csv',
+    'header_lines' => 2,
+    'fields'       => 5,
+    'timestamp'    => 0,
+    'longitude'    => 2,
+    'latitude'     => 3,
+    'depth'        => -1,
+    'id'           => -1,
+    'sid'          => 1,
+    'value'        => 4
+  },
+  {
+    'name' => 'ndbc.wind_v',
+    'units' => 'm/s',
+    'min' => -100.0,
+    'max' => 100.0,
+    'description' =>
+       'NDBC buoy-measured hourly average wind speed northward component.',
+    'query' => 'https://coastwatch.pfeg.noaa.gov/erddap/' .
+               'tabledap/cwwcNDBCMet.csv?' .
+               'time,station,longitude,latitude,wspv'.
+               '&longitude%3E=MIN_LON&longitude%3C=MAX_LON' .
+               '&latitude%3E=MIN_LAT&latitude%3C=MAX_LAT' .
+               '&time%3E=START_TIME&time%3C=END_TIME' .
+               '&distinct()',
+    'negative_lon' => 1,
+    'format'       => 'csv',
+    'header_lines' => 2,
+    'fields'       => 5,
+    'timestamp'    => 0,
+    'longitude'    => 2,
+    'latitude'     => 3,
+    'depth'        => -1,
+    'id'           => -1,
+    'sid'          => 1,
+    'value'        => 4
+  },
+  {
+    'name' => 'ndbc.wind',
+    'units' => 'm/s',
+    'min' => -100.0,
+    'max' => 100.0,
+    'description' =>
+       'NDBC buoy-measured hourly average wind vector u and v components.',
+    'query' => 'https://coastwatch.pfeg.noaa.gov/erddap/' .
+               'tabledap/cwwcNDBCMet.csv?' .
+               'time,station,longitude,latitude,wspu,wspv'.
+               '&longitude%3E=MIN_LON&longitude%3C=MAX_LON' .
+               '&latitude%3E=MIN_LAT&latitude%3C=MAX_LAT' .
+               '&time%3E=START_TIME&time%3C=END_TIME' .
+               '&distinct()',
+    'negative_lon' => 1,
+    'format'       => 'csv',
+    'header_lines' => 2,
+    'fields'       => 6,
+    'timestamp'    => 0,
+    'longitude'    => 2,
+    'latitude'     => 3,
+    'depth'        => -1,
+    'id'           => -1,
+    'sid'          => 1,
+    'value'        => 4
+  },
+  {
+    'name' => 'ndbc.wind_speed_and_wind_direction',
+    'units' => 'm/s',
+    'min' => 0.0,
+    'max' => 100.0,
+    'description' =>
+      'NDBC buoy-measured hourly average wind speed and direction.',
+    'query' => 'https://coastwatch.pfeg.noaa.gov/erddap/' .
+               'tabledap/cwwcNDBCMet.csv?' .
+               'time,station,longitude,latitude,wspd,wd'.
+               '&longitude%3E=MIN_LON&longitude%3C=MAX_LON' .
+               '&latitude%3E=MIN_LAT&latitude%3C=MAX_LAT' .
+               '&time%3E=START_TIME&time%3C=END_TIME' .
+               '&distinct()',
+    'negative_lon' => 1,
+    'format'       => 'csv',
+    'header_lines' => 2,
+    'fields'       => 6,
+    'timestamp'    => 0,
+    'longitude'    => 2,
+    'latitude'     => 3,
+    'depth'        => -1,
+    'id'           => -1,
+    'sid'          => 1,
+    'value'        => 4
+  },
+  {
+    'name' => 'ndbc.wind_gust_speed_and_wind_direction',
+    'units' => 'm/s',
+    'min' => 0.0,
+    'max' => 100.0,
+    'description' =>
+      'NDBC buoy-measured hourly average wind speed and direction.',
+    'query' => 'https://coastwatch.pfeg.noaa.gov/erddap/' .
+               'tabledap/cwwcNDBCMet.csv?' .
+               'time,station,longitude,latitude,gst,wd'.
+               '&longitude%3E=MIN_LON&longitude%3C=MAX_LON' .
+               '&latitude%3E=MIN_LAT&latitude%3C=MAX_LAT' .
+               '&time%3E=START_TIME&time%3C=END_TIME' .
+               '&distinct()',
+    'negative_lon' => 1,
+    'format'       => 'csv',
+    'header_lines' => 2,
+    'fields'       => 6,
+    'timestamp'    => 0,
+    'longitude'    => 2,
+    'latitude'     => 3,
+    'depth'        => -1,
+    'id'           => -1,
+    'sid'          => 1,
+    'value'        => 4
+  },
+  {
+    'name' => 'ndbc.water_temperature',
+    'units' => 'C',
+    'min' => 0.0,
+    'max' => 50.0,
+    'description' => 'NDBC buoy-measured hourly water temperature.',
+    'query' => 'https://coastwatch.pfeg.noaa.gov/erddap/' .
+               'tabledap/cwwcNDBCMet.csv?' .
+               'time,station,longitude,latitude,wtmp'.
+               '&longitude%3E=MIN_LON&longitude%3C=MAX_LON' .
+               '&latitude%3E=MIN_LAT&latitude%3C=MAX_LAT' .
+               '&time%3E=START_TIME&time%3C=END_TIME' .
+               '&distinct()',
+    'negative_lon' => 1,
+    'format'       => 'csv',
+    'header_lines' => 2,
+    'fields'       => 5,
+    'timestamp'    => 0,
+    'longitude'    => 2,
+    'latitude'     => 3,
+    'depth'        => -1,
+    'id'           => -1,
+    'sid'          => 1,
+    'value'        => 4
+  },
+  {
+    'name' => 'ndbc.tide',
+    'units' => 'm',
+    'min' => -30.0,
+    'max' => 30.0,
+    'description' =>
+      'NDBC buoy-measured hourly tide water level above or below ' .
+      'Mean Lower Low Water (MLLW).',
+    'query' => 'https://coastwatch.pfeg.noaa.gov/erddap/' .
+               'tabledap/cwwcNDBCMet.csv?' .
+               'time,station,longitude,latitude,tide'.
+               '&longitude%3E=MIN_LON&longitude%3C=MAX_LON' .
+               '&latitude%3E=MIN_LAT&latitude%3C=MAX_LAT' .
+               '&time%3E=START_TIME&time%3C=END_TIME' .
+               '&distinct()',
+    'negative_lon' => 1,
+    'format'       => 'csv',
+    'header_lines' => 2,
+    'fields'       => 5,
+    'timestamp'    => 0,
+    'longitude'    => 2,
+    'latitude'     => 3,
+    'depth'        => -1,
+    'id'           => -1,
+    'sid'          => 1,
+    'value'        => 4
+  },
+  {
+    'name' => 'ndbc.wave_height',
+    'units' => 'm',
+    'min' => 0.0,
+    'max' => 100.0,
+    'description' =>
+      'NDBC buoy-measured hourly wave height average of the highest '.
+      'one-third of all of the wave heights during the 20-minute sampling ' .
+      'period.',
+    'query' => 'https://coastwatch.pfeg.noaa.gov/erddap/' .
+               'tabledap/cwwcNDBCMet.csv?' .
+               'time,station,longitude,latitude,wvht'.
+               '&longitude%3E=MIN_LON&longitude%3C=MAX_LON' .
+               '&latitude%3E=MIN_LAT&latitude%3C=MAX_LAT' .
+               '&time%3E=START_TIME&time%3C=END_TIME' .
+               '&distinct()',
+    'negative_lon' => 1,
+    'format'       => 'csv',
+    'header_lines' => 2,
+    'fields'       => 5,
+    'timestamp'    => 0,
+    'longitude'    => 2,
+    'latitude'     => 3,
+    'depth'        => -1,
+    'id'           => -1,
+    'sid'          => 1,
+    'value'        => 4
+  },
+  {
+    'name' => 'ndbc.wave_average_period',
+    'units' => 's',
+    'min' => 0.0,
+    'max' => 600.0,
+    'description' =>
+      'NDBC buoy-measured hourly average wave period of all waves during ' .
+      'the 20-minute period.',
+    'query' => 'https://coastwatch.pfeg.noaa.gov/erddap/' .
+               'tabledap/cwwcNDBCMet.csv?' .
+               'time,station,longitude,latitude,apd'.
+               '&longitude%3E=MIN_LON&longitude%3C=MAX_LON' .
+               '&latitude%3E=MIN_LAT&latitude%3C=MAX_LAT' .
+               '&time%3E=START_TIME&time%3C=END_TIME' .
+               '&distinct()',
+    'negative_lon' => 1,
+    'format'       => 'csv',
+    'header_lines' => 2,
+    'fields'       => 5,
+    'timestamp'    => 0,
+    'longitude'    => 2,
+    'latitude'     => 3,
+    'depth'        => -1,
+    'id'           => -1,
+    'sid'          => 1,
+    'value'        => 4
+  },
+  {
+    'name' => 'ndbc.wave_dominant_period',
+    'units' => 's',
+    'min' => 0.0,
+    'max' => 600.0,
+    'description' =>
+      'NDBC buoy-measured hourly dominant wave period with the maximum ' .
+      'wave energy.',
+    'query' => 'https://coastwatch.pfeg.noaa.gov/erddap/' .
+               'tabledap/cwwcNDBCMet.csv?' .
+               'time,station,longitude,latitude,dpd'.
+               '&longitude%3E=MIN_LON&longitude%3C=MAX_LON' .
+               '&latitude%3E=MIN_LAT&latitude%3C=MAX_LAT' .
+               '&time%3E=START_TIME&time%3C=END_TIME' .
+               '&distinct()',
+    'negative_lon' => 1,
+    'format'       => 'csv',
+    'header_lines' => 2,
+    'fields'       => 5,
+    'timestamp'    => 0,
+    'longitude'    => 2,
+    'latitude'     => 3,
+    'depth'        => -1,
+    'id'           => -1,
+    'sid'          => 1,
+    'value'        => 4
+  },
+  {
+    'name' => 'ndbc.wave_direction',
+    'units' => 'degrees',
+    'min' => 0.0,
+    'max' => 360.0,
+    'description' => 'NDBC buoy-measured hourly dominant wave direction.',
+    'query' => 'https://coastwatch.pfeg.noaa.gov/erddap/' .
+               'tabledap/cwwcNDBCMet.csv?' .
+               'time,station,longitude,latitude,mwd'.
+               '&longitude%3E=MIN_LON&longitude%3C=MAX_LON' .
+               '&latitude%3E=MIN_LAT&latitude%3C=MAX_LAT' .
+               '&time%3E=START_TIME&time%3C=END_TIME' .
+               '&distinct()',
+    'negative_lon' => 1,
+    'format'       => 'csv',
+    'header_lines' => 2,
+    'fields'       => 5,
+    'timestamp'    => 0,
+    'longitude'    => 2,
+    'latitude'     => 3,
+    'depth'        => -1,
+    'id'           => -1,
+    'sid'          => 1,
+    'value'        => 4
+  },
+  {
+    'name' => 'ndbc.all', # Get all measured data.
+    'units' => '',
+    'minimums' => [
+      0.0, 0.0, 0.0, 0.0, # Unused: timestamp, station, longitude, latitude.
+      -50.0,
+      -50.0,
+      500.0,
+      -500.0,
+      0.0,
+      0.0,
+      0.0,
+      0.0,
+      -100.0,
+      -100.0,
+      0.0,
+      -30.0,
+      0.0,
+      0.0,
+      0.0,
+      0.0
+    ],
+    'maximums' => [
+      0.0, 0.0, 0.0, 0.0, # Unused: timestamp, station, longitude, latitude.
+      50.0,
+      50.0,
+      1500.0,
+      500.0,
+      100000.0,
+      360.0,
+      100.0,
+      100.0,
+      100.0,
+      100.0,
+      50.0,
+      30.0,
+      100.0,
+      600.0,
+      600.0,
+      360.0
+    ],
+    'factors' => [
+      0.0, 0.0, 0.0, 0.0, # Unused: timestamp, station, longitude, latitude.
+      1.0,
+      1.0,
+      1.0,
+      1.0,
+      1000.0, # kilometers to meters.
+      1.0,
+      1.0,
+      1.0,
+      1.0,
+      1.0,
+      1.0,
+      1.0,
+      1.0,
+      1.0,
+      1.0,
+      1.0
+    ],
+    'output_header' =>
+      "\tair_temperature(C)" .
+      "\tdew_point(C)" .
+      "\tpressure(hPa)" .
+      "\tpressure_tendency(hPa)" .
+      "\tair_visibility(m)" .
+      "\twind_direction(bearing)" .
+      "\twind_speed(m/s)" .
+      "\twind_gust_speed(m/s)" .
+      "\twind_u(m/s)" .
+      "\twind_v(m/s)" .
+      "\twater_temperature(C)" .
+      "\ttide(m)" .
+      "\twave_height(m)" .
+      "\twave_average_period(s)" .
+      "\twave_dominant_period(s)" .
+      "\twave_direction(degrees)\n",
+    'description' => 'NDBC buoy-measured hourly met data.',
+    'query' => 'https://coastwatch.pfeg.noaa.gov/erddap/' .
+               'tabledap/cwwcNDBCMet.csv?' .
+               'time,station,longitude,latitude,' .
+               'atmp,dewp,bar,ptdy,vis,' .
+               'wd,wspd,gst,wspu,wspv,' .
+               'wtmp,tide,wvht,apd,dpd,mwd'.
+               '&longitude%3E=MIN_LON&longitude%3C=MAX_LON' .
+               '&latitude%3E=MIN_LAT&latitude%3C=MAX_LAT' .
+               '&time%3E=START_TIME&time%3C=END_TIME' .
+               '&distinct()',
+    'negative_lon' => 1,
+    'format'       => 'csv',
+    'header_lines' => 2,
+    'fields'       => 20,
+    'timestamp'    => 0,
+    'longitude'    => 2,
+    'latitude'     => 3,
+    'depth'        => -1,
+    'id'           => -1,
+    'sid'          => 1,
+    'value'        => 4
+  },
+
+  # FIX: as of 2024-05-23 neracoosSos is not found at
+  # https://www.neracoos.org/erddap/tabledap/index.html?page=1&itemsPerPage=1000
+  # HACK for now use the air pressure webservice.
+  # NERACOOS SOS buoy data looks like this:
+  #time,station_id,longitude,latitude,altitude,air_temperature,sea_level_pressure,visibility_in_air,wind_from_direction,wind_speed,wind_gust,sea_water_temperature,sea_water_density,sea_water_salinity,sea_water_electrical_conductivity,direction_of_sea_water_velocity,sea_water_speed,wave_height,dominant_wave_period,chlorophyll
+  #UTC,,degrees_east,degrees_north,m,degree_C,mbar,m,degrees_true,m s-1,m s-1,degree_C,kg m-3,PSU,S m-1,degrees_true,cm s-1,m,s,mg m-3
+  #UTC,,degrees_east,degrees_north,degree_C,mbar,m,degrees_true,m s-1,m s-1,degree_C,kg m-3,PSU,S m-1,degrees_true,cm s-1,m,s,mg m-3
+  #2010-08-17T00:00:00Z,44022,-73.73,40.88,24.7,1013.5,NaN,240.0,1.0,2.0,NaN,NaN,NaN,NaN,NaN,NaN,NaN,NaN,NaN
+  #2010-08-17T00:00:00Z,44022,-73.73,40.88,NaN,NaN,NaN,NaN,NaN,NaN,23.3,NaN,NaN,NaN,NaN,NaN,NaN,NaN,NaN
+  #2010-08-17T00:00:00Z,44039,-72.655,41.138,24.7,1014.1,NaN,210.0,4.0,5.0,NaN,NaN,NaN,NaN,NaN,NaN,0.4,2.0,NaN
+  #...
+  #2010-08-19T23:50:00Z,I01,-68.1087,44.1058,NaN,NaN,NaN,162.199996948242,2.28099989891052,2.65799999237061,NaN,NaN,NaN,NaN,NaN,NaN,NaN,NaN,NaN
+  #2010-08-19T23:50:00Z,M01,-67.8716659545898,43.490140914917,19.1599998474121,1009.65179443359,2956.12133789062,NaN,NaN,NaN,NaN,NaN,NaN,NaN,NaN,NaN,NaN,NaN,NaN
+  #2010-08-19T23:50:00Z,M01,-67.8716659545898,43.490140914917,NaN,NaN,NaN,171.5,2.18099999427795,2.43400001525879,NaN,NaN,NaN,NaN,NaN,NaN,NaN,NaN,NaN
+  {
+    'name' => 'neracoossos.station',
+    'units' => '-',
+    'min' => '',
+    'max' => '',
+    'description' => 'NERACOOS-SOS buoy station id.',
+    'query' =>
+      #'https://coastwatch.pfeg.noaa.gov/erddap/tabledap/neracoosSos.csv?' .
+      'https://coastwatch.pfeg.noaa.gov/erddap/tabledap/nosSosATemp.csv?' .
+      'station_id,longitude,latitude' .
+      '&longitude%3E=MIN_LON&longitude%3C=MAX_LON' .
+      '&latitude%3E=MIN_LAT&latitude%3C=MAX_LAT' .
+      '&distinct()',
+    'negative_lon' => 1,
+    'format'       => 'csv',
+    'header_lines' => 2,
+    'fields'       => 3,
+    'timestamp'    => -1,
+    'longitude'    => 1,
+    'latitude'     => 2,
+    'depth'        => -1,
+    'id'           => -1,
+    'sid'          => 0,
+    'value'        => -1
+  },
+  {
+    'name' => 'neracoossos.air_temperature',
+    'units' => 'C',
+    'min' => -50.0,
+    'max' => 50.0,
+    'description' =>
+      'NERACOOS-SOS buoy station-measured hourly air temperature.',
+    'query' =>
+      #'https://coastwatch.pfeg.noaa.gov/erddap/tabledap/neracoosSos.csv?' .
+      'https://coastwatch.pfeg.noaa.gov/erddap/tabledap/nosSosATemp.csv?' .
+      'time,station_id,longitude,latitude,altitude,air_temperature' .
+      '&longitude%3E=MIN_LON&longitude%3C=MAX_LON' .
+      '&latitude%3E=MIN_LAT&latitude%3C=MAX_LAT' .
+      '&time%3E=START_TIME&time%3C=END_TIME' .
+      '&distinct()',
+    'negative_lon' => 1,
+    'format'       => 'csv',
+    'header_lines' => 2,
+    'fields'       => 6,
+    'timestamp'    => 0,
+    'longitude'    => 2,
+    'latitude'     => 3,
+    'depth'        => 4,
+    'id'           => -1,
+    'sid'          => 1,
+    'value'        => 5
+  },
+  {
+    'name' => 'neracoossos.air_pressure',
+    'units' => 'hPa',
+    'min' => 500.0,
+    'max' => 1500.0,
+    'description' =>
+      'NERACOOS-SOS buoy station-measured hourly atmospheric pressure.',
+    'query' =>
+      #'https://coastwatch.pfeg.noaa.gov/erddap/tabledap/neracoosSos.csv?' .
+      #'time,station_id,longitude,latitude,altitude,sea_level_pressure' .
+      'https://coastwatch.pfeg.noaa.gov/erddap/tabledap/nosSosBPres.csv?' .
+      'time,station_id,longitude,latitude,altitude,air_pressure' .
+      '&longitude%3E=MIN_LON&longitude%3C=MAX_LON' .
+      '&latitude%3E=MIN_LAT&latitude%3C=MAX_LAT' .
+      '&time%3E=START_TIME&time%3C=END_TIME' .
+      '&distinct()',
+    'negative_lon' => 1,
+    'format'       => 'csv',
+    'header_lines' => 2,
+    'fields'       => 6,
+    'timestamp'    => 0,
+    'longitude'    => 2,
+    'latitude'     => 3,
+    'depth'        => 4,
+    'id'           => -1,
+    'sid'          => 1,
+    'value'        => 5
+  },
+  {
+    'name' => 'neracoossos.precipitation',
+    'units' => 'mm',
+    'min' => 0.0,
+    'max' => 100.0,
+    'description' =>
+      'NERACOOS-SOS buoy station-measured 6-minute precipitation.',
+    'query' =>
+      'https://coastwatch.pfeg.noaa.gov/erddap/tabledap/nosCoopsMRF.csv?' .
+      'time,stationID,longitude,latitude,RF' .
+      '&longitude%3E=MIN_LON&longitude%3C=MAX_LON' .
+      '&latitude%3E=MIN_LAT&latitude%3C=MAX_LAT' .
+      '&time%3E=START_TIME&time%3C=END_TIME' .
+      '&distinct()',
+    'negative_lon' => 1,
+    'format'       => 'csv',
+    'header_lines' => 2,
+    'fields'       => 5,
+    'timestamp'    => 0,
+    'longitude'    => 2,
+    'latitude'     => 3,
+    'depth'        => -1,
+    'id'           => -1,
+    'sid'          => 1,
+    'value'        => 4
+  },
+  {
+    'name' => 'neracoossos.humidity',
+    'units' => '%',
+    'min' => 0.0,
+    'max' => 100.0,
+    'description' =>
+      'NERACOOS-SOS buoy station-measured 6-minute relative humidity.',
+    'query' =>
+      'https://coastwatch.pfeg.noaa.gov/erddap/tabledap/nosCoopsMRH.csv?' .
+      'time,stationID,longitude,latitude,RH' .
+      '&longitude%3E=MIN_LON&longitude%3C=MAX_LON' .
+      '&latitude%3E=MIN_LAT&latitude%3C=MAX_LAT' .
+      '&time%3E=START_TIME&time%3C=END_TIME' .
+      '&distinct()',
+    'negative_lon' => 1,
+    'format'       => 'csv',
+    'header_lines' => 2,
+    'fields'       => 5,
+    'timestamp'    => 0,
+    'longitude'    => 2,
+    'latitude'     => 3,
+    'depth'        => -1,
+    'id'           => -1,
+    'sid'          => 1,
+    'value'        => 4
+  },
+  {
+    'name' => 'neracoossos.air_visibility',
+    'units' => 'm',
+    'factor' => 1852.0, # Nautical miles to meters.
+    'min' => 0.0,
+    'max' => 100000.0,
+    'description' =>
+      'NERACOOS-SOS buoy station-measured hourly visibility in the air.',
+    'query' =>
+      #'https://coastwatch.pfeg.noaa.gov/erddap/tabledap/neracoosSos.csv?' .
+      #'time,station_id,longitude,latitude,altitude,visibility_in_air'.
+      'https://coastwatch.pfeg.noaa.gov/erddap/tabledap/nosCoopsMV.csv?' .
+      'time,stationID,longitude,latitude,Vis'.
+      '&longitude%3E=MIN_LON&longitude%3C=MAX_LON' .
+      '&latitude%3E=MIN_LAT&latitude%3C=MAX_LAT' .
+      '&time%3E=START_TIME&time%3C=END_TIME' .
+      '&distinct()',
+    'negative_lon' => 1,
+    'format'       => 'csv',
+    'header_lines' => 2,
+    'fields'       => 5,
+    'timestamp'    => 0,
+    'longitude'    => 2,
+    'latitude'     => 3,
+    'depth'        => -1,
+    'id'           => -1,
+    'sid'          => 1,
+    'value'        => 4
+  },
+  {
+    'name' => 'neracoossos.wind_direction',
+    'units' => 'bearing',
+    'min' => 0.0,
+    'max' => 360.0,
+    'description' =>
+      'NERACOOS-SOS buoy station-measured hourly wind from direction ' .
+      '(bearing angle).',
+    'query' =>
+      #'https://coastwatch.pfeg.noaa.gov/erddap/tabledap/neracoosSos.csv?' .
+      #'time,station_id,longitude,latitude,altitude,wind_from_direction'.
+      # FIX: 2024-05-28 The new webservice below returns no data.
+      'https://coastwatch.pfeg.noaa.gov/erddap/tabledap/nosCoopsMW.csv?' .
+      'time,stationID,longitude,latitude,WD'.
+      '&longitude%3E=MIN_LON&longitude%3C=MAX_LON' .
+      '&latitude%3E=MIN_LAT&latitude%3C=MAX_LAT' .
+      '&time%3E=START_TIME&time%3C=END_TIME' .
+      '&distinct()',
+    'negative_lon' => 1,
+    'format'       => 'csv',
+    'header_lines' => 2,
+    'fields'       => 5,
+    'timestamp'    => 0,
+    'longitude'    => 2,
+    'latitude'     => 3,
+    'depth'        => -1,
+    'id'           => -1,
+    'sid'          => 1,
+    'value'        => 4
+  },
+  {
+    'name' => 'neracoossos.wind_speed',
+    'units' => 'm/s',
+    'min' => 0.0,
+    'max' => 100.0,
+    'description' => 'NERACOOS-SOS buoy station-measured hourly wind speed.',
+    'query' =>
+       #'https://coastwatch.pfeg.noaa.gov/erddap/tabledap/neracoosSos.csv?' .
+       #'time,station_id,longitude,latitude,altitude,wind_speed'.
+       # FIX: 2024-05-28 The new webservice below returns no data.
+      'https://coastwatch.pfeg.noaa.gov/erddap/tabledap/nosCoopsMW.csv?' .
+      'time,stationID,longitude,latitude,WS'.
+      '&longitude%3E=MIN_LON&longitude%3C=MAX_LON' .
+      '&latitude%3E=MIN_LAT&latitude%3C=MAX_LAT' .
+      '&time%3E=START_TIME&time%3C=END_TIME' .
+      '&distinct()',
+    'negative_lon' => 1,
+    'format'       => 'csv',
+    'header_lines' => 2,
+    'fields'       => 5,
+    'timestamp'    => 0,
+    'longitude'    => 2,
+    'latitude'     => 3,
+    'depth'        => -1,
+    'id'           => -1,
+    'sid'          => 1,
+    'value'        => 4
+  },
+  {
+    'name' => 'neracoossos.wind_gust_speed',
+    'units' => 'm/s',
+    'min' => 0.0,
+    'max' => 100.0,
+    'description' =>
+      'NERACOOS-SOS buoy station-measured hourly wind gust speed.',
+    'query' =>
+      #'https://coastwatch.pfeg.noaa.gov/erddap/tabledap/neracoosSos.csv?' .
+      #'time,station_id,longitude,latitude,altitude,wind_gust'.
+      # FIX: 2024-05-28 The new webservice below returns no data.
+      'https://coastwatch.pfeg.noaa.gov/erddap/tabledap/nosCoopsMW.csv?' .
+      'time,stationID,longitude,latitude,WG'.
+      '&longitude%3E=MIN_LON&longitude%3C=MAX_LON' .
+      '&latitude%3E=MIN_LAT&latitude%3C=MAX_LAT' .
+      '&time%3E=START_TIME&time%3C=END_TIME' .
+      '&distinct()',
+    'negative_lon' => 1,
+    'format'       => 'csv',
+    'header_lines' => 2,
+    'fields'       => 5,
+    'timestamp'    => 0,
+    'longitude'    => 2,
+    'latitude'     => 3,
+    'depth'        => -1,
+    'id'           => -1,
+    'sid'          => 1,
+    'value'        => 4
+  },
+  {
+    'name' => 'neracoossos.wind',
+    'units' => 'm/s',
+    'min' => 0.0,
+    'max' => 100.0,
+    'description' => 'NERACOOS-SOS buoy station-measured hourly wind vector.',
+    'query' =>
+      #'https://coastwatch.pfeg.noaa.gov/erddap/tabledap/neracoosSos.csv?' .
+      #'time,station_id,longitude,latitude,altitude,' .
+      #'wind_speed,wind_from_direction'.
+      # FIX: 2024-05-28 The new webservice below returns no data.
+      'https://coastwatch.pfeg.noaa.gov/erddap/tabledap/nosCoopsMW.csv?' .
+      'time,stationID,longitude,latitude,WS,WD'.
+      '&longitude%3E=MIN_LON&longitude%3C=MAX_LON' .
+      '&latitude%3E=MIN_LAT&latitude%3C=MAX_LAT' .
+      '&time%3E=START_TIME&time%3C=END_TIME' .
+      '&distinct()',
+    'negative_lon' => 1,
+    'format'       => 'csv',
+    'header_lines' => 2,
+    'fields'       => 6,
+    'timestamp'    => 0,
+    'longitude'    => 2,
+    'latitude'     => 3,
+    'depth'        => -1,
+    'id'           => -1,
+    'sid'          => 1,
+    'value'        => 4
+  },
+  {
+    'name' => 'neracoossos.current_direction',
+    'units' => 'degrees',
+    'min' => 0.0,
+    'max' => 360.0,
+    'description' =>
+      'NERACOOS-SOS buoy station-measured hourly ' .
+      'water current flow direction (degrees).',
+    'query' =>
+      #'https://coastwatch.pfeg.noaa.gov/erddap/tabledap/neracoosSos.csv?' .
+      #'time,station_id,longitude,latitude,altitude,'.
+      #'direction_of_sea_water_velocity'.
+      'https://coastwatch.pfeg.noaa.gov/erddap/tabledap/nosCoopsCA.csv?' .
+      'time,stationID,longitude,latitude,CD'.
+      '&longitude%3E=MIN_LON&longitude%3C=MAX_LON' .
+      '&latitude%3E=MIN_LAT&latitude%3C=MAX_LAT' .
+      '&time%3E=START_TIME&time%3C=END_TIME' .
+      '&distinct()',
+    'negative_lon' => 1,
+    'format'       => 'csv',
+    'header_lines' => 2,
+    'fields'       => 5,
+    'timestamp'    => 0,
+    'longitude'    => 2,
+    'latitude'     => 3,
+    'depth'        => -1,
+    'id'           => -1,
+    'sid'          => 1,
+    'value'        => 4
+  },
+  {
+    'name' => 'neracoossos.current_speed',
+    'units' => 'm/s',
+    #'factor' => 0.01, # cm to m.
+    'factor' => 0.51444, # knots to meters/second
+    'min' => 0.0,
+    'max' => 20.0, # After multiplying by factor.
+    'description' =>
+      'NERACOOS-SOS buoy station-measured hourly current speed.',
+    'query' =>
+      #'https://coastwatch.pfeg.noaa.gov/erddap/tabledap/neracoosSos.csv?' .
+      #'time,station_id,longitude,latitude,altitude,sea_water_speed'.
+      'https://coastwatch.pfeg.noaa.gov/erddap/tabledap/nosCoopsCA.csv?' .
+      'time,stationID,longitude,latitude,CS'.
+      '&longitude%3E=MIN_LON&longitude%3C=MAX_LON' .
+      '&latitude%3E=MIN_LAT&latitude%3C=MAX_LAT' .
+      '&time%3E=START_TIME&time%3C=END_TIME' .
+      '&distinct()',
+    'negative_lon' => 1,
+    'format'       => 'csv',
+    'header_lines' => 2,
+    'fields'       => 5,
+    'timestamp'    => 0,
+    'longitude'    => 2,
+    'latitude'     => 3,
+    'depth'        => -1,
+    'id'           => -1,
+    'sid'          => 1,
+    'value'        => 4
+  },
+  {
+    'name' => 'neracoossos.current',
+    'units' => 'm/s',
+    #'factor' => 0.01, # cm to m.
+    'factor' => 0.51444, # knots to meters/second
+    'min' => 0.0,
+    'max' => 20.0,
+    'description' =>
+      'NERACOOS-SOS buoy station-measured hourly water current flow vector.',
+    'query' =>
+      #'https://coastwatch.pfeg.noaa.gov/erddap/tabledap/neracoosSos.csv?' .
+      #'time,station_id,longitude,latitude,altitude,'.
+      #'sea_water_speed,direction_of_sea_water_velocity'.
+      'https://coastwatch.pfeg.noaa.gov/erddap/tabledap/nosCoopsCA.csv?' .
+      'time,stationID,longitude,latitude,CS,CD'.
+      '&longitude%3E=MIN_LON&longitude%3C=MAX_LON' .
+      '&latitude%3E=MIN_LAT&latitude%3C=MAX_LAT' .
+      '&time%3E=START_TIME&time%3C=END_TIME' .
+      '&distinct()',
+    'negative_lon' => 1,
+    'format'       => 'csv',
+    'header_lines' => 2,
+    'fields'       => 6,
+    'timestamp'    => 0,
+    'longitude'    => 2,
+    'latitude'     => 3,
+    'depth'        => -1,
+    'id'           => -1,
+    'sid'          => 1,
+    'value'        => 4
+  },
+###{
+### 'name' => 'neracoossos.wave_height',
+### 'units' => 'm',
+### 'min' => 0.0,
+### 'max' => 50.0,
+### 'description' => 'NERACOOS-SOS buoy station-measured hourly wave height.',
+### 'query' =>
+###   # FIX: missing webservice.
+###   'https://coastwatch.pfeg.noaa.gov/erddap/tabledap/neracoosSos.csv?' .
+###   'time,station_id,longitude,latitude,altitude,wave_height'.
+###   '&longitude%3E=MIN_LON&longitude%3C=MAX_LON' .
+###   '&latitude%3E=MIN_LAT&latitude%3C=MAX_LAT' .
+###   '&time%3E=START_TIME&time%3C=END_TIME' .
+###   '&distinct()',
+### 'negative_lon' => 1,
+### 'format'       => 'csv',
+### 'header_lines' => 2,
+### 'fields'       => 6,
+### 'timestamp'    => 0,
+### 'longitude'    => 2,
+### 'latitude'     => 3,
+### 'depth'        => 4,
+### 'id'           => -1,
+### 'sid'          => 1,
+### 'value'        => 5
+###},
+###{
+### 'name' => 'neracoossos.wave_period',
+### 'units' => 's',
+### 'min' => 0.0,
+### 'max' => 600.0,
+### 'description' => 'NERACOOS-SOS buoy station-measured hourly wave period.',
+### 'query' =>
+###   # FIX: missing webservice.
+###   'https://coastwatch.pfeg.noaa.gov/erddap/tabledap/neracoosSos.csv?' .
+###   'time,station_id,longitude,latitude,altitude,dominant_wave_period'.
+###   '&longitude%3E=MIN_LON&longitude%3C=MAX_LON' .
+###   '&latitude%3E=MIN_LAT&latitude%3C=MAX_LAT' .
+###   '&time%3E=START_TIME&time%3C=END_TIME' .
+###   '&distinct()',
+### 'negative_lon' => 1,
+### 'format'       => 'csv',
+### 'header_lines' => 2,
+### 'fields'       => 6,
+### 'timestamp'    => 0,
+### 'longitude'    => 2,
+### 'latitude'     => 3,
+### 'depth'        => 4,
+### 'id'           => -1,
+### 'sid'          => 1,
+### 'value'        => 5
+###},
+  {
+    'name' => 'neracoossos.water_temperature',
+    'units' => 'C',
+    'min' => 0.0,
+    'max' => 50.0,
+    'description' =>
+      'NERACOOS-SOS buoy station-measured hourly water temperature.',
+    'query' =>
+      #'https://coastwatch.pfeg.noaa.gov/erddap/tabledap/neracoosSos.csv?' .
+      'https://coastwatch.pfeg.noaa.gov/erddap/tabledap/nosSosWTemp.csv?' .
+      'time,station_id,longitude,latitude,altitude,sea_water_temperature'.
+      '&longitude%3E=MIN_LON&longitude%3C=MAX_LON' .
+      '&latitude%3E=MIN_LAT&latitude%3C=MAX_LAT' .
+      '&time%3E=START_TIME&time%3C=END_TIME' .
+      '&distinct()',
+    'negative_lon' => 1,
+    'format'       => 'csv',
+    'header_lines' => 2,
+    'fields'       => 6,
+    'timestamp'    => 0,
+    'longitude'    => 2,
+    'latitude'     => 3,
+    'depth'        => 4,
+    'id'           => -1,
+    'sid'          => 1,
+    'value'        => 5
+  },
+  {
+    'name' => 'neracoossos.water_level',
+    'units' => 'm',
+    'min' => 0.0,
+    'max' => 50.0,
+    'description' =>
+      'NERACOOS-SOS buoy station-measured hourly water surface height above refernece datum.',
+    'query' =>
+      'https://coastwatch.pfeg.noaa.gov/erddap/tabledap/nosSosWLevel.csv?' .
+      'time,station_id,longitude,latitude,altitude,water_level'.
+      '&longitude%3E=MIN_LON&longitude%3C=MAX_LON' .
+      '&latitude%3E=MIN_LAT&latitude%3C=MAX_LAT' .
+      '&time%3E=START_TIME&time%3C=END_TIME' .
+      '&distinct()',
+    'negative_lon' => 1,
+    'format'       => 'csv',
+    'header_lines' => 2,
+    'fields'       => 6,
+    'timestamp'    => 0,
+    'longitude'    => 2,
+    'latitude'     => 3,
+    'depth'        => 4,
+    'id'           => -1,
+    'sid'          => 1,
+    'value'        => 5
+  },
+###{
+### 'name' => 'neracoossos.water_density',
+### 'units' => 'kg/m3',
+### 'min' => 10.0,
+### 'max' => 50.0,
+### 'description' =>
+###   'NERACOOS-SOS buoy station-measured hourly water density.',
+### 'query' =>
+###   # FIX: missing webservice.
+###   'https://coastwatch.pfeg.noaa.gov/erddap/tabledap/neracoosSos.csv?' .
+###   'time,station_id,longitude,latitude,altitude,sea_water_density'.
+###   '&longitude%3E=MIN_LON&longitude%3C=MAX_LON' .
+###   '&latitude%3E=MIN_LAT&latitude%3C=MAX_LAT' .
+###   '&time%3E=START_TIME&time%3C=END_TIME' .
+###   '&distinct()',
+### 'negative_lon' => 1,
+### 'format'       => 'csv',
+### 'header_lines' => 2,
+### 'fields'       => 6,
+### 'timestamp'    => 0,
+### 'longitude'    => 2,
+### 'latitude'     => 3,
+### 'depth'        => 4,
+### 'id'           => -1,
+### 'sid'          => 1,
+### 'value'        => 5
+###},
+  {
+    'name' => 'neracoossos.salinity',
+    'units' => 'PSU',
+    'min' => 0.0,
+    'max' => 50.0,
+    'description' =>
+      'NERACOOS-SOS buoy station-measured hourly water salinity.',
+    'query' =>
+      #'https://coastwatch.pfeg.noaa.gov/erddap/tabledap/neracoosSos.csv?' .
+      'https://coastwatch.pfeg.noaa.gov/erddap/tabledap/nosSosSalinity.csv?' .
+      'time,station_id,longitude,latitude,altitude,sea_water_salinity'.
+      '&longitude%3E=MIN_LON&longitude%3C=MAX_LON' .
+      '&latitude%3E=MIN_LAT&latitude%3C=MAX_LAT' .
+      '&time%3E=START_TIME&time%3C=END_TIME' .
+      '&distinct()',
+    'negative_lon' => 1,
+    'format'       => 'csv',
+    'header_lines' => 2,
+    'fields'       => 6,
+    'timestamp'    => 0,
+    'longitude'    => 2,
+    'latitude'     => 3,
+    'depth'        => 4,
+    'id'           => -1,
+    'sid'          => 1,
+    'value'        => 5
+  },
+  {
+    'name' => 'neracoossos.conductivity',
+    'units' => 'S/m',
+    'min' => 0.0,
+    'max' => 100.0,
+    'description' =>
+      'NERACOOS-SOS buoy station-measured hourly water electrical ' .
+      'conductivity.',
+    'query' =>
+      #'https://coastwatch.pfeg.noaa.gov/erddap/tabledap/neracoosSos.csv?' .
+      'https://coastwatch.pfeg.noaa.gov/erddap/tabledap/nosSosCond.csv?' .
+      'time,station_id,longitude,latitude,altitude,' .
+      #'sea_water_electrical_conductivity'.
+      'conductivity'.
+      '&longitude%3E=MIN_LON&longitude%3C=MAX_LON' .
+      '&latitude%3E=MIN_LAT&latitude%3C=MAX_LAT' .
+      '&time%3E=START_TIME&time%3C=END_TIME' .
+      '&distinct()',
+    'negative_lon' => 1,
+    'format'       => 'csv',
+    'header_lines' => 2,
+    'fields'       => 6,
+    'timestamp'    => 0,
+    'longitude'    => 2,
+    'latitude'     => 3,
+    'depth'        => 4,
+    'id'           => -1,
+    'sid'          => 1,
+    'value'        => 5
+  },
+###{
+### 'name' => 'neracoossos.chlorophyll',
+### 'units' => 'mg/m3',
+### 'min' => 0.0,
+### 'max' => 1000.0,
+### 'description' => 'NERACOOS-SOS buoy station-measured hourly chlorophyll.',
+### 'query' =>
+###   # FIX: missing webservice.
+###   'https://coastwatch.pfeg.noaa.gov/erddap/tabledap/neracoosSos.csv?' .
+###   'time,station_id,longitude,latitude,altitude,chlorophyll' .
+###   '&longitude%3E=MIN_LON&longitude%3C=MAX_LON' .
+###   '&latitude%3E=MIN_LAT&latitude%3C=MAX_LAT' .
+###   '&time%3E=START_TIME&time%3C=END_TIME' .
+###   '&distinct()',
+### 'negative_lon' => 1,
+### 'format'       => 'csv',
+### 'header_lines' => 2,
+### 'fields'       => 6,
+### 'timestamp'    => 0,
+### 'longitude'    => 2,
+### 'latitude'     => 3,
+### 'depth'        => 4,
+### 'id'           => -1,
+### 'sid'          => 1,
+### 'value'        => 5
+###},
+###{
+### 'name' => 'neracoossos.all', # Get all data.
+### 'units' => '',
+### 'minimums' => [
+###   0.0, 0.0, 0.0, 0.0, # Unused: timestamp, station, longitude, latitude.
+###   10.0, # depth/altitude
+###   -50.0,
+###   500.0,
+###   0.0,
+###   0.0,
+###   0.0,
+###   0.0,
+###   0.0,
+###   0.0,
+###   0.0,
+###   0.0,
+###   0.0,
+###   10.0,
+###   0.0,
+###   0.0,
+###   0.0
+### ],
+### 'maximums' => [
+###   0.0, 0.0, 0.0, 0.0, # Unused: timestamp, station, longitude, latitude.
+###   -500.0, # depth/altitude
+###   50.0,
+###   1500.0,
+###   100000.0,
+###   360.0,
+###   100.0,
+###   100.0,
+###   360.0,
+###   20.0,
+###   50.0,
+###   600.0,
+###   50.0,
+###   50.0,
+###   50.0,
+###   100.0,
+###   1000.0
+### ],
+### 'factors' => [
+###   0.0, 0.0, 0.0, 0.0, # Unused: timestamp, station, longitude, latitude.
+###   1.0, # depth/altitude
+###   1.0,
+###   1.0,
+###   1.0,
+###   1.0,
+###   1.0,
+###   1.0,
+###   1.0,
+###   0.01, # cm to m.
+###   1.0,
+###   1.0,
+###   1.0,
+###   1.0,
+###   1.0,
+###   1.0,
+###   1.0
+### ],
+### 'output_header' =>
+###   "\tdepth(m)" .
+###   "\tair_temperature(C)" .
+###   "\tair_pressure(hPa)" .
+###   "\tair_visibility(m)" .
+###   "\twind_direction(bearing)" .
+###   "\twind_speed(m/s)" .
+###   "\twind_gust_speed(m/s)" .
+###   "\tcurrent_direction(degrees)" .
+###   "\tcurrent_speed(m/s)" .
+###   "\twave_height(m)" .
+###   "\twave_period(s)" .
+###   "\twater_temperature(C)" .
+###   "\twater_density(kg/m3)" .
+###   "\tsalinity(PSU)" .
+###   "\tconductivity(S/m)" .
+###   "\tchlorophyll(mg/m3)\n",
+### 'description' => 'NERACOOS-SOS buoy station-measured hourly data.',
+### 'query' =>
+###   # FIX: missing webservice.
+###   'https://coastwatch.pfeg.noaa.gov/erddap/tabledap/neracoosSos.csv?' .
+###   'time,station_id,longitude,latitude,altitude,' .
+###   'air_temperature,sea_level_pressure,visibility_in_air,' .
+###   'wind_from_direction,wind_speed,wind_gust,' .
+###   'direction_of_sea_water_velocity,sea_water_speed,' .
+###   'wave_height,dominant_wave_period,' .
+###   'sea_water_temperature,sea_water_density,sea_water_salinity,' .
+###   'sea_water_electrical_conductivity,chlorophyll' .
+###   '&longitude%3E=MIN_LON&longitude%3C=MAX_LON' .
+###   '&latitude%3E=MIN_LAT&latitude%3C=MAX_LAT' .
+###   '&time%3E=START_TIME&time%3C=END_TIME' .
+###   '&distinct()',
+### 'negative_lon' => 1,
+### 'format'       => 'csv',
+### 'header_lines' => 2,
+### 'fields'       => 20,
+### 'timestamp'    => 0,
+### 'longitude'    => 2,
+### 'latitude'     => 3,
+### 'depth'        => 4,
+### 'id'           => -1,
+### 'sid'          => 1,
+### 'value'        => 5
+###}
+);
+
+
+################################## VARIABLES #################################
+
+
+# Parsed from the URL query string:
+
+my $service  = ''; # wcs.
+my $version  = ''; # 1.0.0.
+my $request  = ''; # getcapabilities or describecoverage or getcoverage.
+my $coverage = ''; # Saved until time has been parsed.
+my $variable = ''; # o3, ...
+my $format   = ''; # ascii.
+my $time     = ''; # E.g., 2001-08-29t00:00:00z/2001-08-31t23:59:59z.
+my $bbox     = ''; # E.g., -90,28,-80,32,1,1. Where 1,1 means layer 1 only.
+my $depth    = ''; # E.g., 0 or 500.
+
+# Derived from the above parsed values:
+
+my @bounds = split( /,/, '-180,-90,180,90' );
+my $starting_timestamp = 0;  # yyyymmddhh, e.g., 2005082600.
+my $hours              = 0;  # E.g., 5 days = 5 x 24 = 120.
+my $days               = 0;  # E.g., 5.
+my $ending_yyyymmdd    = 0;  # yyyymmdd, e.g., 20050826.
+my $coverage_units = '';
+my $remote_queries = 0; # Number of calls to remote cdmo web service.
+
+################################## ROUTINES ##################################
+
+
+main();
+
+
+sub main {
+  my $result = 0;
+
+  if ( ! parse_url() ) {
+    print "Content-type: text/plain; charset=iso-8859-1\n\n"; # For webserver
+  } elsif ( $request eq 'getcapabilities' ) {
+    print "Content-type: text/xml; charset=iso-8859-1\n\n"; # For webserver
+    print_capabilities();
+    $result = 1;
+  } elsif ( $request eq 'describecoverage' ) {
+    print "Content-type: text/xml; charset=iso-8859-1\n\n"; # For webserver
+    print_coverage_description();
+    $result = 1;
+  } elsif ( $request eq 'getcoverage' ) {
+    compute_time_range();
+    print "Content-type: $content_types{ $format }; charset=iso-8859-1\n\n";
+    $result = execute_remote_query();
+  }
+
+  $result = 1 - $result; # UNIX: zero is success, non-zero is failure.
+  debug( "exit result = $result" );
+  exit $result;
+}
+
+
+
+# Print web server capabilities metadata.
+
+sub print_capabilities {
+  print '<?xml version="1.0" encoding="UTF-8" ?>' . "\n";
+  print '<WCS_Capabilities version="1.0.0" ';
+  print 'xmlns="https://www.opengeospatial.org/standards/wcs" ';
+  print 'xmlns:gml="https://www.opengis.net//gml" ';
+  print 'xmlns:xlink="https://www.w3.org/1999/xlink">';
+  print '
+    <Service>
+        <metadataLink xlink:type="simple" xlink:href=" https://www.epa.gov/rsig" metadataType="other" />
+        <description>EPA ERDDAP Web Server 1.0.0</description>
+        <name>EPA_ERDDAP_OGC_WCS_1.0.0</name>
+        <label>EPA ERDDAP Web Server 1.0.0</label>
+        <keywords>
+            <keyword>EPA</keyword>
+            <keyword>ERDDAP</keyword>
+            <keyword>interoperability</keyword>
+        </keywords>
+        <responsibleParty>
+            <individualName>Todd Plessel</individualName>
+            <organisationName>EPA Vislab</organisationName>
+            <contactInfo>
+                <onlineResource xlink:type="simple" xlink:href="mailto:plessel.todd@epa.gov" />
+            </contactInfo>
+        </responsibleParty>
+        <fees>NONE</fees>
+        <accessConstraints>NONE</accessConstraints>
+    </Service>
+    <Capability>
+        <Request>
+            <GetCapabilities>
+                <DCPType>
+                    <HTTP>
+                        <Get>
+                            <OnlineResource xlink:type="simple" xlink:href="https://ofmpub.epa.gov/rsig/erddapserver?" />
+                        </Get>
+                        <Post>
+                            <OnlineResource xlink:type="simple" xlink:href="https://ofmpub.epa.gov/rsig/erddapserver" />
+                        </Post>
+                    </HTTP>
+                </DCPType>
+            </GetCapabilities>
+            <DescribeCoverage>
+                <DCPType>
+                    <HTTP>
+                        <Get>
+                            <OnlineResource xlink:type="simple" xlink:href="https://ofmpub.epa.gov/rsig/erddapserver?" />
+                        </Get>
+                        <Post>
+                            <OnlineResource xlink:type="simple" xlink:href="https://ofmpub.epa.gov/rsig/erddapserver" />
+                        </Post>
+                    </HTTP>
+                </DCPType>
+            </DescribeCoverage>
+            <GetCoverage>
+                <DCPType>
+                    <HTTP>
+                        <Get>
+                            <OnlineResource xlink:type="simple" xlink:href="https://ofmpub.epa.gov/rsig/erddapserver?" />
+                        </Get>
+                        <Post>
+                            <OnlineResource xlink:type="simple" xlink:href="https://ofmpub.epa.gov/rsig/erddapserver" />
+                        </Post>
+                    </HTTP>
+                </DCPType>
+            </GetCoverage>
+        </Request>
+        <Exception>
+            <Format>text/xml; charset="utf-8"</Format>
+        </Exception>
+    </Capability>
+    <ContentMetadata version="1.0.0">';
+  print "\n";
+
+  my $variable_count = @metadata;
+
+  for ( my $variable = 0; $variable < $variable_count; ++$variable ) {
+    my $name = $metadata[ $variable ]->{ name };
+
+    if ( $name ne '?' ) {
+      my $units = $metadata[ $variable ]->{ units };
+      my $label = last_name( $name );
+      my $description = $metadata[ $variable ]->{ description };
+      print "        <CoverageOfferingBrief>\n";
+      print "            <name>$name</name>\n";
+      print "            <label>$label($units)</label>\n";
+      print "            <description>$description</description>\n";
+      print '            <lonLatEnvelope srsName="WGS84(DD)">';
+      print "\n";
+      print "                <gml:pos>-126 22</gml:pos>\n";
+      print "                <gml:pos>-65 50</gml:pos>\n";
+      print "            </lonLatEnvelope>\n";
+      print "        </CoverageOfferingBrief>\n";
+    }
+  }
+
+  print "    </ContentMetadata>\n";
+  print "</WCS_Capabilities>\n";
+}
+
+
+
+# Print web server coverage description metadata.
+
+sub print_coverage_description {
+  print '<?xml version="1.0" encoding="UTF-8" ?>';
+  print '<CoverageDescription version="1.0.0" ';
+  print 'xmlns="https://www.opengeospatial.org/standards/wcs" ';
+  print 'xmlns:gml="https://www.opengis.net/gml" ';
+  print 'xmlns:xlink="https://www.w3.org/1999/xlink">';
+  print "\n";
+
+  my $variable_count = @metadata;
+
+  for ( my $variable = 0; $variable < $variable_count; ++$variable ) {
+    my $name = $metadata[ $variable ]->{ name };
+
+    if ( $name ne '?' ) {
+      my $units = $metadata[ $variable ]->{ units };
+      my $description = $metadata[ $variable ]->{ description };
+
+      if ( $coverage eq '' || $coverage eq $name ) {
+        print "    <CoverageOffering>\n";
+        print "        <name>$name</name>\n";
+        print "        <label>$name($units)</label>\n";
+        print "        <description>$description</description>\n";
+        print "        <domainSet>\n";
+        print "            <spatialDomain>\n";
+        print '                <gml:Envelope srsName="WGS84(DD)">';
+        print "\n";
+        print "                    <gml:pos>-126 22</gml:pos>\n";
+        print "                    <gml:pos>-65 50</gml:pos>\n";
+        print "                </gml:Envelope>\n";
+        print "            </spatialDomain>\n";
+        print "            <temporalDomain>\n";
+        print "                <timePeriod>\n";
+        print "                    <beginPosition>19940501";
+        print "T00:00:00Z</beginPosition>\n";
+        print "                    <endPosition>20151213";
+        print "T23:59:59Z</endPosition>\n";
+        print "                    <timeResolution>PT1Y</timeResolution>\n";
+        print "                </timePeriod>\n";
+        print "            </temporalDomain>\n";
+        print "        </domainSet>\n";
+        print "        <rangeSet>\n";
+        print "            <RangeSet>\n";
+        print "                <name>$name</name>\n";
+        print "                <label>$name($units)</label>\n";
+        print "                <description>$description</description>";
+        print '
+                <nullValues>
+                    <singleValue>-99</singleValue>
+                </nullValues>
+            </RangeSet>
+        </rangeSet>
+        <supportedCRSs>
+            <requestResponseCRSs>CRS:84</requestResponseCRSs>
+            <nativeCRSs>CRS:84</nativeCRSs>
+        </supportedCRSs>
+        <supportedFormats>
+            <formats>ASCII</formats>
+        </supportedFormats>
+        <supportedInterpolations>
+            <interpolationMethod>mean mode</interpolationMethod>
+        </supportedInterpolations>
+    </CoverageOffering>
+';
+
+      }
+    }
+  }
+
+  print "</CoverageDescription>\n";
+}
+
+
+
+# Parse URL parameters into variables.
+
+sub parse_url {
+  use CGI qw/ untaint /;     # Load Safe untainting CGI routines.
+  $CGI::DISABLE_UPLOADS = 1; # Disable uploads.
+  $CGI::POST_MAX = 1024;     # Limit posts to 1024 bytes.
+  my $query = new CGI;       # Parse QUERY_STRING.
+  %ENV = ();                 # Unset all environment variables.
+  my @names = $query->param; # Extract names of parameters.
+  my $count = @names;
+  my $result = 0;
+  debug( "$program_name @names ($count)" );
+
+  for ( my $parameter = 0; $parameter < $count; ++$parameter) {
+    $_ = $names[ $parameter ];                # $_ is tainted.
+    s/[^A-Za-z]/_/go;                         # Untaint $_.
+    my $option = $_;                          # $option is untainted.
+    $_ = $query->param( $option );            # $_ is tainted.
+    s/[^\w\-.,:\/]/_/go;                      # Untaint $_.
+    my $value = $_;                           # $value is untainted.
+    my $lowercase_option = lc( $option );
+    my $lowercase_value  = lc( $value );
+    debug( "$lowercase_option $lowercase_value" );
+
+    if ( $parsers{ $lowercase_option } ) {
+      $result = $parsers{ $lowercase_option }->( $lowercase_value );
+    } else {
+      print STDERR "\nInvalid option: '$option'\n";
+      $result = 0;
+    }
+
+    if ( ! $result ) {
+      $parameter = $count; # Finish looping.
+    }
+  }
+
+  $result = $result && required_options_specified();
+  return $result;
+}
+
+
+
+# Parse service option.
+
+sub parse_service_option {
+  my $value = shift;
+  my $result = parse_option( $service, $value, 'SERVICE', 'wcs' );
+  return $result;
+}
+
+
+
+# Parse version option.
+
+sub parse_version_option {
+  my $value = shift;
+  my $result = parse_option( $version, $value, 'VERSION', '1.0.0' );
+  return $result;
+}
+
+
+
+# Parse request option.
+
+sub parse_request_option {
+  my $value = shift;
+  my $result = parse_option( $request, $value, 'REQUEST',
+                             'getcoverage getcapabilities describecoverage' );
+  return $result;
+}
+
+
+
+# Parse format option:
+
+sub parse_format_option {
+  my $value = shift;
+  my $result =
+    parse_option( $format, $value, 'FORMAT', 'ascii bin' );
+  return $result;
+}
+
+
+
+# Parse coverage option.
+
+sub parse_coverage_option {
+  my $value = shift;
+  my $result = 0;
+
+  if ( $coverage ne '' ) {
+    print STDERR "\nRedundant COVERAGE option: '$value'\n";
+  } else {
+    my $variable_count = @metadata;
+
+    for ( my $variable = 0; $coverage eq '' && $variable < $variable_count;
+          ++$variable ) {
+      my $name = $metadata[ $variable ]->{ name };
+
+      if ( $name ne '?' ) {
+
+        if ( $name eq $value ) {
+          $coverage = $name;
+          $coverage_units = $metadata[ $variable ]->{ units };
+          $result = 1;
+        }
+      }
+    }
+
+    if ( ! $result ) {
+      print STDERR "\nInvalid COVERAGE option: '$value'\n";
+    }
+  }
+
+  return $result;
+}
+
+
+
+# Parse time option.
+
+sub parse_time_option {
+  my $value = shift;
+  my $result = 0;
+
+  if ( $time ne '' ) {
+    print STDERR "\nRedundant TIME option: '$value'\n";
+  } else {
+    $time = $value;
+    my $is_valid = is_valid_time( $time );
+
+    if ( ! $is_valid ) {
+      print STDERR "\nInvalid TIME option: '$value'\n";
+    } else {
+      $result = 1;
+    }
+  }
+
+  return $result;
+}
+
+
+
+# Parse bbox option.
+
+sub parse_bbox_option {
+  my $value = shift;
+  my $result = 0;
+
+  if ( $bbox ne '' ) {
+    print STDERR "\nRedundant BBOX option: '$value'\n";
+  } else {
+    $bbox = $value;
+    @bounds = split( /,/, $bbox );
+    my $bounds_count = @bounds;
+
+    if ( $bounds_count != 4 && $bounds_count != 6 ) {
+      print STDERR "\nInvalid bbox option: '$value'\n";
+    } elsif ( ! in_range( $bounds[ 0 ], -180.0, 180.0 ) ) {
+      print STDERR "\nInvalid bbox option: '$bounds[ 0 ]'\n";
+    } elsif ( ! in_range( $bounds[ 1 ], -90.0, 90.0 ) ) {
+      print STDERR "\nInvalid bbox option: '$bounds[ 1 ]'\n";
+    } elsif ( ! in_range( $bounds[ 2 ], $bounds[ 0 ], 180.0 ) ) {
+      print STDERR "\nInvalid bbox option: '$bounds[ 2 ]'\n";
+    } elsif ( ! in_range( $bounds[ 3 ], $bounds[ 1 ], 90.0 ) ) {
+      print STDERR "\nInvalid bbox option: '$bounds[ 3 ]'\n";
+    } elsif ( $bounds_count == 6 ) {
+      $result = $bounds[ 4 ] eq $bounds[ 5 ] &&
+                parse_option( $depth, $bounds[ 4 ], 'BBOX(depth)',
+                          '0 -10 -20 -30 -50 -75 -100 ' .
+                          '-125 -150 -200 -250 -300 -400 -500' );
+    } else {
+      $depth = 0;
+      $result = 1;
+    }
+  }
+
+  return $result;
+}
+
+
+# Check that all required 'options' have been specified:
+
+sub required_options_specified {
+  my $result = 0;
+
+  if ( $service eq '' ) {
+    print STDERR "\nMissing option: 'SERVICE'\n";
+  } elsif ( $version eq '' ) {
+    print STDERR "\nMissing option: 'VERSION'\n";
+  } elsif ( $request eq '' ) {
+    print STDERR "\nMissing option: 'REQUEST'\n";
+  } elsif ( $request eq 'getcoverage' ) {
+
+    if ( $format eq '' ) {
+      print STDERR "\nMissing option: 'FORMAT'\n";
+    } elsif ( $time eq '' ) {
+      print STDERR "\nMissing option: 'TIME'\n";
+    } elsif ( $bbox eq '' ) {
+      print STDERR "\nMissing option: 'BBOX'\n";
+    } elsif ( $coverage eq '' ) {
+      print STDERR "\nMissing option: 'COVERAGE'\n";
+    } else {
+      $result = 1;
+    }
+  } else {
+    $result = 1;
+  }
+
+  return $result;
+}
+
+
+
+# Compute starting_timestamp and hours.
+# inputs:  $time = '2001-08-26t00:00:00z/2001-08-31t23:59:59z'
+# outputs: $starting_timestamp = 2005082600
+#          $hours = 120
+#          $days = 5
+
+sub compute_time_range {
+  my $yyyy1 = substr( $time, 0, 4 );
+  my $mm1   = substr( $time, 5, 2 );
+  my $dd1   = substr( $time, 8, 2 );
+  my $hh1   = substr( $time, 11, 2 );
+  my $i     = index( $time, '/' );
+
+  $starting_timestamp = integer_timestamp( $yyyy1, $mm1, $dd1, $hh1 );
+  $ending_yyyymmdd = $starting_timestamp / 100;
+  $hours = 1;
+  $days = 1;
+
+  if ( $i != -1 ) {
+    ++$i;
+    my $yyyy2 = substr( $time, $i + 0, 4 );
+    my $mm2   = substr( $time, $i + 5, 2 );
+    my $dd2   = substr( $time, $i + 8, 2 );
+    my $hh2   = substr( $time, $i + 11, 2 );
+    my $yyyy  = $yyyy1;
+    my $mm    = $mm1;
+    my $dd    = $dd1;
+    my $hh    = $hh1;
+    my $previous_dd = $dd1;
+
+    while ( integer_timestamp( $yyyy, $mm, $dd, $hh ) !=
+            integer_timestamp( $yyyy2, $mm2, $dd2, $hh2 ) ) {
+      increment_timestamp( $yyyy, $mm, $dd, $hh );
+
+      if ( $dd ne $previous_dd ) {
+        ++$days;
+        $previous_dd = $dd;
+        $ending_yyyymmdd = $yyyy * 10000 + $mm * 100 + $dd;
+      }
+
+      ++$hours;
+    }
+  }
+}
+
+
+
+# Execute query of remote web service:
+
+sub execute_remote_query {
+  my $result = 0;
+  my $start_timestamp = uc( substr( $time, 0, 20 ) );
+  my $end_timestamp =
+    length( $time ) == 41 ? uc( substr( $time, 21, 20 ) ) : $start_timestamp;
+  my $variable = lookup_variable( $coverage );
+  my $variable_info = $metadata[ $variable ];
+  my $short_name = last_name( $variable_info->{ name } );
+  my $units = $variable_info->{ units };
+  my $min = $variable_info->{ min };
+  my $max = $variable_info->{ max };
+  my $negative_lon = $variable_info->{ negative_lon };
+  my $command = construct_command( $variable_info );
+  my $is_gridded = $variable_info->{ format } eq 'dods';
+  my $header_lines = $is_gridded ? -1 : $variable_info->{ header_lines };
+  my $factor =
+    defined( $variable_info->{ factor } ) ? $variable_info->{ factor } : 1.0;
+  my $fields          = $is_gridded ? -1 : $variable_info->{ fields };
+  my $timestamp_index = $is_gridded ? -1 : $variable_info->{ timestamp };
+  my $longitude_index = $is_gridded ? -1 : $variable_info->{ longitude };
+  my $latitude_index  = $is_gridded ? -1 : $variable_info->{ latitude };
+  my $depth_index     = $is_gridded ? -1 : $variable_info->{ depth };
+  my $id_index        = $is_gridded ? -1 : $variable_info->{ id };
+  my $sid_index       = $is_gridded ? -1 : $variable_info->{ sid };
+  my $value_index     = $is_gridded ? -1 : $variable_info->{ value };
+  my $is_wind = $short_name eq 'wind';
+  my $is_current = $short_name eq 'current';
+  my $is_vector = $is_wind || $is_current;
+  my $is_all  = $short_name eq 'all';
+  my $is_altitude = index( $variable_info->{ query }, ',altitude,' ) != -1;
+  my $the_pipe = 0;
+
+  # Untaint command (match expression is arbitrary as far as -T is concerned):
+
+  if ( $command =~ m#^(/[\w-]+/[\w -/.,':?=&<>\[\]\(\)|]+)$# ) {
+    $command = $1; # Re-assign first match, which is enough to satisfy -T.
+    debug( "$0 executing command = $command" );
+    %ENV = (); # Unset all environment variables prior to popen.
+    # Complicated, supposedly safer way to open a readable pipe to command:
+    my $pid = open( the_pipe, "-|" );
+
+    if ( ! defined( $pid ) ) {
+      die "Couldn't open pipe to subprocess";
+    } elsif ( $pid ) { # Parent process.
+      debug( "reading result of query to remote webservice..." );
+      my $line = <the_pipe>; # Read and skip header line.
+
+      if ( defined( $line ) ) { # If remote web service returned a line.
+        my $lines_read = 1;
+        my $ok = 0;
+        debug( "first line = '$line'" );
+
+        if ( $is_gridded ) {
+          print $line;
+
+          while ( <the_pipe> ) {
+            print;
+          }
+
+          $result = 1;
+        } else { # Read and process point data:
+          my @output = ();
+
+          # Read the csv ASCII header for point data:
+
+          $ok = index( $line, ',' ) > 0;
+          debug( "reading csv header ok = $ok" );
+
+          for ( my $i = 1; $ok && $i < $header_lines; ++$i ) {
+            $ok = defined( $line = <the_pipe> ) && index( $line, ',' ) != -1;
+            debug( "read header line '$line'" );
+          }
+
+          # Read the csv ASCII point data:
+
+          my $previous_longitude = -9999.0;
+          my $previous_latitude  = -9999.0;
+
+          while ( defined( $line = <the_pipe> ) ) {
+            my @values = split( /,/, $line );
+            my $count = @values;
+            $ok = $count == $fields;
+
+            if ( @output < 5 ) {
+              debug( "read data line = @values ($count), ok = $ok" );
+            }
+
+            if ( $ok ) {
+              my $longitude = $values[ $longitude_index ];
+              my $latitude  = $values[ $latitude_index ];
+
+              if ( $negative_lon == 0 ) {
+
+                if ( $longitude > 180.0 ) {
+                  $longitude -= 360.0;
+                }
+              }
+
+              $ok = in_range( $longitude, -180.0, 180.0 ) &&
+                    in_range( $latitude, -90.0, 90.0 );
+
+              if ( $ok &&
+                   $short_name ne 'station' ||
+                   ( ( $longitude != $previous_longitude ||
+                       $latitude  != $previous_latitude ) &&
+                       ! found_text( sprintf( "\t%12.6f\t%12.6f",
+                                     $longitude, $latitude ), \@output ) ) ) {
+                $previous_longitude = $longitude;
+                $previous_latitude  = $latitude;
+                my $timestamp =
+                  $timestamp_index == -1 ? -1 : $values[ $timestamp_index ];
+                my $id = $id_index == -1 ? -1 : $values[ $id_index ];
+                my $sid = $sid_index == -1 ? -1 : $values[ $sid_index ];
+                my $depth = $depth_index == -1 ? -1 : $values[ $depth_index ];
+
+                if ( lc( $values[ $depth_index ] ) eq 'nan' ) {
+                  $depth = 0.0;
+                }
+
+                my $value = $value_index == -1 ? -1 : $values[ $value_index ];
+                my $value2 = $is_vector ? $values[ $value_index + 1 ] : -1;
+
+                if ( $is_all ) {
+                  $ok = 0;
+
+                  for ( my $i = $value_index; $i < $fields; ++$i ) {
+                    my $v = $values[ $i ];
+
+                    if ( $v eq '' || index( $v, 'a' ) != -1 ) {
+                      $v = '-9999';
+                    } else {
+                      my $f = $variable_info->{ factors }[ $i ];
+                      $v *= $f;
+                      my $minimum = $variable_info->{ minimums }[ $i ];
+                      my $maximum = $variable_info->{ maximums }[ $i ];
+
+                      if ( ! in_range( $v, $minimum, $maximum ) ) {
+                        $v = '-9999';
+                      } else {
+                        $ok = 1;
+                      }
+                    }
+
+                    $values[ $i ] = $v;
+                  }
+
+                } elsif ( $min ne '' ) {
+                  $ok = 0;
+
+                  if ( $value eq '' || index( $value, 'a' ) != -1 ) {
+                    $value = -9999.0;
+                  } else {
+                    $value *= $factor;
+
+                    if ( ! in_range( $value, $min, $max ) ) {
+                      $value = -9999.0;
+                    } else {
+                      $ok = 1;
+                    }
+
+                    if ( $ok && $is_wind && $coverage eq 'neracoossos.wind' ) {
+                      $ok = 0;
+
+                      if ( $value2 eq '' || index( $value2, 'a' ) != -1 ) {
+                        $value2 = -9999.0;
+                      } else {
+
+                        if ( ! in_range( $value2, 0.0, 360.0 ) ) {
+                          $value2 = -9999.0;
+                        } else { # Convert (speed, from_bearing) to (u, v):
+                          my $angle = 90.0 - $value2;
+
+                          if ( $angle < 0.0 ) {
+                            $angle += 360.0;
+                          }
+
+                          # Convert 'from_direction' to 'to_direction':
+
+                          $angle -= 180.0;
+
+                          if ( $angle < 0.0 ) {
+                            $angle += 360.0;
+                          }
+
+                          my $to_radians = 0.017453292519943; # Pi / 180.
+                          my $theta = $angle * $to_radians;
+                          my $u = $value * cos( $theta );
+                          my $v = $value * sin( $theta );
+                          $value = $u;
+                          $value2 = $v;
+                          $ok = 1;
+                        }
+                      }
+                    } elsif ( $ok && $is_wind ) {
+                      $ok = 0;
+
+                      if ( $value2 eq '' || index( $value2, 'a' ) != -1 ) {
+                        $value2 = -9999.0;
+                      } else {
+                        $value2 *= $factor;
+
+                        if ( ! in_range( $value2, $min, $max ) ) {
+                          $value2 = -9999.0;
+                        } else {
+                          $ok = 1;
+                        }
+                      }
+                    } elsif ( $ok && $is_current ) {
+                      $ok = 0;
+
+                      if ( $value2 eq '' || index( $value2, 'a' ) != -1 ) {
+                        $value2 = -9999.0;
+                      } else {
+
+                        if ( ! in_range( $value2, 0.0, 360.0 ) ) {
+                          $value2 = -9999.0;
+                        } else { # Convert (speed, angle) to (u, v):
+                          my $angle = $value2;
+                          my $to_radians = 0.017453292519943; # Pi / 180.
+                          my $theta = $angle * $to_radians;
+                          my $u = $value * cos( $theta );
+                          my $v = $value * sin( $theta );
+                          $value = $u;
+                          $value2 = $v;
+                          $ok = 1;
+                        }
+                      }
+                    }
+                  }
+                }
+
+                if ( $ok ) {
+                  my $output_line = '';
+
+                  if ( $timestamp_index != -1 ) {
+                    $ok = ( $timestamp ge $start_timestamp &&
+                            $timestamp le $end_timestamp );
+
+                    if ( $ok ) {
+                      $output_line .= "$timestamp\t";
+                    }
+                  }
+
+                  if ( $ok ) {
+
+                    if ( $id_index != -1 ) {
+                      $output_line .= sprintf( "%010d\t", $id );
+                    }
+
+                    if ( $sid_index != -1 ) {
+                      $output_line .= sprintf( "%10s\t", $sid );
+                    }
+
+                    $output_line .= sprintf( "%12.6f\t", $longitude );
+                    $output_line .= sprintf( "%12.6f", $latitude );
+
+                    if ( $depth_index != -1 ) {
+
+                      if ( $is_altitude ) {
+                        $output_line .= sprintf( "\t%12.6f", $depth );
+                      } else {
+                        $output_line .= sprintf( "\t%12.6f", -$depth );
+                      }
+                    }
+
+                    if ( $is_all ) {
+
+                      for ( my $i = $value_index; $i < $fields; ++$i ) {
+                        $output_line .= sprintf( "\t%12.6f", $values[ $i ] );
+                      }
+
+                    } elsif ( $value_index != -1 ) {
+                      $output_line .= sprintf( "\t%12.6f", $value );
+
+                      if ( $is_wind || $is_current ) {
+                        $output_line .= sprintf( "\t%12.6f", $value2 );
+                      }
+                    }
+
+                    push( @output, $output_line );
+                  }
+                }
+              }
+            }
+          } # End of read loop on pipe.
+
+          my $output_count = @output;
+
+          if ( $output_count ) { # Write ASCII header and data lines:
+            print "$output_count\n"; # Output number of data lines.
+            my $header_line = '';
+
+            if ( $timestamp_index != -1 ) {
+              $header_line .= "timestamp(UTC)\t";
+            }
+
+            if ( $id_index != -1 ) {
+              $header_line .= "station_id(-)\t";
+            }
+
+            if ( $sid_index != -1 ) {
+              $header_line .= "station_name(-)\t";
+            }
+
+            $header_line .= "longitude(deg)\tlatitude(deg)";
+
+            if ( $depth_index != -1 ) {
+
+              if ( $is_altitude ) {
+                $header_line .= "\televation(m)";
+              } else {
+                $header_line .= "\tdepth(m)";
+              }
+            }
+
+            if ( $value_index != -1 ) {
+
+              if ( $is_wind ) {
+                $header_line .= "\twind_u($units)\twind_v($units)";
+              } elsif ( $is_current ) {
+                $header_line .= "\tcurrent_u($units)\tcurrent_v($units)";
+              } elsif ( $is_all ) {
+                $header_line .= $variable_info->{ output_header };
+              } else {
+                $header_line .= "\t$short_name($units)";
+              }
+            }
+
+            print "$header_line\n";
+
+            for ( my $i = 0; $i < $output_count; ++$i ) {
+              print "$output[ $i ]\n";
+            }
+
+            $result = 1;
+          }
+        }
+      }
+
+      close( the_pipe ) or die $!;
+    } else { # Child process.
+      exec( $command ) or die "can't exec program: $!";
+    }
+  } else {
+    print STDERR "\n$0: command contains invalid characters.\n";
+  }
+
+  return $result;
+}
+
+
+
+# Construct a command to query a remote web service:
+# my $command = construct_command( $variable_info );
+
+sub construct_command {
+  my ( $variable_info ) = @_;
+  my $name = last_name( $variable_info->{ name } );
+  my $units = $variable_info->{ units };
+  my $min = $variable_info->{ min };
+  my $max = $variable_info->{ max };
+  my $query = $variable_info->{ query };
+  my $negative_lon = $variable_info->{ negative_lon };
+  my $swap_rows = $variable_info->{ swap_rows };
+
+  if ( ! defined( $swap_rows ) ) {
+    $swap_rows = 0;
+  }
+
+  my $format = $variable_info->{ format };
+  my $result = "$wget_command '$query'";
+
+  if ( $format eq 'dods' ) {
+    $result .= " | $dods2bin $name $units $min $max $swap_rows";
+  }
+
+  my $start_time  = uc( substr( $time, 0, 20 ) );
+  my $end_time =
+    length( $time ) == 41 ? uc( substr( $time, 21, 20 ) ) : $start_time;
+  my $yyyy1  = substr( $start_time, 0, 4 );
+  my $mm1    = substr( $start_time, 5, 2 );
+  my $dd1    = substr( $start_time, 8, 2 );
+  my $yyyy2  = substr( $end_time, 0, 4 );
+  my $mm2    = substr( $end_time, 5, 2 );
+  my $dd2    = substr( $end_time, 8, 2 );
+  my $min_lon = $bounds[ 0 ];
+  my $min_lat = $bounds[ 1 ];
+  my $max_lon = $bounds[ 2 ];
+  my $max_lat = $bounds[ 3 ];
+
+  if ( $negative_lon == 0 ) { # Convert from [-180, 180] to [0, 360]:
+
+    if ( $min_lon < 0.0 ) {
+      $min_lon += 360.0;
+    }
+
+    if ( $max_lon < 0.0 ) {
+      $max_lon += 360.0;
+    }
+
+    if ( $min_lon > $max_lon ) {
+      my $swap_temp = $min_lon;
+      $min_lon = $max_lon;
+      $max_lon = $swap_temp;
+    }
+  }
+
+  my $previous_day = $variable_info->{ previous_day };
+
+  if ( ! defined( $previous_day ) ) {
+    $previous_day = 0;
+  }
+
+  if ( $previous_day == 1 ) {
+    decrement_date( $yyyy1, $mm1, $dd1 );
+    decrement_date( $yyyy2, $mm2, $dd2 );
+    $mm1 = sprintf( "%02d", $mm1 );
+    $mm2 = sprintf( "%02d", $mm2 );
+    $dd1 = sprintf( "%02d", $dd1 );
+    $dd2 = sprintf( "%02d", $dd2 );
+  }
+
+  $result =~ s/START_TIME/$start_time/;
+  $result =~ s/END_TIME/$end_time/;
+  $result =~ s/YYYY1-/$yyyy1-/;
+  $result =~ s/YYYY2-/$yyyy2-/;
+  $result =~ s/-MM1-/-$mm1-/;
+  $result =~ s/-MM2-/-$mm2-/;
+  $result =~ s/-DD1/-$dd1/;
+  $result =~ s/-DD2/-$dd2/;
+  $result =~ s/MIN_LON/$min_lon/;
+  $result =~ s/MAX_LON/$max_lon/;
+  $result =~ s/MIN_LAT/$min_lat/;
+  $result =~ s/MAX_LAT/$max_lat/;
+
+  my $d = $depth < 0 ? -1 * $depth : 0;
+  $result =~ s/DEPTH/$d/g;
+
+  # Encode problematic characters:
+
+  $result =~ s/\[/%5B/g;
+  $result =~ s/\]/%5D/g;
+
+  return $result;
+}
+
+
+
+# Parse gridded array variable line which looks like this:
+# "     Float32 chlorophyll[time = 2][altitude = 1][latitude = 11][longitude = 22];\n"
+# or
+# "     Float32 sst[time = 3][latitude = 11][longitude = 11];\n"
+# my $ok =
+#   parse_data_array_line( $line, $timesteps, $rows, $columns );
+
+sub parse_data_array_line {
+  my ( $line, $timesteps, $rows, $columns ) = @_;
+  debug( "read data line: $line" );
+  my $result = 0;
+
+  if ( index( $line, '      Float32 ' ) == 0 ||
+       index( $line, '      Float64 ' ) == 0 ) {
+
+    $line =~ s/\D/ /g; # Replace non-digits with spaces.
+    my @dimensions = split( /\s+/, $line ); # Split line into space-delimited.
+    debug( "dimensions = @dimensions" );
+    my $count = @dimensions;
+    my $layers = 1;
+    my $unused1 = '';
+    my $unused2 = '';
+    my $bits = 0;
+
+    if ( $count == 5 || $count == 6 ) {
+      $bits = $dimensions[ 1 ];
+      $timesteps = $dimensions[ 2 ];
+      my $next = 3;
+
+      if ( $count == 6 ) {
+        $layers = $dimensions[ 3 ];
+        $next = 4;
+      }
+
+      $rows = $dimensions[ $next ];
+      $columns = $dimensions[ $next + 1 ];
+      $result = $layers == 1 && $timesteps > 0 && $rows > 0 && $columns > 0;
+      debug( "bits = $bits timesteps = $timesteps layers = $layers " .
+             "rows = $rows columns = $columns result = $result" );
+    }
+  }
+
+  if ( $result == 0 ) {
+    $timesteps = $rows = $columns = 0;
+  }
+
+  $_[1] = $timesteps;
+  $_[2] = $rows;
+  $_[3] = $columns;
+  return $result;
+}
+
+
+
+# my $variable = lookup_variable( $coverage );
+
+sub lookup_variable {
+  my $result = -1;
+  my $variable_count = @metadata;
+
+  for ( my $variable = 0; $variable < $variable_count;
+        ++$variable ) {
+    my $name = $metadata[ $variable ]->{ name };
+
+    if ( $coverage eq $name ) {
+      $result = $variable;
+      $variable = $variable_count; # Stop looping.
+    }
+  }
+
+  return $result;
+}
+
+
+
+# Last part of dotted name:
+# my $name = last_name( 'modis.atlantic.attenuation_coefficient' );
+# $name is 'attenuation_coefficient'
+
+sub last_name {
+  my $name = shift;
+  my @parts = split( /\./, $name );
+  my $count = @parts;
+  my $label = $parts[ $count - 1 ];
+  return $label;
+}
+
+
+
+# Compute YYYYMMDDHH timestamps from start_date, timesteps:
+# my @yyyymmddhh = compute_timestamps( $timesteps );
+
+sub compute_timestamps {
+  my $timesteps = shift;
+  my @result = ();
+  my $yyyy = substr( $time, 0, 4 );
+  my $mm   = substr( $time, 5, 2 );
+  my $dd   = substr( $time, 8, 2 );
+  my $hh   = 0;
+
+  for ( my $day = 0; $day < $timesteps; ++$day ) {
+    increment( $yyyy, $mm, $dd );
+    my $yyyymmddhh = integer_timestamp( $yyyy, $mm, $dd, $hh );
+    push( @result, $yyyymmddhh );
+  }
+
+  return @result;
+}
+
+
+
+# Is text in array of strings?
+# my $found = found_text( $text, \@array );
+
+sub found_text {
+  my ( $text, $array ) = @_;
+  my $count = @$array;
+  my $result = 0;
+
+  for ( my $i = $count - 1; $result == 0 && $i >= 0; --$i ) {
+    $result = index( $array->[ $i ], $text ) != -1;
+  }
+
+  return $result;
+}
+
+
+
+############################### HELPER ROUTINES ##############################
+
+
+
+# debug( message );
+
+sub debug {
+  my $message = shift;
+
+  if ( $debugging ) {
+    print STDERR "\n$message\n";
+####print STDOUT "\n$message\n";
+  }
+}
+
+
+
+# my $result = parse_option( $option, $value, $option_name, $valid_values );
+# my $result = parse_option( $variable, $value, 'COVERAGE', 'ozone pm25' );
+
+sub parse_option {
+  my ( $option, $value, $option_name, $valid_values ) = @_;
+  my $result = 0;
+
+  if ( $option ne '' ) {
+    print STDERR "\nRedundant $option_name option: '$value'\n";
+  } else {
+    $result = index( " $valid_values ", " $value " ) != -1;
+
+    if ( $result ) {
+      $_[ 0 ] = $value;
+    } else {
+      print STDERR "\nInvalid $option_name option: '$value'\n";
+    }
+  }
+
+  return $result;
+}
+
+
+
+# my $ok = in_range( $value, $minimum, $maximum );
+
+sub in_range {
+  my ( $value, $minimum, $maximum ) = @_;
+  my $result = $value >= $minimum && $value <= $maximum;
+  return $result;
+}
+
+
+
+# my $is_valid = is_valid_time( '2001-08-26t20:00:00z/2001-08-27t23:59:59z' );
+
+sub is_valid_time {
+  my $time = shift;
+  my $result = 0;
+  my $length = length( $time );
+
+  if ( $length == 41 ) {
+    $result = is_valid_time( substr( $time, 0, 20 ) );
+    $result = $result && substr( $time, 20, 1 ) eq '/';
+    $result = $result && is_valid_time( substr( $time, 21, 20 ) );
+    $result = $result && substr( $time, 0, 20 ) le substr( $time, 21, 20 );
+  } elsif ( $length == 20 ) {
+    my $year   = substr( $time, 0, 4 );
+    my $month  = substr( $time, 5, 2 );
+    my $day    = substr( $time, 8, 2 );
+    my $hour   = substr( $time, 11, 2 );
+    my $minute = substr( $time, 14, 2 );
+    my $second = substr( $time, 17, 2 );
+    $result = in_range( $year, 1900, 3000 );
+    $result = $result && in_range( $month, 1, 12 );
+    $result = $result && in_range( $day, 1, days_in_month( $year, $month ) );
+    $result = $result && in_range( $hour, 0, 23 );
+    $result = $result && in_range( $minute, 0, 59 );
+    $result = $result && in_range( $second, 0, 59 );
+    $result = $result && substr( $time, 4, 1 ) eq '-';
+    $result = $result && substr( $time, 7, 1 ) eq '-';
+    $result = $result && substr( $time, 10, 1 ) eq 't';
+    $result = $result && substr( $time, 13, 1 ) eq ':';
+    $result = $result && substr( $time, 16, 1 ) eq ':';
+    $result = $result && substr( $time, 19, 1 ) eq 'z';
+  }
+
+  return $result;
+}
+
+
+
+# increment_timestamp( $yyyy, $mm, $dd, $hh );
+
+sub increment_timestamp {
+  my ( $yyyy, $mm, $dd, $hh ) = @_;
+  my $hours_per_day   = 23;
+  my $months_per_year = 12;
+  my $days_this_month = days_in_month( $yyyy, $mm );
+  ++$hh;
+
+  if ( $hh > $hours_per_day ) {
+    $hh = 0;
+    ++$dd;
+
+    if ( $dd > $days_this_month ) {
+      $dd = 1;
+      ++$mm;
+
+      if ( $mm > $months_per_year ) {
+        $mm = 1;
+        ++$yyyy;
+      }
+    }
+  }
+
+  $_[ 0 ] = $yyyy;
+  $_[ 1 ] = $mm;
+  $_[ 2 ] = $dd;
+  $_[ 3 ] = $hh;
+}
+
+
+
+# decrement_date( $yyyy, $mm, $dd );
+
+sub decrement_date {
+  my ( $yyyy, $mm, $dd ) = @_;
+  --$dd;
+
+  if ( $dd < 1 ) {
+    --$mm;
+
+    if ( $mm < 1 ) {
+       --$yyyy;
+       $mm = 12;
+    }
+
+    $dd = days_in_month( $yyyy, $mm );
+  }
+
+  $_[ 0 ] = $yyyy;
+  $_[ 1 ] = $mm;
+  $_[ 2 ] = $dd;
+}
+
+
+
+# my $yyyymmddhh = integer_timestamp( $yyyy, $mm, $dd, $hh );
+
+sub integer_timestamp {
+  my ( $yyyy, $mm, $dd, $hh ) = @_;
+  my $result = int( $yyyy * 1000000 + $mm * 10000 + $dd * 100 + $hh );
+  return $result;
+}
+
+
+
+# my $leap = is_leap_year( $year );
+
+sub is_leap_year {
+  my $year = shift;
+  my $result = $year % 4 == 0 && ( $year % 100 != 0 || $year % 400 == 0 );
+  return $result;
+}
+
+
+
+# my $days = days_in_month( $year, $month );
+
+sub days_in_month {
+  my $year  = shift;
+  my $month = shift;
+
+  # 30 days hath September, April, June and November...
+
+  my @days_per_month = ( 31, 28, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31 );
+  my $result = $days_per_month[ $month - 1 ];
+
+  if ( $month == 2 ) {
+
+    if ( is_leap_year( $year ) ) {
+      ++$result;
+    }
+  }
+
+  return $result;
+}
+
+

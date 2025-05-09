@@ -1,0 +1,2 @@
+0 5 * * * /data/NEUBrew/get_neubrew_files > /dev/null 2>&1
+

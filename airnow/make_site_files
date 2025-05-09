@@ -1,0 +1,11 @@
+#!/bin/csh -f
+
+#YOUR_WEBSERVER_HOST:/data/Airnow/h -2 Monitoring_Site_Locations_V2.dat
+#StationID|AQSID|FullAQSID|Parameter|MonitorType|SiteCode|SiteName|Status|AgencyID|AgencyName|EPARegion|Latitude|Longitude|Elevation|GMTOffset|CountryFIPS|CBSA_ID|CBSA_Name|StateAQSCode|StateAbbreviation|CountyAQSCode|CountyName
+#586000000000|000000000|586000000000|PM2.5|Permanent|0000|Islamabad-Old|Inactive|PK1|U.S. Department of State Pakistan - Islamabad|DSPK|33.723500|73.118220||5.00|PK||||||
+
+cat Monitoring_Site_Locations_V2.dat | awk -F'|' '{ if ( NR > 1 ) print $1 }' | sort | uniq > airnow_sites.txt.new
+
+cat Monitoring_Site_Locations_V2.dat | awk -F'|' '{ if ( NR > 1 ) print $3 }' | sort | uniq > aqs_sites.txt.new
+
+

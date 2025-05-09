@@ -1,0 +1,466 @@
+#!/usr/bin/perl -wT
+
+##############################################################################
+# PURPOSE: wqdataserver - Serve WQData Live requests.
+#
+# NOTES:   Used by Village Blue application.
+#          Example usage:
+#
+#          wget -q -T 0 -O - 'https://ofmpub.epa.gov/rsig/wqdataserver?\
+#             SERVICE=WQDATA&REQUEST=download&SITEID=2457
+#                                          &PARAMS=58242
+#                                          &TZSTRING=eastern
+#                                          &FROM=20241028T00:00:00\
+#                                          &TO=20241028T23:59:59
+#
+# https://ofmpub.epa.gov/rsig/rsigserver?SERVICE=WQDATA&REQUEST=download&SITEID=2457&PARAMS=58242&FORMAT=ascii&TZstring=eastern&FROM=2024-10-28T00:00:00Z&TO=2024-10-28T23:00:00Z
+# https://ofmpub.epa.gov/rsig/rsigserver?SERVICE=WQDATA&REQUEST=download&SITEID=2457&PARAMS=58242&FORMAT=ascii&TZSTRING=eastern
+#
+#
+# HISTORY: 2024-10-29 Matt Freeman
+#
+# STATUS:  reviewed tested
+##############################################################################
+
+
+use strict;
+package main;
+$| = 1; # Turn off output buffering so messages appear in correct order.
+alarm( 3600 ); # Kill process after 1 hour. Legitimate usage could be an hour!
+# Restrict PATH and ENV. (But before popen, ENV is cleared!)
+delete @ENV{ 'PATH', 'IFS', 'CDPATH', 'ENV', 'BASH_ENV' };
+
+
+############################## TUNABLE CONSTANTS #############################
+
+
+my $debugging = 0; # 1 = print debug messages to STDERR logs/error_log.
+
+
+# Downloader program:
+
+my $downloader = '/rsig/villageblue/wqdata_download';
+
+# Server where this program is installed:
+
+my $server_path = 'https://YOUR_WEBSERVER_HOST/cgi-bin';
+
+# Query string parsing routine dispatch table:
+
+my %parsers = (
+  'service'    => \&parse_service_option,
+  'request'    => \&parse_request_option,
+  'siteid'     => \&parse_siteid_option,
+  'params'     => \&parse_params_option,
+  'format'     => \&parse_format_option,
+  'tzstring'   => \&parse_tzstring_option, #tzString is optional (e.g. 'Eastern')
+  'from'       => \&parse_from_option,   # from is optional, but must also have to
+  'to'         => \&parse_to_option      # to is optional, but must also have from
+);
+
+# Full URL path to this program:
+
+my @pathed_program_parts = split( /\//, $0 );
+my $program_name = $pathed_program_parts[ @pathed_program_parts - 1 ];
+my $program = "$server_path/$program_name";
+
+    
+################################## VARIABLES #################################
+
+# Parsed from the URL query string:
+
+my $service  = ''; # wqdata.
+my $request  = ''; # download.
+my $siteid   = '';
+my $params   = '';
+my $from     = '';
+my $to       = '';
+my $format   = '';
+my $tzstring = '';
+
+################################## ROUTINES ##################################
+
+
+main();
+
+
+sub main {
+  my $result = 0;
+  print "Content-type: text/plain; charset=iso-8859-1\n\n"; # Read by httpd.
+
+  if ( parse_url() ) {
+
+      if ($format eq '') {
+          $format = 'json' # default to send to the download program
+      }
+
+      if ($tzstring eq '') {
+          $tzstring = 'UTC' # default if not specified
+      }
+
+    if ( $request eq 'download' ) {
+      my $download_command = "$downloader $siteid $params $format $tzstring $from $to";
+      $result = execute_command( $download_command );
+    }
+  }
+
+  $result = 1 - $result; # UNIX: zero is success, non-zero is failure.
+  debug( "exit result = $result" );
+  exit $result;
+}
+
+
+
+# Parse URL parameters into variables.
+
+sub parse_url {
+  use CGI qw/ untaint /;     # Load Safe untainting CGI routines.
+  $CGI::DISABLE_UPLOADS = 1; # Disable uploads.
+  $CGI::POST_MAX = 2048;     # Limit posts to 2048 bytes.
+  my $query = new CGI;       # Parse QUERY_STRING.
+  %ENV = ();                 # Unset all environment variables.
+  my @names = $query->param; # Extract names of parameters.
+  my $count = @names;
+  my $result = 0;
+  debug( "$program_name @names ($count)" );
+
+  for ( my $parameter = 0; $parameter < $count; ++$parameter) {
+    $_ = $names[ $parameter ];                # $_ is tainted.
+    s/[^A-Za-z]/_/go;                         # Untaint $_.
+    my $option = $_;                          # $option is untainted.
+    $_ = $query->param( $option );            # $_ is tainted.
+    s/[^\(\)\w\.#:@,-]/_/go;                         # Untaint $_.
+    my $value = $_;                           # $value is untainted.
+    my $lowercase_option = lc( $option );
+    my $lowercase_value  = lc( $value );
+    debug( "$lowercase_option $lowercase_value" );
+
+    if ( $parsers{ $lowercase_option } ) {
+      $result = $parsers{ $lowercase_option }->( $lowercase_value );
+    } else {
+      print STDERR "\nInvalid option: '$option'\n";
+      $result = 0;
+    }
+
+    if ( ! $result ) {
+      $parameter = $count; # Finish looping.
+    }
+  }
+
+  $result = $result && required_options_specified();
+  return $result;
+}
+
+
+
+# Parse service option.
+
+sub parse_service_option {
+  my $value = shift;
+  my $result = parse_option( $service, $value, 'SERVICE', 'wqdata' );
+  return $result;
+}
+
+
+
+# Parse request option.
+
+sub parse_request_option {
+  my $value = shift;
+  my $result = parse_option( $request, $value, 'REQUEST', 'download' );
+  return $result;
+}
+
+
+# Parse tzString option
+#
+sub parse_tzstring_option {
+  my $value = shift;
+  my $result = parse_option( $tzstring, $value, 'TZSTRING', 'eastern central mountain pacific utc' );
+  return $result;
+}
+
+
+# Parse siteid option.
+
+sub parse_siteid_option {
+ 
+  my $value = shift;
+  my $result = 0;
+
+  if ( $siteid ne '' ) {
+    print STDERR "\nRedundant option: 'SITEID'\n";
+  } elsif ( $value =~ m#^([\(\)\w\.\#,-_]+)$# ) {
+    $siteid = $1; # Re-assign first match, which is enough to satisfy -T.
+    $result = 1;
+  }
+
+  return $result;
+}
+
+# Parse from option.
+
+sub parse_from_option {
+ 
+  my $value = shift;
+  my $result = 0;
+
+  if ( $from ne '' ) {
+    print STDERR "\nRedundant option: 'FROM'\n";
+  } else {
+    $from = $value;
+    my $is_valid = is_valid_time( $from );
+
+    if ( ! $is_valid ) {
+      print STDERR "\nInvalid FROM option\n";
+    } else {
+      $result = 1;
+    }  
+  }
+
+  return $result;
+}
+
+
+# Parse to option
+#
+sub parse_to_option {
+ 
+  my $value = shift;
+  my $result = 0;
+
+  if ( $to ne '' ) {
+    print STDERR "\nRedundant option: 'TO'\n";
+  } else {
+    $to = $value;
+    my $is_valid = is_valid_time( $to );
+
+    if ( ! $is_valid ) {
+      print STDERR "\nInvalid TO option\n";
+    } else {
+      $result = 1;
+    }  
+  }
+
+  return $result;
+}
+
+
+# Parse format option.
+
+#sub parse_format_option {
+# 
+#  my $value = shift;
+#  my $result = 0;
+#
+#  if ( $format ne '' ) {
+#    print STDERR "\nRedundant option: 'FORMAT'\n";
+#  } elsif ( $value =~ m#^([\(\)\w\.\#,-_]+)$# ) {
+#    $format = $1; # Re-assign first match, which is enough to satisfy -T.
+#    $result = 1;
+#  }
+#
+#  return $result;
+#}
+sub parse_format_option {
+  my $value = shift;
+  my $result = parse_option( $format, $value, 'FORMAT', 'json ascii' );
+  return $result;
+}
+
+
+# Parse params option.
+
+sub parse_params_option {
+ 
+  my $value = shift;
+  my $result = 0;
+
+  if ( $params ne '' ) {
+    print STDERR "\nRedundant option: 'PARAMS'\n";
+  } elsif ( $value =~ m#^([\(\)\w\.\#,-_]+)$# ) {
+    $params = $1; # Re-assign first match, which is enough to satisfy -T.
+    $result = 1;
+  }
+
+  return $result;
+}
+
+
+
+# Check that all required 'options' have been specified:
+
+sub required_options_specified {
+  my $result = 0;
+
+  if ( $request eq '' ) {
+    print STDERR "\nMissing option: 'REQUEST'\n";
+  } elsif ( $request eq 'download' ) {
+
+    if ( $siteid eq '' ) {
+      print STDERR "\nMissing option: 'SITEID'\n";
+    } elsif ( $params eq '' ) {
+      print STDERR "\nMissing option: 'PARAMS'\n";
+    } elsif ( $format eq '' ) {
+      print STDERR "\nMissing option: 'FORMAT'\n";
+    } else {
+      $result = 1;
+    }
+  } else {
+    $result = 1;
+  }
+
+  debug( "required_options_specified result = $result, siteid = $siteid, params = $params, format = $format" );
+  return $result;
+}
+
+
+
+############################### HELPER ROUTINES ##############################
+
+sub is_leap_year {
+  my $year = shift;
+  my $result = $year % 4 == 0 && ( $year % 100 != 0 || $year % 400 == 0 );
+  return $result;
+}
+
+
+
+sub days_in_month {
+  my $year  = shift;
+  my $month = shift;
+
+  # 30 days hath September, April, June and November...
+  
+  my @days_per_month = ( 31, 28, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31 );
+  my $result = $days_per_month[ $month - 1 ];
+  
+  if ( $month == 2 ) {
+  
+    if ( is_leap_year( $year ) ) {
+      ++$result;
+    }
+  }
+  
+  return $result;
+}
+  
+
+
+sub in_range {
+  my ( $value, $minimum, $maximum ) = @_;
+  my $result = $value >= $minimum && $value <= $maximum;
+  return $result;
+}
+
+
+sub is_valid_time {
+  my $time = shift;
+  my $result = 0;
+  my $length = length( $time );
+
+  if ( $length == 41 ) {
+    $result = is_valid_time( substr( $time, 0, 20 ) );
+    $result = $result && substr( $time, 20, 1 ) eq '/';
+    $result = $result && is_valid_time( substr( $time, 21, 20 ) );
+    $result = $result && substr( $time, 0, 20 ) le substr( $time, 21, 20 );
+  } elsif ( $length == 20 ) {
+    my $year   = substr( $time, 0, 4 );
+    my $month  = substr( $time, 5, 2 );
+    my $day    = substr( $time, 8, 2 );
+    my $hour   = substr( $time, 11, 2 );
+    my $minute = substr( $time, 14, 2 );
+    my $second = substr( $time, 17, 2 );
+    $result = in_range( $year, 1900, 3000 );
+    $result = $result && in_range( $month, 1, 12 );
+    $result = $result && in_range( $day, 1, days_in_month( $year, $month ) );
+    $result = $result && in_range( $hour, 0, 23 );
+    $result = $result && in_range( $minute, 0, 59 );
+    $result = $result && in_range( $second, 0, 59 );
+    $result = $result && substr( $time, 4, 1 ) eq '-';
+    $result = $result && substr( $time, 7, 1 ) eq '-';
+    $result = $result && substr( $time, 10, 1 ) eq 't';
+    $result = $result && substr( $time, 13, 1 ) eq ':';
+    $result = $result && substr( $time, 16, 1 ) eq ':';
+    $result = $result && substr( $time, 19, 1 ) eq 'z';
+  }
+
+  return $result;
+}
+
+
+# debug( message );
+
+sub debug {
+  my $message = shift;
+
+  if ( $debugging ) {
+    print STDERR "\n$message\n";
+####print STDOUT "\n$message\n";
+  }
+}
+
+
+
+# Execute command and echo its output to STDOUT. E.g., execute_command( 'ls' );
+
+sub execute_command {
+  my $command = shift;
+  my $result = 0;
+  my $the_pipe = 0;
+
+  # Untaint command (match expression is arbitrary as far as -T is concerned):
+
+  if ( $command =~ m#^(/[\w-]+/[\w -/\.:@\#,]+)$# ) {
+    $command = $1; # Re-assign first match, which is enough to satisfy -T.
+    debug( "$0 executing command = $command" );
+    %ENV = (); # Unset all environment variables prior to popen.
+    # Complicated, supposedly safer way to open a readable pipe to command:
+    my $pid = open( the_pipe, "-|" );
+
+    if ( ! defined( $pid ) ) {
+      die "Couldn't open pipe to subprocess";
+    } elsif ( $pid ) { # Parent process.
+
+      while ( <the_pipe> ) {
+        print;
+      }
+
+      close( the_pipe ) or die $!;
+      $result = ! $?;
+    } else { # Child process.
+      exec( $command ) or die "can't exec program: $!";
+    }
+  } else {
+    print STDERR "\n$0: '$command' contains invalid characters.\n";
+  }
+
+  return $result;
+}
+
+
+
+# my $result = parse_option( $option, $value, $option_name, $valid_values );
+# my $result = parse_option( $variable, $value, 'SERVICE', 'nwis' );
+
+sub parse_option {
+  my ( $option, $value, $option_name, $valid_values ) = @_;
+  my $result = 0;
+
+  if ( $option ne '' ) {
+    print STDERR "\nRedundant $option_name option: '$value'\n";
+  } else {
+    $result = index( " $valid_values ", " $value " ) != -1;
+
+    if ( $result ) {
+      $_[ 0 ] = $value;
+    } else {
+      print STDERR "\nInvalid $option_name option: '$value'\n";
+    }
+  }
+
+  return $result;
+}
+
+
+

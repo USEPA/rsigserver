@@ -1,0 +1,22 @@
+#!/bin/sh
+
+clear
+
+echo
+echo "Compiling Utilities..."
+cd Utilities
+gcc -m64 -Wall -D_FILE_OFFSET_BITS=64 -D_LARGEFILE_SOURCE -DNO_ASSERTIONS -DSERIAL_REGRID -O -I. -c Utilities.c BasicNumerics.c DateTime.c Failure.c Memory.c Stream.c Projector.c Lambert.c Stereographic.c Mercator.c VoidList.c Grid.c elevation.c RegridQuadrilaterals.c
+ls -l *.o
+cd ..
+
+echo
+echo "Compiling GOESSubset"
+gcc -m64 -Wall -D_FILE_OFFSET_BITS=64 -D_LARGEFILE_SOURCE -DNO_ASSERTIONS -O -I./Utilities -I. -o GOESSubset GOESSubset.c Utilities/*.o -lz -lm -lc
+strip GOESSubset
+ls -l GOESSubset
+file  GOESSubset
+ldd   GOESSubset
+
+ls -Fsalt | head
+echo Done
+

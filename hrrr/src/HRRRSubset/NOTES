@@ -1,0 +1,146 @@
+
+https://home.chpc.utah.edu/~u0553130/Brian_Blaylock/HRRR_archive/hrrr_sfc_table_f00-f01.html
+
+9,10,11,12,13,14,15,16,17,18,19,20,21,22,23,24,25,26,27,28,29,30,31,32,33,38,
+42,43,44,45,46,47,54,55,56,57,58,59,60,75,76,77,80,81,82,
+92,93,94,95,96,97,98,99,100,101,102,103,104,105,106,116,117,118,119,
+120,121,122,123,124,125,126,127,128,129,130,131,132
+
+
+HRRR Wind (UGRD, VGRD m/s, at 10m above ground) archive from 2016-07-15 to present.
+http://home.chpc.utah.edu/~u0553130/Brian_Blaylock/hrrr_FAQ.html
+You will cite the
+NCEP/ESRL HRRR model and University of Utah MesoWest HRRR archive
+in works published where this data was used.
+You may cite this paper https://doi.org/10.1016/j.cageo.2017.08.005.
+http://home.chpc.utah.edu/~u0553130/Brian_Blaylock/cgi-bin/hrrr_download.cgi
+https://pando-rgw01.chpc.utah.edu/hrrr/sfc/20200217/hrrr.t00z.wrfsfcf00.grib2
+http://home.chpc.utah.edu/~u0553130/Brian_Blaylock/hrrr_script_tips.html
+
+Variable list:
+https://pando-rgw01.chpc.utah.edu/hrrr/GRIB2Table_hrrr_2d.txt
+
+Grid parameters:
+https://www.ready.noaa.gov/data/archives/hrrr/README.TXT
+https://www.ready.noaa.gov/data/archives/hrrr/HRRR.gif
+Lon-lat file:
+https://pando-rgw01.chpc.utah.edu/hrrr/HRRR_latlon.h5
+rows = 1059
+columns = 1799
+latitude [21.138, 52.61565]
+longitude = [-134.09613, -60.91784]
+
+NOAA NCEP source (hourly daily, not archived):
+https://nomads.ncep.noaa.gov/
+https://nomads.ncep.noaa.gov/cgi-bin/filter_hrrr_2d.pl?dir=%2Fhrrr.20200209%2Fconus
+https://www.ncdc.noaa.gov/wct/
+
+
+-------
+==============================================================
+==============================================================
+
+			HRRR 3 km Forecast Data Archive 
+                          Revised: 10 January 2020  
+
+________________________________________________________________________________
+
+Overview -
+
+
+NOAA ARL began an archive of the first hour of hourly HRRR 3 km
+meteorological data from NOAA NCEP in June 2015.  Each 1 hour forecast is
+concatenated to create a 6 hour data file beginning with 00z - 05z in the first 
+file of the day. The first file of the day is called:
+
+hysplit.YYYYMMDD.00z.hrrra
+
+Subsequent files that day are named as follows:
+
+hysplit.YYYYMMDD.06z.hrrra - containing data from 06 - 11z
+hysplit.YYYYMMDD.12z.hrrra - containing data from 12 - 17z
+hysplit.YYYYMMDD.18z.hrrra - containing data from 18 - 23z
+
+NOTE:  The Total Kinetic Energy (TKEN) field is zero from the initial date of the
+archive through the 12 UTC August 23, 2016 data set.  The TKE field is
+available beginning at 18 UTC on August 23, 2016.
+
+NOTE: The pressure values are occasionally zero in the upper atmosphere 
+(between about 100-200 mb) for the two-day period 20180831 and 20180901.  
+This was discovered through use of the HYSPLIT utility program 'profile'.  
+________________________________________________________________________________
+
+These files were created by processing NCEP's HRRR grib files obtained from 
+https://nomads.ncep.noaa.gov/pub/data/nccf/com/hrrr/prod/
+________________________________________________________________________________
+
+Additional Data Set Details
+
+	3 km lambert conformal grid 
+	1799x1059 points 
+	Spatial domain: 12.14N 122.72W to 47.844N 60.9155W
+	36 Levels (hPa): 1.0 0.9990 0.9960 0.9905 0.9810 0.9670 0.9490 0.9275 
+        0.9040 0.8785 0.8500 0.8185 0.7840 0.7465 0.7060 0.6625 0.6160 0.5670 
+	0.5195 0.4767 0.4385 0.4041 0.3729 0.3449 0.3198 0.2767 0.2412 0.2118 
+	0.1836 0.1553 0.1271 0.0989 0.0718 0.0527 0.0304 0.0124 
+
+	Sfc Variables:         24 SHGT PRSS MSLP TPP1 DIFR T02M DP2M PBLH DSWF 
+				  ULWF U10M V10M VSBY CSNO CICE CFZR CRAI LIB4 
+				  CAPE CINH TCLD REFC CLDB CLDT 
+	Upper Levels:           8 PRES TEMP UWND VWND WWND DIFW SPHU TKEN
+
+	MODEL TYPE:         HRRR
+	VERT COORD:         1
+	POLE LAT:           38.5000
+	POLE LON:           262.5000
+	REF LAT:            38.5000
+	REF LON:            262.5000 
+	REF GRID:           3.0
+	ORIENTATION:        0.
+	CONE ANGLE:         38.5000
+	SYNC X:             1.
+	SYNC Y:             1.
+	SYNC LAT:           21.1400
+	SYNC LON:           237.2800
+	NUMB X:             1799
+	NUMB Y:             1059
+	NUMB LEVELS:        36
+
+-------------
+from brian.blaylock@utah.edu
+
+https://rapidrefresh.noaa.gov/hrrr/HRRR/static/HRRRv1/
+
+map_proj = 'lambert';,
+ref_lat = 38.5,
+ref_lon = -97.5,
+truelat1 = 38.5,
+truelat2 = 38.5,
+stand_lon = -97.5,
+
+--------------
+
+https://rapidrefresh.noaa.gov/faq/HRRR.faq.html
+RTRAN code for converting the u and v wind components aligned to the HRRR grid to components with respect to true north (meteorological standard)? Here is a code snippet that should do the job.
+PARAMETER ( ROTCON_P = 0.622515 )
+PARAMETER ( LON_XX_P = -97.5 )
+PARAMETER ( LAT_TAN_P = 38.5 )
+C** ROTCON_P R WIND ROTATION CONSTANT, = 1 FOR POLAR STEREO
+C** AND SIN(LAT_TAN_P) FOR LAMBERT CONFORMAL
+C** LON_XX_P R MERIDIAN ALIGNED WITH CARTESIAN X-AXIS(DEG)
+C** LAT_TAN_P R LATITUDE AT LAMBERT CONFORMAL PROJECTION
+C** IS TRUE (DEG)
+do j=1,ny_p
+  do i=1,nx_p
+    angle2 = rotcon_p*(olon(i,j)-lon_xx_p)*0.017453
+    sinx2 = sin(angle2)
+    cosx2 = cos(angle2)
+    do k=1,nzp_p
+      ut = u(i,j,k)
+      vt = v(i,j,k)
+      un(i,j,k) = cosx2*ut+sinx2*vt
+      vn(i,j,k) =-sinx2*ut+cosx2*vt
+    end do
+  end do
+end do
+

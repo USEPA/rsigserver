@@ -1,0 +1,162 @@
+#!/bin/csh -f
+
+set type = '_L2Tot_rnvs0p1-7.txt'
+@ columns = 37
+echo
+echo "$type"
+
+@ column = 1
+while ($column <= $columns)
+  cat testdata/*$type | \
+  awk -v "c=$column" -v "min=999" '/^20/ {x = $c; if (x < min) min = x; if (x > max) max = x} END {print c " " min " " max}'
+  @ column += 1
+end
+
+set type = '_L2Tot_rnvs1p1-7.txt'
+@ columns = 37
+echo
+echo "$type"
+
+@ column = 1
+while ($column <= $columns)
+  cat testdata/*$type | \
+  awk -v "c=$column" -v "min=999" '/^20/ {x = $c; if (x < min) min = x; if (x > max) max = x} END {print c " " min " " max}'
+  @ column += 1
+end
+
+
+set type = '_L2Tot_rout0p1-7.txt'
+@ columns = 44
+echo
+echo "$type"
+
+@ column = 1
+while ($column <= $columns)
+  cat testdata/*$type | \
+  awk -v "c=$column" -v "min=999" '/^20/ {x = $c; if (x < min) min = x; if (x > max) max = x} END {print c " " min " " max}'
+  @ column += 1
+end
+
+
+set type = '_L2_rfuh5p1-8.txt'
+#@ columns = 55
+@ columns = 99
+echo
+echo "$type"
+
+@ column = 1
+while ($column <= $columns)
+  cat testdata/*$type | \
+  awk -v "c=$column" -v "min=999" '/^20/ {x = $c; if (x < min) min = x; if (x > max) max = x} END {print c " " min " " max}'
+  @ column += 1
+end
+
+
+set type = '_L2_rfus5p1-8.txt'
+@ columns = 52
+echo
+echo "$type"
+
+@ column = 1
+while ($column <= $columns)
+  cat testdata/*$type | \
+  awk -v "c=$column" -v "min=999" '/^20/ {x = $c; if (x < min) min = x; if (x > max) max = x} END {print c " " min " " max}'
+  @ column += 1
+end
+
+
+set type = '_L2_rnvh3p1-8.txt'
+#@ columns = 54
+@ columns = 120
+echo
+echo "$type"
+
+@ column = 1
+while ($column <= $columns)
+  cat testdata/*$type | \
+  awk -v "c=$column" -v "min=999" '/^20/ {x = $c; if (x < min) min = x; if (x > max) max = x} END {print c " " min " " max}'
+  @ column += 1
+end
+
+
+set type = '_L2_rnvs3p1-8.txt'
+@ columns = 54
+echo
+echo "$type"
+
+@ column = 1
+while ($column <= $columns)
+  cat testdata/*$type | \
+  awk -v "c=$column" -v "min=999" '/^20/ {x = $c; if (x < min) min = x; if (x > max) max = x} END {print c " " min " " max}'
+  @ column += 1
+end
+
+
+set type = '_L2_rout2p1-8.txt'
+@ columns = 52
+echo
+echo "$type"
+
+@ column = 1
+while ($column <= $columns)
+  cat testdata/*$type | \
+  awk -v "c=$column" -v "min=999" '/^20/ {x = $c; if (x < min) min = x; if (x > max) max = x} END {print c " " min " " max}'
+  @ column += 1
+end
+
+
+set type = '_L2_rsus1p1-8.txt'
+@ columns = 52
+echo
+echo "$type"
+
+@ column = 1
+while ($column <= $columns)
+  cat testdata/*$type | \
+  awk -v "c=$column" -v "min=999" '/^20/ {x = $c; if (x < min) min = x; if (x > max) max = x} END {print c " " min " " max}'
+  @ column += 1
+end
+
+
+set type = '_L2Trop_rnvh1p1-7.txt'
+@ columns = 70
+echo
+echo "$type"
+
+@ column = 1
+while ($column <= $columns)
+  cat testdata/*$type | \
+  awk -v "c=$column" -v "min=999" '/^20/ {x = $c; if (x < min) min = x; if (x > max) max = x} END {print c " " min " " max}'
+  @ column += 1
+end
+
+
+set type = '_L2_rnvh3p1-8.txt'
+#@ columns = 69
+@ columns = 120
+echo
+echo "$type"
+
+@ column = 1
+while ($column <= $columns)
+  cat testdata/*$type | \
+  awk -v "c=$column" -v "min=999" '/^20/ {x = $c; if (x < min) min = x; if (x > max) max = x} END {print c " " min " " max}'
+  @ column += 1
+end
+
+
+
+set type = '_L2_rnvssp1-8.txt'
+#@ columns = 69
+@ columns = 120
+echo
+echo "$type"
+
+@ column = 1
+while ($column <= $columns)
+  cat testdata/*$type | \
+  awk -v "c=$column" -v "min=999" '/^20/ {x = $c; if (x < min) min = x; if (x > max) max = x} END {print c " " min " " max}'
+  @ column += 1
+end
+
+

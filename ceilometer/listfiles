@@ -1,0 +1,88 @@
+#!/bin/csh -f
+# listfiles - List Ceilometer data files for given starting YYYYMMDDHH and HOURS.
+# 2016-01-21 plessel.todd@epa.gov 919-541-5500
+
+set data_directory = '/data/Ceilometer/data'
+##set data_directory = '/data/Ceilometer/data.1' # TEMP HACK
+set temp = /data/tmp/listfiles.$$
+touch $temp ; \rm $temp
+
+@ ok = 0
+@ yyyymmddhh = 0
+@ hours      = 0
+
+if ( $#argv == 2 ) then
+  @ yyyymmddhh = $1
+  @ hours      = $2
+  @ ok = ($yyyymmddhh >= 1990010100 && $yyyymmddhh <= 2147123123 && $hours >= 1)
+
+  if ( ! $ok ) then
+    echo "$0 Invalid command-line arguments $1 $2"
+  endif
+endif
+
+if ( ! $ok ) then
+  echo
+  echo "$0 - List Ceilometer data files for given starting YYYYMMDDHH and HOURS."
+  echo "usage: $0 YYYYMMDDHH HOURS"
+  echo "example: $0 2014071500 24"
+  echo '/data/Ceilometer/data/BAO-TOWER-7_cl51-8888_20140715_L1.h5'
+  echo '/data/Ceilometer/data/GOLDEN-15_cl51-8888_20140715_L1.h5'
+  echo "example: $0 2021100700 24"
+  echo '/data/Ceilometer2/data/CL51_STMA_20211007.nc'
+  echo
+  exit 1
+endif
+
+@ yyyy =   $yyyymmddhh / 1000000
+@ mm   = ( $yyyymmddhh / 10000 ) % 100
+@ dd   = ( $yyyymmddhh / 100 ) % 100
+set days_per_month = ( 31 28 31 30 31 30 31 31 30 31 30 31 )
+
+@ days_in_month = $days_per_month[$mm]
+
+if ( $mm == 2 ) then
+  @ leap = ( $yyyy % 4 == 0 && ! ( $yyyy % 100 == 0 && ! $yyyy % 400 == 0 ) )
+  @ days_in_month += $leap
+endif
+
+@ yyyymmdd = `echo $yyyy $mm $dd | xargs printf "%d%02d%02d"`
+@ days = ( $hours - 1 ) / 24 + 1
+@ day = 1
+
+while ( $day <= $days )
+
+  # List files matching yyyymmdd timestamp:
+
+##find $data_directory -name "*_${yyyymmdd}_*.h5" | sort
+  ls $data_directory/*_${yyyymmdd}_*.h5  $data_directory/*_${yyyymmdd}*.nc |& grep -v 'ls: ' >> $temp
+
+  # Increment to next day:
+
+  @ dd += 1
+
+  if ( $dd > $days_in_month ) then
+    @ dd = 1
+    @ mm += 1
+
+    if ( $mm > 12 ) then
+      @ yyyy += 1
+      @ mm = 1
+      @ days_in_month = $days_per_month[$mm]
+    else
+      @ days_in_month = $days_per_month[$mm]
+
+      if ( $mm == 2 ) then
+        @ leap = ( $yyyy % 4 == 0 && ! ( $yyyy % 100 == 0 && ! $yyyy % 400 == 0 ) )
+        @ days_in_month += $leap
+      endif
+    endif
+  endif
+
+  @ yyyymmdd = `echo $yyyy $mm $dd | xargs printf "%d%02d%02d"`
+  @ day += 1
+end
+
+cat $temp | sort | uniq
+\rm $temp
+

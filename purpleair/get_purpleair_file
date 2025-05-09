@@ -1,0 +1,280 @@
+#!/bin/csh -f
+# get_purpleair_file - Get PurpleAir data >= minutes_ago.
+# Examples:
+#   get_purpleair_file 2
+#   Gets purpleair data from 2-miutes ago.
+#   get_purpleair_file 1
+#   Gets purpleair data from 1-minute ago.
+# 2024-03-13 plessel.todd@epa.gov
+# https://api.purpleair.com
+# Units of returned data:
+# sensor_index: - integer id of sensor
+# location_type: 0 = outside, 1 = inside
+# altitude = feet
+# last_seen = UNIX seconds since 1970-01-01
+# channel_states: 0 = No PM, 1 = PM-A, 2 = PM-B, 3 = PM-A+PM-B
+# channel_flags: 0=Normal, 1=A-Downgraded, 2=B-Downgraded, 3=A+B-Downgraded
+# confidence: % [0, 100]
+# pm*: ug/m3
+# *_um_count: particles/100ml
+# humidity: %
+# pressure: millibars (= hPa)
+# voc: IAQ Bosch units per BME680 spec sheet
+# ozone: ppb
+# analog_input: V
+
+if ( $#argv != 1 && $#argv != 2 ) then
+  echo
+  echo "Get PurpleAir data from a given number of minutes ago."
+  echo "usage: $0 minutes_ago dir"
+  echo "examples:"
+  echo "$0 2 data2"
+  echo "Gets PurpleAir data from 2 minutes ago and writes it to a json file in data2/."
+  echo "$0 1 data1"
+  echo "Gets PurpleAir data from 1 minute ago and writes it to a json file in data1/."
+  echo "$0 1 data"
+  echo "Gets PurpleAir data from 1 minute ago and writes it to a json file in data/."
+  echo
+  exit 1
+endif
+
+@ minutes_ago = $1
+@ seconds_ago = $minutes_ago * 60
+
+set directory = /data/PurpleAir
+
+# If get_purpleair_file 1 single then use single url:
+
+if ( "$2" == 'single' ) then
+  set url = "https://0-dot-purpleair-api-production.uc.r.appspot.com/v1/sensors"
+  set data_directory = $directory/data${minutes_ago}s
+else if ( "$2" != '' ) then
+  #set url = "https://0-dot-purpleair-api-production.uc.r.appspot.com/v1/sensors"
+  set url = "https://api.purpleair.com/v1/sensors"
+  set data_directory = $directory/$2
+else
+  set url = "https://api.purpleair.com/v1/sensors"
+  set data_directory = $directory/data$minutes_ago
+endif
+
+# Before accessing PurpleAir one must register to obtain a key.
+set key = "X-API-Key:C4BE33C6-2E88-11EB-9893-42010A8001E8" # freeman.matt@epa.gov
+#set key = "X-API-Key:7FEF1BB4-714F-11EB-8C3A-42010A800259" # plessel.todd@epa.gov
+
+# Longitude-latitude bounds to retrieve data from:
+
+set lon_min = -180
+set lon_max =  180
+set lat_min =  -90
+set lat_max =   90
+
+# Variables to retrieve:
+
+set variables = (\
+name \
+last_seen \
+longitude \
+latitude \
+altitude \
+channel_state \
+channel_flags \
+confidence \
+location_type \
+pm1.0 \
+pm1.0_a \
+pm1.0_b \
+pm1.0_atm \
+pm1.0_atm_a \
+pm1.0_atm_b \
+pm1.0_cf_1 \
+pm1.0_cf_1_a \
+pm1.0_cf_1_b \
+pm2.5 \
+pm2.5_a \
+pm2.5_b \
+pm2.5_atm \
+pm2.5_atm_a \
+pm2.5_atm_b \
+pm2.5_cf_1 \
+pm2.5_cf_1_a \
+pm2.5_cf_1_b \
+pm2.5_10minute \
+pm2.5_10minute_a \
+pm2.5_10minute_b \
+pm2.5_60minute \
+pm2.5_60minute_a \
+pm2.5_60minute_b \
+pm10.0 \
+pm10.0_a \
+pm10.0_b \
+pm10.0_atm \
+pm10.0_atm_a \
+pm10.0_atm_b \
+pm10.0_cf_1 \
+pm10.0_cf_1_a \
+pm10.0_cf_1_b \
+0.3_um_count \
+0.3_um_count_a \
+0.3_um_count_b \
+0.5_um_count \
+0.5_um_count_a \
+0.5_um_count_b \
+1.0_um_count \
+1.0_um_count_a \
+1.0_um_count_b \
+2.5_um_count \
+2.5_um_count_a \
+2.5_um_count_b \
+5.0_um_count \
+5.0_um_count_a \
+5.0_um_count_b \
+10.0_um_count \
+10.0_um_count_a \
+10.0_um_count_b \
+humidity \
+temperature \
+pressure \
+voc \
+ozone1 \
+)
+
+#------------------------------------------------------------------------------
+# Linux date utility usage examples:
+# date -u --date="2023-03-22T14:08:00Z" "+%s"
+# 1679494080
+# date -u --date=@1679494080  "+%Y-%m-%dT%H:%M:%SZ"
+# 2023-03-22T14:08:00Z
+
+# In case no previous json files are available,
+# Compute now (UTC) minus seconds_ago rounded down to 0 seconds:
+
+@ seconds = `date -u "+%s"`
+@ seconds -= $seconds_ago
+@ seconds /= 60
+@ seconds *= 60
+
+# Get timestamp YYYYMMDDHHMMSS:
+
+set yyyymmddhhmmss = `date -u --date=@$seconds "+%Y%m%d%H%M%S"`
+
+# Set output directory and file name to this timestamp and
+# request data measured >= that time.
+
+@ yyyymmdd  = `echo $yyyymmddhhmmss | awk '{ print substr( $1, 1, 8 ) }'`
+set hhmmss  = `echo $yyyymmddhhmmss | awk '{ print substr( $1, 9, 6 ) }'`
+@ yyyy = $yyyymmdd / 10000
+set output_directory = "$data_directory/$yyyy/$yyyymmdd"
+
+if ( ! -d $output_directory ) then
+  mkdir -p $output_directory
+endif
+
+set output_file = "$output_directory/purpleair_$hhmmss.json"
+
+# Per adrian@purpleair.com retrievals should use the header data_time_stamp seconds
+# from previous file (if it exists) for the next retrieval modified_since.
+
+echo "$output_directory/purpleair_*.json"
+set previous_file = `ls -1t $output_directory/purpleair_*.json | head -1`
+echo "previous_file = $previous_file"
+
+if ( "$previous_file" == '' ) then
+  @ seconds_previous = $seconds - 86400
+  @ yyyymmdd_previous = `date -u --date=@$seconds_previous "+%Y%m%d"`
+  @ yyyy_previous = $yyyymmdd_previous / 10000
+  echo "$data_directory/$yyyy_previous/$yyyymmdd_previous/purpleair_*.json"
+  set previous_file = `ls -1t $data_directory/$yyyy_previous/$yyyymmdd_previous/purpleair_*.json | head -1`
+  echo "previous_file = $previous_file"
+endif
+
+if ( "$previous_file" != '' ) then
+  @ seconds = `head $previous_file | grep '^  "data_time_stamp" : ' | awk -F: '{ print $2 }' | tr -d ','`
+endif
+
+set yyyymmddhhmmss = `date -u --date=@$seconds "+%Y%m%d%H%M%S"`
+set now_timestamp = `date -u "+%Y-%m-%dT%H:%M:%SZ"`
+
+@ yyyymmdd  = `echo $yyyymmddhhmmss | awk '{ print substr( $1, 1, 8 ) }'`
+set hhmmss  = `echo $yyyymmddhhmmss | awk '{ print substr( $1, 9, 6 ) }'`
+@ yyyy = $yyyymmdd / 10000
+set output_directory = "$data_directory/$yyyy/$yyyymmdd"
+
+if ( ! -d $output_directory ) then
+  mkdir -p $output_directory
+endif
+
+set output_file = "$output_directory/purpleair_$hhmmss.json"
+
+echo "At $now_timestamp retrieving data modified_since $seconds ($yyyymmddhhmmss) into file $output_file"
+
+set variable_list = ""
+
+foreach variable ( $variables )
+
+  if ( $variable_list == '' ) then
+    set variable_list = "$variable"
+  else
+    set variable_list = "$variable_list,$variable"
+  endif
+end
+
+set bounds = "nwlng=$lon_min&nwlat=$lat_max&selng=$lon_max&selat=$lat_min"
+
+@ ok = 0
+@ tries = 3
+
+while ( $ok == 0 && $tries > 0 )
+
+  # Try curl connect/get 3 times waiting at most 10 seconds for response:
+
+  curl -k --silent --retry 3 -C - --retry-delay 5 -L --tcp-nodelay --max-time 10 \
+       --header $key \
+       "$url?fields=$variable_list&$bounds&modified_since=$seconds" \
+    > $output_file
+
+  @ ok = $status == 0 # Check that curl succeeded.
+
+  # Also check that the resulting file is not an error message.
+
+  if ( $ok ) then
+    grep '"error"' $output_file >& /dev/null
+    @ ok = $status != 0
+  endif
+
+  # Also check that the resulting file is not invalid:
+ 
+  if ( $ok ) then
+    head -1 $output_file | grep '^{' >& /dev/null
+    @ ok = $status == 0
+
+    if ( $ok ) then
+      tail -1 $output_file | grep '^}' >& /dev/null
+      @ ok = $status == 0
+
+      if ( $ok ) then
+        set ok = `cat $output_file | awk '/  "data" : \[/ { while ( getline ) { ++data_lines } } END { print ( data_lines > 5 ) }'`
+ 
+        if ( "$ok" == '1' ) then
+          @ ok = 1
+        else
+          @ ok = 0
+        endif
+      endif
+    endif
+  endif
+ 
+  if ( $ok ) then
+    chmod 444 $output_file
+  else
+    /bin/rm -f $output_file
+    sleep 10
+  endif
+
+  @ tries -= 1
+end
+
+if ( ! $ok ) then
+##/bin/rm -f $output_file
+  mv $output_file $output_file:r.bad
+endif
+

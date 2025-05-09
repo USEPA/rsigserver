@@ -1,0 +1,61 @@
+
+This directory contains the C source code for the CMAQSubset program.
+Note that this application requires linking with libUtilities.a
+(whose source code is at ../../lib/Utilities) and libNetCDF.a
+(../../lib/NetCDF).
+
+
+Files:
+------
+
+README             - This file.
+CMAQDataset.c      - C source file for CMAQDataset ADT.
+CMAQDataset.h      - C header file for CMAQDataset ADT.
+CMAQSubset.c       - C source file for CMAQSubset program (has main())
+makeit             - C Shell script to compile the program.
+subset.xdr         - Sample output file of a subset.
+
+
+Compiling:
+----------
+
+Run 'makeit' to compile the program.
+
+set uname_ = "`uname`"
+set uname_m = "`uname -m`"
+set platform = "$uname_"
+if ( "$uname_" == "Linux" ) set platform = "$uname_.$uname_m"
+echo "platform is $platform"
+
+
+Running and Program Usage Documentation:
+----------------------------------------
+
+For CMAQSubset program usage documentation simply execute 
+../../../bin/$platform/CMAQSubset |& more
+to see what command-line options are required/available and
+the format of the resulting output files.
+
+See 'runit' script for examples.
+
+Notes:
+------
+
+1. CONC and MET grids match, DOT grids are related but not matched.
+   GRIDCRO2D files define LON LAT HT (meters above mean sea level)
+             of grid cell centers.
+   GRIDCRO3D files define X3HT0M (cell center meters above ground).
+   CONC files define air-quality variables such as NO and O3.
+   MET  files define temperature, TA (K), etc. and possibly changing
+        grid cell centers ZH (meters above ground)
+        and WWIND (m/s vertical wind at top-center of cell).
+   GRIDDOT2D defines LON LAT of wind.
+   METDOT3D  defines UWIND, VWIND (horizontal wind components, m/s)
+
+I couldn't find HT and ZH for the DOT grid files.
+
+2. Use 'head' to examine the headers of the binary output files:
+
+head -17 subset.xdr
+
+

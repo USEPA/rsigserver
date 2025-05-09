@@ -1,0 +1,124 @@
+#!/bin/csh -f
+
+## processRetigoWMS - A wrapper for processing RETIGO WMS requests.
+##                    Called from /opt/Apache/cgi-bin/retigowmsserver
+##
+## args: - layers
+##       - maplineFlag
+##       - bbox
+##       - width
+##       - height
+##       - time
+##       - minval
+##       - maxval
+##       - qaflag
+##       - idWithDate
+##       - jsonpflag
+##       - crs
+#
+## e.g. processRetigoWMS viirsnoaa.jrraod.AOD550 1 -90,30,-75,42 1024 1024 2016-10-04T00:00:00Z/2016-10-04T23:59:59Z 0.0 1.0 30608_1537291963
+
+
+#set server    = "http://rtpmeta.epa.gov/cgi-bin/rsigserver?"
+set server    = "http://YOUR_WEBSERVER_HOST/cgi-bin/rsigserver?"
+set scriptDir = "/rsig/WMS/scripts"
+set netcdfDir = "/rsig/WMS/data/input"
+set outputDir = "/rsig/WMS/data/output"
+
+
+## if we got this far, assume the parameters are in the correct order
+set layer         = $1
+set maplineStyle  = $2
+set bbox          = $3
+set width         = $4
+set height        = $5
+set time          = $6
+set minval        = $7
+set maxval        = $8
+set qaflag        = $9
+set idWithDate    = $10
+set jsonpFlag     = $11
+set crs           = $12
+
+echo "processRetigoWMS: layer=$layer maplineStyle=$maplineStyle bbox=$bbox width=$width height=$height time=$time minval=$minval maxval=$maxval qaflag=$qaflag idWithDate=$idWithDate jsonpFlag=$jsonpFlag crs=$crs" > /rsig/WMS/data/output/dafuq.txt
+chmod uog+w /rsig/WMS/data/output/dafuq.txt
+
+## get variable name
+set varParse = ($layer:as|.| |)
+@ varPos = $#varParse
+set varName = $varParse[${varPos}]
+
+
+# get hour (for Tempo)
+set timeParse1 = ($time:as|t| |)
+set timeParse2 = ($timeParse1[2]:as|:| |)
+set hh         = "$timeParse2[1]"
+
+#set maplineFlag = 0 
+#if ($maplineStyle == 'maplines') then
+#  set maplineFlag = 1
+#endif
+
+
+set fileIdentifier = ${idWithDate}
+
+
+## if output PNG does not exist, generate it
+if ( ! -e $outputDir/${fileIdentifier}.png ) then
+    # request data 
+    set netcdfFile = ${netcdfDir}/${fileIdentifier}.nc
+    if ( "${layer}" =~ viirs* ) then
+      /usr/bin/curl -s --max-time 3600 --retry 0 -L --tcp-nodelay "${server}SERVICE=wcs&VERSION=1.0.0&REQUEST=GetCoverage&FORMAT=netcdf-coards&TIME=${time}&BBOX=${bbox}&COVERAGE=${layer}&CORNERS=1&MINIMUM_QUALITY=${qaflag}" >> $netcdfFile
+    else if ( "${layer}" =~ tropomi* ) then
+      /usr/bin/curl -s --max-time 3600 --retry 0 -L --tcp-nodelay "${server}SERVICE=wcs&VERSION=1.0.0&REQUEST=GetCoverage&FORMAT=netcdf-coards&TIME=${time}&BBOX=${bbox}&COVERAGE=${layer}&CORNERS=1" >> $netcdfFile
+    else if ( "${layer}" =~ tempo* ) then
+      /usr/bin/curl -s --max-time 3600 --retry 0 -L --tcp-nodelay "${server}SERVICE=wcs&VERSION=1.0.0&REQUEST=GetCoverage&FORMAT=netcdf-coards&TIME=${time}&BBOX=${bbox}&COVERAGE=${layer}&CORNERS=1&MINIMUM_QUALITY=normal&MAXIMUM_CLOUD_FRACTION=1.0&KEY=tempost" >> $netcdfFile
+    else if ( "${layer}" =~ purpleair* ) then
+      # always regridded
+     set bboxParse = ($bbox:as|,| |)
+     set xorig  = $bboxParse[1]
+     set yorig  = $bboxParse[2]
+     set xcell  = 0.1
+     set ycell  = 0.1
+     set nrows  = `echo "($bboxParse[4] - $bboxParse[2]) / $xcell" | bc | sed -e 's/-//g' ` 
+     set ncols  = `echo "($bboxParse[1] - $bboxParse[3]) / $ycell" | bc | sed -e 's/-//g' `
+     set grid   = "${ncols},${nrows},${xorig},${yorig},${xcell},${ycell}"
+     set levels = "1,6,5000.0,0.0,1.0,9.81,287.04,50.0,290.0,100000.0" 
+     /usr/bin/curl -s --max-time 3600 --retry 0 -L --tcp-nodelay "${server}SERVICE=wcs&VERSION=1.0.0&REQUEST=GetCoverage&FORMAT=netcdf-coards&TIME=${time}&BBOX=${bbox}&COVERAGE=${layer}&AGGREGATE=hourly&MINIMUM_CONFIDENCE=90.0&MAXIMUM_DIFFERENCE=5.0&MAXIMUM_RATIO=0.7&MINIMUM_AGGREGATION_COUNT_PERCENTAGE=75.0&KEY=EPA&REGRID=WEIGHTED&LONLAT=1&ELLIPSOID=637000.0,637000.0&GRID=${grid}&levels=${levels}" >> $netcdfFile
+
+    else
+      echo "processRetigoWMS cannot process this variable"
+      exit 1
+    endif
+    
+    set parseTime = ($time:as|/| |)
+    set startTime = $parseTime[1]
+    set endTime = $parseTime[2]
+
+    ## set environment for python3
+    setenv CONDA_PREFIX /data/opt/Anaconda3
+    setenv PROJ_LIB $CONDA_PREFIX/share/proj
+    set path = ( $CONDA_PREFIX/bin $path )
+
+    ## run python routine to produce image
+    if ("${layer}" =~ purpleair* ) then 
+      ${CONDA_PREFIX}/bin/python -u ${scriptDir}/readCmaqNetcdf.py ${idWithDate}.nc ${varName}_hourly $minval $maxval $idWithDate $maplineStyle $width $height $bbox $xcell $ycell $crs >& ${outputDir}/${idWithDate}.log
+    else if ("${layer}" =~ tropomi* ) then
+      ${CONDA_PREFIX}/bin/python -u ${scriptDir}/readSatelliteNetcdf.py ${idWithDate}.nc ${varName} ${minval} ${maxval} ${idWithDate} ${maplineStyle} ${width} ${height} ${bbox} ${crs} >& ${outputDir}/${idWithDate}.log
+    else if ("${layer}" =~ viirs* ) then
+      ${CONDA_PREFIX}/bin/python -u ${scriptDir}/readSatelliteNetcdf.py ${idWithDate}.nc ${varName} ${minval} ${maxval} ${idWithDate} ${maplineStyle} ${width} ${height} ${bbox} ${crs} >& ${outputDir}/${idWithDate}.log
+    else if ("${layer}" =~ tempo* ) then
+      ${CONDA_PREFIX}/bin/python -u ${scriptDir}/readSatelliteNetcdf.py ${idWithDate}.nc ${varName} ${minval} ${maxval} ${idWithDate} ${maplineStyle} ${width} ${height} ${bbox} ${crs} >& ${outputDir}/${idWithDate}.log
+    endif
+
+
+endif
+
+## send back file
+if ( $jsonpFlag != 1 ) then
+    if (-e $outputDir/${idWithDate}.png) then
+        cat $outputDir/${idWithDate}.png
+    endif
+else
+    ## jsonp request- return nothing
+endif

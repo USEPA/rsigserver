@@ -1,0 +1,1558 @@
+#!/usr/bin/perl -wT
+
+##############################################################################
+# PURPOSE: compareserver - Serve regridded data compared to CMAQ, subsetted by
+#          date/time range, variable, and longitude-latitude box, in ASCII,
+#          XDR, MCMC, NetCDF-COARDS, and NetCDF-IOAPI formats for use by
+#          other rograms
+#          (e.g., via wget).
+# NOTES:   Server is WCS-compliant:
+#          https://www.opengeospatial.org/standards/wcs
+#          https://datafed.net/xs/OpenGIS/wcs/1.0.0/
+#          and modeled after a similar webserver application:
+#          https://webapps.datafed.net/ogc_EPA.wsfl
+#
+#          Uses cmaqserver, geoschemserver, siteserver, modisserver,
+#          viirnasasserver, viirsnoaaserver.
+#
+#          Example usage:
+#
+#          wget -q -T 0 -O - 'https://ofmpub.epa.gov/rsig/compareserver?\
+#                    SERVICE=wcs&\
+#                    VERSION=1.0.0&\
+#                    REQUEST=GetCoverage&\
+#                    COVERAGE=aqs.pm25&\
+#                    TIME=2001-08-26T00:00:00Z/2001-08-30T23:59:59Z&\
+#                    BBOX=-90,28,-80,32,0,0&\
+#                    FORMAT=ascii'
+#
+# HISTORY: 2006/08/03, plessel.todd@epa.gov, 1-919-541-5500, TSSMS=cws
+#
+# STATUS:  reviewed, tested.
+##############################################################################
+
+
+use strict;
+package main;
+$| = 1; # Turn off output buffering so messages appear in correct order.
+alarm( 3600 ); # Kill process after 1 hour. Legitimate usage could be an hour!
+# Restrict PATH and ENV. (But before popen, ENV is cleared!)
+delete @ENV{ 'PATH', 'IFS', 'CDPATH', 'ENV', 'BASH_ENV' };
+
+
+############################## TUNABLE CONSTANTS #############################
+
+
+my $debugging = 0; # 1 = print debug messages to STDERR logs/error_log.
+
+# Server where this program is installed:
+
+my $server_path = 'https://YOUR_WEBSERVER_HOST/cgi-bin';
+
+# External server to forward to via wget command:
+
+my $rsigserver_path = 'https://YOUR_WEBSERVER_HOST/cgi-bin/rsigserver?';
+
+my $bindir         = '/rsig/current/code/bin/Linux.x86_64';
+#my $wget_command   = "$bindir/wget -q -t 1 -T 0 -O - ";
+my $wget_command   = '/usr/bin/curl -k --silent --max-time 3600 --retry 0 -L --tcp-nodelay ';
+
+my $xdrconvert     = "$bindir/XDRConvert";
+my $compressor     = "$bindir/gzip -c -1";
+my $temp_file_name = "/data/tmp/compareserver_temp.$$";
+
+# Query string parsing routine dispatch table:
+
+my %parsers = (
+  'service'             => \&parse_service_option,
+  'version'             => \&parse_version_option,
+  'request'             => \&parse_request_option,
+  'coverage'            => \&parse_coverage_option,
+  'time'                => \&parse_time_option,
+  'bbox'                => \&parse_bbox_option,
+  'format'              => \&parse_format_option,
+  'compress'            => \&parse_compress_option,
+  'corners'             => \&parse_corners_option,
+  'regrid'              => \&parse_regrid_option,
+  'regrid_aggregate'    => \&parse_regrid_aggregate_option,
+  'lambert'             => \&parse_lambert_option,
+  'stereographic'       => \&parse_stereographic_option,
+  'mercator'            => \&parse_mercator_option,
+  'lonlat'              => \&parse_lonlat_option,
+  'ellipsoid'           => \&parse_ellipsoid_option,
+  'grid'                => \&parse_grid_option,
+  'levels'              => \&parse_levels_option,
+  'minimum_cad'         => \&parse_minimum_cad_option,
+  'maximum_uncertainty' => \&parse_maximum_uncertainty_option
+);
+
+# Webserver content types for each output format:
+
+my %content_types = (
+  'ascii'         => 'text/plain',
+  'mcmc'          => 'text/plain',
+  'xdr'           => 'application/octet-stream',
+  'netcdf-coards' => 'application/netcdf',
+  'netcdf-ioapi'  => 'application/netcdf'
+);
+
+# Full URL path to this program:
+
+my @pathed_program_parts = split( /\//, $0 );
+my $program_name = $pathed_program_parts[ @pathed_program_parts - 1 ];
+my $program = "$server_path/$program_name";
+
+
+# Coverage metadata: operators x variables x cmaq_sources.
+
+my @operators = (
+  'abs_diff',
+  'diff',
+  'percent_diff',
+  'ratio',
+  'replace'
+);
+
+my @cmaq_sources = (
+  'cmaq.amad.conus', # 2011-2012
+  'cmaq.discover.conus', # 2011-07
+  'cmaq.discover.east', # 2011-07
+  'cmaq.discover.md' # 2011-07
+);
+
+my @other_variables = (
+  'acam.no2', # 2011-07
+##'airnow.ozone', # 2000+
+##'airnow.pm25', # 2000+
+  'aqs.ozone', # 2000+
+  'aqs.pm25', # 2000+
+  'calipso.l2_05kmapro.column_optical_depth_aerosols_532', # 2006+
+  'calipso.l2_05kmapro.extinction_coefficient_532', # 2006+
+  'gasp.aod', # 2006+
+  'modis.mod4.optical_depth_land_and_ocean', # 2000+
+  'mozaic.ozone'  # 2001-2007, 2011
+);
+
+my @cmaq_variables = (
+  'conc.no2',
+##'aconc.o3',
+##'pm25.pm25',
+  'aconc.o3',
+  'pm25.pm25',
+  'aod.aod',
+  'ext.extinction',
+  'aod.aod',
+  'aod.aod',
+  'conc.o3',
+);
+
+my @units = (
+  'ppm',
+##'ppm',
+##'ug/m3',
+  'ppm',
+  'ug/m3',
+  '-',
+  '/km',
+  '-',
+  '-',
+  'ppm',
+);
+
+my @descriptions = (
+  'ACAM aircraft-measured NO2',
+##'Airnow ground station measured ozone',
+##'Airnow ground station measured particulate matter not more than 2.5 microns in diameter',
+  'AQS ground station measured ozone',
+  'AQS ground station measured particulate matter not more than 2.5 microns in diameter',
+  'CALIPSO satellite-measured column optical depth from aerosols at 532 nm wavelength',
+  'CALIPSO satellite-measured extinction coefficient at 532 nm wavelength',
+  'GASP satellite-measured aerosol optical depth',
+  'MODIS satellite-measured aerosol optical depth',
+  'MOZAIC aircraft-measured ozone'
+);
+
+################################## VARIABLES #################################
+
+
+# Parsed from the URL query string:
+
+my $query_string  = '';
+my $service       = ''; # wcs.
+my $version       = ''; # 1.0.0.
+my $request       = ''; # getcapabilities or describecoverage or getcoverage.
+my $coverage      = ''; # E.g., aqs.pm25-cmaq.amad.conus.pm25.pm25-diff.
+my $format        = ''; # xdr, ascii, netcdf.
+my $compress      = ''; # 1 = | gzip -c otherwise don't compress (default).
+my $corners       = ''; # 1 = compute satellite data quad corners. 0 = default.
+my $time          = ''; # E.g., 2001-08-29t00:00:00z/2001-08-30t23:59:59z.
+my $bbox          = ''; # E.g., -90,28,-80,32,1,1.
+my $minimum_cad   = ''; # Minimum accepted CAD score. E.g., 30.
+my $maximum_uncertainty = ''; # Maximum accepted abs uncertainty. E.g., 99.
+my $regrid        = ''; # E.g., nearest, mean, weighted.
+my $regrid_aggregate = ''; # E.g., none, all, daily.
+my $lambert       = ''; # E.g., 33,45,-97,40.
+my $stereographic = ''; # E.g., -98,90,45.
+my $mercator      = ''; # E.g., -98.
+my $lonlat        = '';
+my $ellipsoid     = ''; # E.g., 6370000,6370000.
+my $grid          = ''; # E.g., 268,259,-420000,-1716000,12000,12000.
+my $levels        = ''; # E.g,22,2,10000,1.0,...,0.0,9.81,287.04,50,290,100000.
+my $data_coverage = ''; # E.g., mod4.optical_depth_land_and_ocean.
+my $cmaq_coverage = ''; # cmaq.amad.conus.aod.aod.
+my $operator      = ''; # diff, abs_diff, percent_diff, ratio.
+
+
+
+################################## ROUTINES ##################################
+
+
+main();
+
+
+sub main {
+  my $result = 0;
+
+  if ( ! parse_url() ) {
+    print "Content-type: text/plain; charset=iso-8859-1\n\n"; # For webserver
+  } elsif ( $request eq 'getcapabilities' ) {
+    print "Content-type: text/xml; charset=iso-8859-1\n\n"; # For webserver
+    print_capabilities();
+    $result = 1;
+  } elsif ( $request eq 'describecoverage' ) {
+    print "Content-type: text/xml; charset=iso-8859-1\n\n"; # For webserver
+    print_coverage_description();
+    $result = 1;
+  } elsif ( $request eq 'getcoverage' ) {
+    print "Content-type: $content_types{ $format }; charset=iso-8859-1\n\n";
+    my $my_cmaq_coverage = $cmaq_coverage;
+
+    # If convert/scale get offset variable too:
+
+    if ( $my_cmaq_coverage eq 'geoschem.scale.conus.aod2pm25.slope' ) {
+      $my_cmaq_coverage .= ',geoschem.scale.conus.aod2pm25.offset';
+    }
+
+    if ( $my_cmaq_coverage eq 'geoschem.scale.conus4km.aod2pm25.slope' ) {
+      $my_cmaq_coverage .= ',geoschem.scale.conus4km.aod2pm25.offset';
+    }
+
+    my $cmaq_command =
+      "$wget_command '$rsigserver_path" .
+      "SERVICE=wcs&VERSION=$version&REQUEST=GetCoverage&" .
+      "COVERAGE=$my_cmaq_coverage&BBOX=$bbox&TIME=$time&format=xdr'" .
+      " > $temp_file_name";
+    $result = execute_command( $cmaq_command );
+
+debug( "compareserver: cmaq_command = $cmaq_command" );
+debug( "compareserver: result = $result" );
+
+    if ( $result ) { # Run XDRConvert on temporary file (on local host):
+      my $compare_command = construct_compare_command();
+      $result = execute_command( $compare_command );
+debug( "compareserver: compare_command = $compare_command" );
+debug( "compareserver: result = $result" );
+    }
+
+    unlink( $temp_file_name ); # Remove temporary file.
+  }
+
+  $result = 1 - $result; # UNIX: zero is success, non-zero is failure.
+  debug( "compareserver: exit result = $result" );
+  exit $result;
+}
+
+
+
+# Print web server capabilities metadata.
+
+sub print_capabilities {
+  print '<?xml version="1.0" encoding="UTF-8" ?>' . "\n";
+  print '<WCS_Capabilities version="1.0.0" ';
+  print 'xmlns="https://www.opengeospatial.org/standards/wcs" ';
+  print 'xmlns:gml="https://www.opengis.net//gml" ';
+  print 'xmlns:xlink="https://www.w3.org/1999/xlink">';
+  print '
+    <Service>
+        <metadataLink xlink:type="simple" xlink:href="https://www.epa.gov/ttn/airs/aqsdatamart" metadataType="other" />
+        <description>EPA AQS Web Server 1.0.0</description>
+        <name>EPA_AQS_OGC_WCS_1.0.0</name>
+        <label>EPA AQS Web Server 1.0.0</label>
+        <keywords>
+            <keyword>EPA</keyword>
+            <keyword>AQS</keyword>
+            <keyword>interoperability</keyword>
+        </keywords>
+        <responsibleParty>
+            <individualName>Todd Plessel</individualName>
+            <organisationName>EPA Vislab</organisationName>
+            <contactInfo>
+                <onlineResource xlink:type="simple" xlink:href="mailto:plessel.todd@epa.gov" />
+            </contactInfo>
+        </responsibleParty>
+        <fees>NONE</fees>
+        <accessConstraints>NONE</accessConstraints>
+    </Service>
+    <Capability>
+        <Request>
+            <GetCapabilities>
+                <DCPType>
+                    <HTTP>
+                        <Get>
+                            <OnlineResource xlink:type="simple" xlink:href="https://ofmpub.epa.gov/rsig/compareserver?" />
+                        </Get>
+                        <Post>
+                            <OnlineResource xlink:type="simple" xlink:href="https://ofmpub.epa.gov/rsig/compareserver" />
+                        </Post>
+                    </HTTP>
+                </DCPType>
+            </GetCapabilities>
+            <DescribeCoverage>
+                <DCPType>
+                    <HTTP>
+                        <Get>
+                            <OnlineResource xlink:type="simple" xlink:href="https://ofmpub.epa.gov/rsig/compareserver?" />
+                        </Get>
+                        <Post>
+                            <OnlineResource xlink:type="simple" xlink:href="https://ofmpub.epa.gov/rsig/compareserver" />
+                        </Post>
+                    </HTTP>
+                </DCPType>
+            </DescribeCoverage>
+            <GetCoverage>
+                <DCPType>
+                    <HTTP>
+                        <Get>
+                            <OnlineResource xlink:type="simple" xlink:href="https://ofmpub.epa.gov/rsig/compareserver?" />
+                        </Get>
+                        <Post>
+                            <OnlineResource xlink:type="simple" xlink:href="https://ofmpub.epa.gov/rsig/compareserver" />
+                        </Post>
+                    </HTTP>
+                </DCPType>
+            </GetCoverage>
+        </Request>
+        <Exception>
+            <Format>text/xml; charset="utf-8"</Format>
+        </Exception>
+    </Capability>
+    <ContentMetadata version="1.0.0">
+  ';
+
+  my $variable_count = @other_variables;
+
+  for ( my $variable_index = 0; $variable_index < $variable_count;
+        ++$variable_index ) {
+    my $other_variable   = $other_variables[ $variable_index ];
+    my $cmaq_variable    = $cmaq_variables[  $variable_index ];
+    my $this_units       = $units[           $variable_index ];
+
+    foreach my $cmaq_source ( @cmaq_sources ) {
+
+      foreach my $operator ( @operators ) {
+
+        my @parts = split( /\./, $cmaq_variable );
+        my $parts_count = @parts;
+        my $short_variable_name = $parts[ $parts_count - 1 ];
+        my $label = $short_variable_name;
+        my $this_description =
+          description_sentence( $operator, $variable_index );
+
+        if ( $operator ne 'replace' ) {
+          $label .= '-' . $operator;
+        }
+
+        my $this_coverage =
+          $other_variable . '-' . $cmaq_source . '.' . $cmaq_variable . '-' .
+          $operator;
+
+        if ( valid_coverage( $this_coverage ) ) {
+          print "        <CoverageOfferingBrief>\n";
+          print "            <name>$this_coverage</name>\n";
+          print "            <label>$label($this_units)</label>\n";
+          print "            <description>$this_description</description>\n";
+          print '            <lonLatEnvelope srsName="WGS84(DD)">';
+          print "\n";
+          print "                <gml:pos>-125 20</gml:pos>\n";
+          print "                <gml:pos>-50 50</gml:pos>\n";
+          print "            </lonLatEnvelope>\n";
+          print "        </CoverageOfferingBrief>\n";
+        }
+      }
+    }
+  }
+
+  print '        <CoverageOfferingBrief>
+            <name>gasp.daily_aod-geoschem.scale.conus.aod2pm25.slope-convert</name>
+            <label>PM25(ug/m3)</label>
+            <description>Convert daily mean GASP AOD to PM25 (ug/m3) via scale and offset factors.</description>
+            <lonLatEnvelope srsName="WGS84(DD)">
+                <gml:pos>-158 18</gml:pos>
+                <gml:pos>-60 64</gml:pos>
+            </lonLatEnvelope>
+        </CoverageOfferingBrief>
+        <CoverageOfferingBrief>
+            <name>gasp.daily_aod-geoschem.scale.conus4km.aod2pm25.slope-convert</name>
+            <label>PM25(ug/m3)</label>
+            <description>Convert daily mean GASP AOD to PM25 (ug/m3) via scale and offset factors.</description>
+            <lonLatEnvelope srsName="WGS84(DD)">
+                <gml:pos>-158 18</gml:pos>
+                <gml:pos>-60 64</gml:pos>
+            </lonLatEnvelope>
+        </CoverageOfferingBrief>
+    </ContentMetadata>
+</WCS_Capabilities>
+';
+}
+
+
+
+# Print web server coverage description metadata.
+
+sub print_coverage_description {
+  print '<?xml version="1.0" encoding="UTF-8" ?>';
+  print '<CoverageDescription version="1.0.0" ';
+  print 'xmlns="https://www.opengeospatial.org/standards/wcs" ';
+  print 'xmlns:gml="https://www.opengis.net/gml" ';
+  print 'xmlns:xlink="https://www.w3.org/1999/xlink">';
+
+  my $variable_count = @other_variables;
+
+  for ( my $variable_index = 0; $variable_index < $variable_count;
+        ++$variable_index ) {
+    my $other_variable   = $other_variables[ $variable_index ];
+    my $cmaq_variable    = $cmaq_variables[  $variable_index ];
+    my $this_units       = $units[           $variable_index ];
+
+    foreach my $cmaq_source ( @cmaq_sources ) {
+
+      foreach my $operator ( @operators ) {
+
+        my @parts = split( /\./, $cmaq_variable );
+        my $parts_count = @parts;
+        my $short_variable_name = $parts[ $parts_count - 1 ];
+        my $label = $short_variable_name;
+        my $this_description =
+          description_sentence( $operator, $variable_index );
+
+        if ( $operator ne 'replace' ) {
+          $label .= '-' . $operator;
+        }
+
+        my $this_coverage =
+          $other_variable . '-' . $cmaq_source . '.' . $cmaq_variable . '-' .
+          $operator;
+
+        if ( valid_coverage( $this_coverage ) ) {
+
+          if ( $coverage eq '' or $coverage eq $this_coverage ) {
+            print "    <CoverageOffering>\n";
+            print "        <name>$this_coverage</name>\n";
+            print "        <label>$label($this_units)</label>\n";
+            print "        <description>$this_description</description>\n";
+            print '
+        <lonLatEnvelope srsName="WGS84(DD)">
+          <gml:pos>-125 20</gml:pos>
+          <gml:pos>-50 50</gml:pos>
+        </lonLatEnvelope>
+        <domainSet>
+            <spatialDomain>
+                <gml:Envelope srsName="WGS84(DD)">
+                    <gml:pos>-123 18</gml:pos>
+                    <gml:pos>-66 49</gml:pos>
+                </gml:Envelope>
+            </spatialDomain>
+            <temporalDomain>
+                <timePeriod>
+                    <beginPosition>2002-01-01T00:00:00Z</beginPosition>
+                    <endPosition>2017-12-31T23:59:59Z</endPosition>
+                    <timeResolution>PT1H</timeResolution>
+                </timePeriod>
+            </temporalDomain>
+        </domainSet>
+        <rangeSet>
+            <RangeSet>
+          ';
+            print "                <name>$this_coverage</name>\n";
+            print "                <label>$label($this_units)</label>\n";
+            print "                <description>$this_description.</description>\n";
+            print '
+                <nullValues>
+                    <singleValue>-9999.0</singleValue>
+                </nullValues>
+            </RangeSet>
+        </rangeSet>
+        <supportedCRSs>
+            <requestResponseCRSs>CRS:84</requestResponseCRSs>
+            <nativeCRSs>CRS:84</nativeCRSs>
+        </supportedCRSs>
+        <supportedFormats>
+            <formats>ASCII XDR NetCDF-COARDS NetCDF-IOAPI MCMC</formats>
+        </supportedFormats>
+        <supportedInterpolations>
+            <interpolationMethod>none</interpolationMethod>
+        </supportedInterpolations>
+    </CoverageOffering>
+';
+          }
+        }
+      }
+    }
+  }
+
+  if ( $coverage eq '' or
+       $coverage eq 'gasp.daily_aod-cmaq.scale.conus.scale12km.pm25-convert') {
+    print '
+    <CoverageOffering>
+        <name>gasp.daily_aod-cmaq.scale12km.pm25-convert</name>
+        <label>PM25(ug/m3)</label>
+        <description>Convert daily mean GASP AOD to PM25 (ug/m3) via scale and offset factors.</description>
+        <lonLatEnvelope srsName="WGS84(DD)">
+            <gml:pos>-158 18</gml:pos>
+            <gml:pos>-60 64</gml:pos>
+        </lonLatEnvelope>
+        <domainSet>
+            <spatialDomain>
+                <gml:Envelope srsName="WGS84(DD)">
+                    <gml:pos>-158 18</gml:pos>
+                    <gml:pos>-60 64</gml:pos>
+                </gml:Envelope>
+            </spatialDomain>
+            <temporalDomain>
+                <timePeriod>
+                    <beginPosition>2007-01-01T00:00:00Z</beginPosition>
+                    <endPosition>2010-12-31T23:59:59Z</endPosition>
+                    <timeResolution>PT1H</timeResolution>
+                </timePeriod>
+            </temporalDomain>
+        </domainSet>
+        <rangeSet>
+            <RangeSet>
+                <name>gasp.daily_aod-cmaq.scale12km.pm25-convert</name>
+                <label>PM25(ug/m3)</label>
+                <description>Convert daily mean GASP AOD to PM25 (ug/m3) via scale and offset factors.</description>
+                <nullValues>
+                    <singleValue>-9999.0</singleValue>
+                </nullValues>
+            </RangeSet>
+        </rangeSet>
+        <supportedCRSs>
+            <requestResponseCRSs>CRS:84</requestResponseCRSs>
+            <nativeCRSs>CRS:84</nativeCRSs>
+        </supportedCRSs>
+        <supportedFormats>
+            <formats>ASCII XDR NetCDF-COARDS NetCDF-IOAPI MCMC</formats>
+        </supportedFormats>
+        <supportedInterpolations>
+            <interpolationMethod>none</interpolationMethod>
+        </supportedInterpolations>
+    </CoverageOffering>';
+  }
+
+  if ( $coverage eq '' or
+       $coverage eq 'gasp.daily_aod-cmaq.scale.conus.scale4km.pm25-convert') {
+    print '
+    <CoverageOffering>
+        <name>gasp.daily_aod-cmaq.scale12km.pm25-convert</name>
+        <label>PM25(ug/m3)</label>
+        <description>Convert daily mean GASP AOD to PM25 (ug/m3) via scale and offset factors.</description>
+        <lonLatEnvelope srsName="WGS84(DD)">
+            <gml:pos>-158 18</gml:pos>
+            <gml:pos>-60 64</gml:pos>
+        </lonLatEnvelope>
+        <domainSet>
+            <spatialDomain>
+                <gml:Envelope srsName="WGS84(DD)">
+                    <gml:pos>-158 18</gml:pos>
+                    <gml:pos>-60 64</gml:pos>
+                </gml:Envelope>
+            </spatialDomain>
+            <temporalDomain>
+                <timePeriod>
+                    <beginPosition>2007-01-01T00:00:00Z</beginPosition>
+                    <endPosition>2010-12-31T23:59:59Z</endPosition>
+                    <timeResolution>PT1H</timeResolution>
+                </timePeriod>
+            </temporalDomain>
+        </domainSet>
+        <rangeSet>
+            <RangeSet>
+                <name>gasp.daily_aod-cmaq.scale12km.pm25-convert</name>
+                <label>PM25(ug/m3)</label>
+                <description>Convert daily mean GASP AOD to PM25 (ug/m3) via scale and offset factors.</description>
+                <nullValues>
+                    <singleValue>-9999.0</singleValue>
+                </nullValues>
+            </RangeSet>
+        </rangeSet>
+        <supportedCRSs>
+            <requestResponseCRSs>CRS:84</requestResponseCRSs>
+            <nativeCRSs>CRS:84</nativeCRSs>
+        </supportedCRSs>
+        <supportedFormats>
+            <formats>ASCII XDR NetCDF-COARDS NetCDF-IOAPI MCMC</formats>
+        </supportedFormats>
+        <supportedInterpolations>
+            <interpolationMethod>none</interpolationMethod>
+        </supportedInterpolations>
+    </CoverageOffering>';
+  }
+
+  print '
+  </CoverageDescription>
+';
+}
+
+
+
+# Parse URL parameters into variables.
+
+sub parse_url {
+  use CGI qw/ untaint /;     # Load Safe untainting CGI routines.
+  $CGI::DISABLE_UPLOADS = 1; # Disable uploads.
+  $CGI::POST_MAX = 1024;     # Limit posts to 1024 bytes.
+  my $query = new CGI;       # Parse QUERY_STRING.
+  %ENV = ();                 # Unset all environment variables.
+  my @names = $query->param; # Extract names of parameters.
+  my $count = @names;
+  my $result = 0;
+  debug( "$program @names\n$count" );
+
+  for ( my $parameter = 0; $parameter < $count; ++$parameter) {
+    $_ = $names[ $parameter ];                # $_ is tainted.
+    s/[^A-Za-z]/_/go;                         # Untaint $_.
+    my $option = $_;                          # $option is untainted.
+    $_ = $query->param( $option );            # $_ is tainted.
+    s/[^\w\-.,:\/]/_/go;                      # Untaint $_.
+    my $value = $_;                           # $value is untainted.
+    my $lowercase_option = lc( $option );
+    my $lowercase_value  = lc( $value );
+    debug( "$lowercase_option $lowercase_value" );
+
+    if ( $parsers{ $lowercase_option } ) {
+      $result = $parsers{ $lowercase_option }->( $lowercase_value );
+    } else {
+      print STDERR "\nInvalid option: '$option'\n";
+      $result = 0;
+    }
+
+    if ( ! $result ) {
+      $parameter = $count; # Finish looping.
+    } else {
+      $query_string = $query_string . '&' . $option . '=' . $lowercase_value
+    }
+  }
+
+  if ( index( $query_string, 'getcapabilities' ) == -1 &&
+       index( $query_string, 'describecoverage' ) == -1 ) {
+    $result = $result && set_regrid_parameters(); # Override regrid to CMAQ grid
+  }
+
+  $result = $result && required_options_specified();
+
+  return $result;
+}
+
+
+
+# Parse service option.
+
+sub parse_service_option {
+  my $value = shift;
+  my $result = parse_option( $service, $value, 'SERVICE', 'wcs' );
+  return $result;
+}
+
+
+
+# Parse version option.
+
+sub parse_version_option {
+  my $value = shift;
+  my $result = parse_option( $version, $value, 'VERSION', '1.0.0' );
+  return $result;
+}
+
+
+
+# Parse request option.
+
+sub parse_request_option {
+  my $value = shift;
+  my $result = parse_option( $request, $value, 'REQUEST',
+                             'getcoverage getcapabilities describecoverage' );
+  return $result;
+}
+
+
+
+# Parse coverage option.
+
+sub parse_coverage_option {
+  my $value = shift;
+  $coverage = $value;
+  my $result = 0;
+  my @parts = split( /-/, $value );
+  my $count = @parts;
+
+  if ( $count != 3 ) {
+    print STDERR "\nInvalid COVERAGE option: '$value'\n";
+  } else {
+    $data_coverage = $parts[ 0 ];
+    $cmaq_coverage = $parts[ 1 ];
+    $operator = $parts[ 2 ];
+
+    if ( index( ' diff abs_diff percent_diff ratio replace convert ',
+                "$operator" ) == -1 ) {
+      print STDERR "\nInvalid COVERAGE option: '$value'\n";
+    } else {
+      $result =1;
+    }
+  }
+
+  return $result;
+}
+
+
+
+# Parse format option:
+
+sub parse_format_option {
+  my $value = shift;
+  my $result = parse_option( $format, $value, 'FORMAT',
+                             'xdr ascii netcdf-coards netcdf-ioapi mcmc' );
+  return $result;
+}
+
+
+
+# Parse time option.
+
+sub parse_time_option {
+  my $value = shift;
+  my $result = 0;
+
+  if ( $time ne '' ) {
+    print STDERR "\nRedundant TIME option: '$value'\n";
+  } else {
+    $time = $value;
+    my $is_valid = is_valid_time( $time );
+
+    if ( ! $is_valid ) {
+      print STDERR "\nInvalid TIME option: '$value'\n";
+    } else {
+      $result = 1;
+    }
+  }
+
+  return $result;
+}
+
+
+
+# Parse bbox option.
+
+sub parse_bbox_option {
+  my $value = shift;
+  my $result = 0;
+
+  if ( $bbox ne '' ) {
+    print STDERR "\nRedundant BBOX option: '$value'\n";
+  } else {
+    $bbox = $value;
+    my @bounds = split( /,/, $bbox );
+    my $bounds_count = @bounds;
+
+    if ( $bounds_count != 4 && $bounds_count != 6 ) {
+      print STDERR "\nInvalid bbox option: '$value'\n";
+    } elsif ( ! in_range( $bounds[ 0 ], -180.0, 180.0 ) ) {
+      print STDERR "\nInvalid bbox option: '$bounds[ 0 ]'\n";
+    } elsif ( ! in_range( $bounds[ 1 ], -90.0, 90.0 ) ) {
+      print STDERR "\nInvalid bbox option: '$bounds[ 1 ]'\n";
+    } elsif ( ! in_range( $bounds[ 2 ], $bounds[ 0 ], 180.0 ) ) {
+      print STDERR "\nInvalid bbox option: '$bounds[ 2 ]'\n";
+    } elsif ( ! in_range( $bounds[ 3 ], $bounds[ 1 ], 90.0 ) ) {
+      print STDERR "\nInvalid bbox option: '$bounds[ 3 ]'\n";
+    } else {
+      $result = 1;
+    }
+  }
+
+  return $result;
+}
+
+
+
+# Parse compress option.
+
+sub parse_compress_option {
+  my $value = shift;
+  my $result = 0;
+
+  if ( $compress ne '' ) {
+    print STDERR "\nRedundant COMPRESS option: '$value'\n";
+  } else {
+    $compress = $value;
+    my $is_valid = $compress == 0 || $compress == 1;
+
+    if ( ! $is_valid ) {
+      print STDERR "\nInvalid COMPRESS option: '$value'\n";
+    } else {
+      $result = 1;
+    }
+  }
+
+  return $result;
+}
+
+
+
+# Parse corners option:
+
+sub parse_corners_option {
+  my $value = shift;
+  my $result = 0;
+
+  if ( $corners ne '' ) {
+    print STDERR "\nRedundant CORNERS option\n";
+  } else {
+    $corners = $value;
+    my $is_valid = $corners == 0 || $corners == 1;
+
+    if ( ! $is_valid ) {
+      print STDERR "\nInvalid CORNERS option (require 0 or 1)\n";
+    } else {
+      $result = 1;
+    }
+  }
+
+  return $result;
+}
+
+
+
+# Parse minimum_cad option.
+
+sub parse_minimum_cad_option {
+  my $value = shift;
+  my $result = 0;
+
+  if ( $minimum_cad ne '' ) {
+    print STDERR "\nRedundant MINIMUM_CAD option: '$value'\n";
+  } else {
+    $minimum_cad = $value;
+    my $is_valid = in_range( $minimum_cad, 0.0, 100.0 );
+
+    if ( ! $is_valid ) {
+      print STDERR "\nInvalid MINIMUM_CAD option: '$value'\n";
+    } else {
+      $result = 1;
+    }
+  }
+
+  return $result;
+}
+
+
+
+# Parse maximum_uncertainty option.
+
+sub parse_maximum_uncertainty_option {
+  my $value = shift;
+  my $result = 0;
+
+  if ( $maximum_uncertainty ne '' ) {
+    print STDERR "\nRedundant MAXIMUM_UNCERTAINTY option: '$value'\n";
+  } else {
+    $maximum_uncertainty = $value;
+    my $is_valid = in_range( $maximum_uncertainty, 0.0, 100.0 );
+
+    if ( ! $is_valid ) {
+      print STDERR "\nInvalid MAXIMUM_UNCERTAINTY option: '$value'\n";
+    } else {
+      $result = 1;
+    }
+  }
+
+  return $result;
+}
+
+
+
+# Parse regrid option:
+
+sub parse_regrid_option {
+  my $value = shift;
+  my $result = parse_option( $regrid, $value, 'REGRID',
+                             'nearest mean weighted' );
+  return $result;
+}
+
+
+
+# Parse regrid_aggregate option:
+
+sub parse_regrid_aggregate_option {
+  my $value = shift;
+  my $result = parse_option( $regrid_aggregate, $value, 'REGRID_AGGREGATE',
+                             'none all daily' );
+  return $result;
+}
+
+
+
+# Parse lambert option.
+
+sub parse_lambert_option {
+  my $value = shift;
+  my $result = 0;
+
+  if ( $lambert ne '' ) {
+    print STDERR "\nRedundant LAMBERT option: '$value'\n";
+  } else {
+    $lambert = $value;
+    my @values = split( /,/, $value );
+    my $count = @values;
+
+    if ( $count != 4 ) {
+      print STDERR "\nInvalid LAMBERT option: '$value'\n";
+    } elsif ( ! in_range( $values[ 0 ], -89.0, 89.0 ) ) {
+      print STDERR "\nInvalid LAMBERT option: '$values[ 0 ]'\n";
+    } elsif ( ! in_range( $values[ 1 ], -89.0, 89.0 ) ) {
+      print STDERR "\nInvalid LAMBERT option: '$values[ 1 ]'\n";
+    } elsif ( ! in_range( $values[ 2 ], -180.0, 180.0 ) ) {
+      print STDERR "\nInvalid LAMBERT option: '$values[ 2 ]'\n";
+    } elsif ( ! in_range( $values[ 3 ], -89.0, 89.0 ) ) {
+      print STDERR "\nInvalid LAMBERT option: '$values[ 3 ]'\n";
+    } elsif ( $values[ 0 ] > $values[ 1 ] ) {
+      print STDERR "\nInvalid LAMBERT option: '$values[ 1 ]'\n";
+    } elsif ( $values[ 0 ] > 0.0 && $values[ 1 ] < 0.0 ) {
+      print STDERR "\nInvalid LAMBERT option: '$values[ 1 ]'\n";
+    } elsif ( $values[ 0 ] < 0.0 && $values[ 1 ] > 0.0 ) {
+      print STDERR "\nInvalid LAMBERT option: '$values[ 1 ]'\n";
+    } else {
+      $result = 1;
+    }
+  }
+
+  return $result;
+}
+
+
+
+# Parse stereographic option.
+
+sub parse_stereographic_option {
+  my $value = shift;
+  my $result = 0;
+
+  if ( $stereographic ne '' ) {
+    print STDERR "\nRedundant STEREOGRAPHIC option: '$value'\n";
+  } else {
+    $stereographic = $value;
+    my @values = split( /,/, $value );
+    my $count = @values;
+
+    if ( $count != 3 ) {
+      print STDERR "\nInvalid STEREOGRAPHIC option: '$value'\n";
+    } elsif ( ! in_range( $values[ 0 ], -180.0, 180.0 ) ) {
+      print STDERR "\nInvalid STEREOGRAPHIC option: '$values[ 0 ]'\n";
+    } elsif ( ! in_range( $values[ 1 ], -90.0, 90.0 ) ) {
+      print STDERR "\nInvalid STEREOGRAPHIC option: '$values[ 1 ]'\n";
+    } elsif ( ! in_range( $values[ 2 ], -90.0, 90.0 ) ) {
+      print STDERR "\nInvalid STEREOGRAPHIC option: '$values[ 2 ]'\n";
+    } else {
+      $result = 1;
+    }
+  }
+
+  return $result;
+}
+
+
+
+# Parse mercator option.
+
+sub parse_mercator_option {
+  my $value = shift;
+  my $result = 0;
+
+  if ( $mercator ne '' ) {
+    print STDERR "\nRedundant MERCATOR option: '$value'\n";
+  } else {
+    $mercator = $value;
+    my @values = split( /,/, $value );
+    my $count = @values;
+
+    if ( $count != 1 ) {
+      print STDERR "\nInvalid MERCATOR option: '$value'\n";
+    } elsif ( ! in_range( $values[ 0 ], -180.0, 180.0 ) ) {
+      print STDERR "\nInvalid MERCATOR option: '$values[ 0 ]'\n";
+    } else {
+      $result = 1;
+    }
+  }
+
+  return $result;
+}
+
+
+
+# Parse lonlat option.
+
+sub parse_lonlat_option {
+  my $value = shift;
+  my $result = 0;
+
+  if ( $lonlat ne '' ) {
+    print STDERR "\nRedundant LONLAT option: '$value'\n";
+  } else {
+    $lonlat = 1;
+    $result = 1;
+  }
+
+  return $result;
+}
+
+
+
+# Parse ellipsoid option.
+
+sub parse_ellipsoid_option {
+  my $value = shift;
+  my $result = 0;
+
+  if ( $ellipsoid ne '' ) {
+    print STDERR "\nRedundant ELLIPSOID option: '$value'\n";
+  } else {
+    $ellipsoid = $value;
+    my @values = split( /,/, $value );
+    my $count = @values;
+
+    if ( $count != 1 && $count != 2 ) {
+      print STDERR "\nInvalid ELLIPSOID option: '$value'\n";
+    } elsif ( ! in_range( $values[ 0 ], 1.0, 1e10 ) ) {
+      print STDERR "\nInvalid ELLIPSOID option: '$values[ 0 ]'\n";
+    } elsif ( $count == 2 ) {
+
+      if ( ! in_range( $values[ 1 ], $values[ 0 ], 1e10 ) ) {
+        print STDERR "\nInvalid ELLIPSOID option: '$values[ 1 ]'\n";
+      } else {
+        $result = 1;
+      }
+    } else {
+      $result = 1;
+    }
+  }
+
+  return $result;
+}
+
+
+
+# Parse grid option.
+
+sub parse_grid_option {
+  my $value = shift;
+  my $result = 0;
+
+  if ( $grid ne '' ) {
+    print STDERR "\nRedundant GRID option: '$value'\n";
+  } else {
+    $grid = $value;
+    my @values = split( /,/, $value );
+    my $count = @values;
+
+    if ( $count != 6 ) {
+      print STDERR "\nInvalid GRID option: '$value'\n";
+    } elsif ( $values[ 0 ] < 1 ) {
+      print STDERR "\nInvalid GRID option: '$values[ 0 ]'\n";
+    } elsif ( $values[ 1 ] < 1 ) {
+      print STDERR "\nInvalid GRID option: '$values[ 1 ]'\n";
+    } elsif ( ! in_range( $values[ 2 ], -1e10, 1e10 ) ) {
+      print STDERR "\nInvalid GRID option: '$values[ 2 ]'\n";
+    } elsif ( ! in_range( $values[ 3 ], -1e10, 1e10 ) ) {
+      print STDERR "\nInvalid GRID option: '$values[ 3 ]'\n";
+    } elsif ( ! in_range( $values[ 4 ], 0.01, 1e10 ) ) {
+      print STDERR "\nInvalid GRID option: '$values[ 4 ]'\n";
+    } elsif ( ! in_range( $values[ 5 ], 0.01, 1e10 ) ) {
+      print STDERR "\nInvalid GRID option: '$values[ 5 ]'\n";
+    } else {
+      $result = 1;
+    }
+  }
+
+  return $result;
+}
+
+
+
+# Parse levels option.
+
+sub parse_levels_option {
+  my $value = shift;
+  my $result = 0;
+
+  if ( $levels ne '' ) {
+    print STDERR "\nRedundant LEVELS option: '$value'\n";
+  } else {
+    $levels = $value;
+    my @values = split( /,/, $value );
+    my $count = @values;
+
+    if ( $count != 3 + $values[ 0 ] + 1 + 5 ) {
+      print STDERR "\nInvalid LEVELS option: '$value'\n";
+    } elsif ( ! in_range( $values[ 0 ], 1, 100 ) ) {
+      print STDERR "\nInvalid LEVELS option: '$values[ 0 ]'\n";
+    } elsif ( ! ( $values[ 1 ] == 2 || $values[ 1 ] == 7 ) ) {
+      print STDERR "\nInvalid LEVELS option: '$values[ 1 ]'\n";
+    } elsif ( ! in_range( $values[ 2 ], 0.0, 1e8 ) ) {
+      print STDERR "\nInvalid LEVELS option: '$values[ 2 ]'\n";
+    } else {
+      my $count = $values[ 0 ];
+      my $maximum = 1.0;
+      my $ok = 0;
+
+      for ( my $index = 3; $index < $count; ++$index ) {
+        my $sigma_p = $values[ $index ];
+
+        $ok = in_range( $sigma_p, 0.0, $maximum );
+
+        if ( ! $ok ) {
+          print STDERR "\nInvalid LEVELS option: '$values[ $index ]'\n";
+          $index = $count;
+        } else {
+          $maximum = $sigma_p;
+        }
+      }
+
+      if ( $ok == 1 ) {
+        my $index = $count - 5;
+
+        if ( ! in_range( $values[ $index ], 0.01, 1e2 ) ) {
+          print STDERR "\nInvalid LEVELS option: '$values[ $index ]'\n";
+        } elsif ( ! in_range( $values[ $index + 1 ], 0.01, 1e4 ) ) {
+          print STDERR "\nInvalid LEVELS option: '$values[ $index + 1 ]'\n";
+        } elsif ( ! in_range( $values[ $index + 2 ], 0.01, 1e4 ) ) {
+          print STDERR "\nInvalid LEVELS option: '$values[ $index + 2 ]'\n";
+        } elsif ( ! in_range( $values[ $index + 3 ], 0.01, 1e4 ) ) {
+          print STDERR "\nInvalid LEVELS option: '$values[ $index + 3 ]'\n";
+        } elsif ( ! in_range( $values[ $index + 4 ], 0.01, 1e6 ) ) {
+          print STDERR "\nInvalid LEVELS option: '$values[ $index + 4 ]'\n";
+        } else {
+          $result = 1;
+        }
+      }
+    }
+  }
+
+  return $result;
+}
+
+
+
+# Override any regrid parameters in query_string with grid parameters from
+# named CMAQ grid used for comparison:
+# my $query_string
+# my $regrid        = ''; # E.g., nearest, mean, weighted.
+# my $lambert       = ''; # E.g., 33,45,-97,40.
+# my $stereographic = ''; # E.g., -98,90,45.
+# my $mercator      = ''; # E.g., -98.
+# my $lonlat        = '';
+# my $ellipsoid     = ''; # E.g., 6370000,6370000.
+# my $grid          = ''; # E.g., 268,259,-420000,-1716000,12000,12000.
+# my $levels        = ''; # E.g,22,2,10000,1.0,...,0.0,9.81,287.04,50,290,100000.
+
+sub set_regrid_parameters {
+  my $result = 0;
+  my $regrid_parameters = '';
+  $regrid = 'weighted';
+
+  if ( index( $cmaq_coverage, 'cmaq.amad.conus' ) != -1 ) {
+    $lambert = '33,45,-97,40';
+    $ellipsoid = '6370000,6370000';
+    $grid = '459,299,-2556000,-1728000,12000,12000';
+    $levels =
+      '35,7,5000,1,0.9975,0.995,0.99,0.985,0.98,0.97,0.96,0.95,0.94,' .
+      '0.93,0.92,0.91,0.9,0.88,0.86,0.84,0.82,0.8,0.77,0.74,0.7,0.65,0.6,' .
+      '0.55,0.5,0.45,0.4,0.35,0.3,0.25,0.2,0.15,0.1,0.05,0,' .
+      '9.81,287.04,50,290,100000';
+    $regrid_parameters =
+      "&REGRID=$regrid&LAMBERT=$lambert&ELLIPSOID=$ellipsoid&GRID=$grid" .
+      "&LEVELS=$levels";
+  } elsif ( index( $cmaq_coverage, 'cmaq.discover.conus' ) != -1 ) {
+    $lambert = '33,45,-97,40';
+    $ellipsoid = '6370000,6370000';
+    $grid = '459,299,-2556000,-1728000,12000,12000';
+    $levels =
+      '35,7,5000,1,0.9975,0.995,0.99,0.985,0.98,0.97,0.96,0.95,0.94,' .
+      '0.93,0.92,0.91,0.9,0.88,0.86,0.84,0.82,0.8,0.77,0.74,0.7,0.65,0.6,' .
+      '0.55,0.5,0.45,0.4,0.35,0.3,0.25,0.2,0.15,0.1,0.05,0,' .
+      '9.81,287.04,50,290,100000';
+    $regrid_parameters =
+      "&REGRID=$regrid&LAMBERT=$lambert&ELLIPSOID=$ellipsoid&GRID=$grid" .
+      "&LEVELS=$levels";
+  } elsif ( index( $cmaq_coverage, 'cmaq.discover.east' ) != -1 ) {
+    $lambert = '33,45,-97,40';
+    $ellipsoid = '6370000,6370000';
+    $grid = '300,315,1056000,-636000,4000,4000';
+    $levels =
+      '35,7,5000,1,0.9975,0.995,0.99,0.985,0.98,0.97,0.96,0.95,0.94,' .
+      '0.93,0.92,0.91,0.9,0.88,0.86,0.84,0.82,0.8,0.77,0.74,0.7,0.65,0.6,' .
+      '0.55,0.5,0.45,0.4,0.35,0.3,0.25,0.2,0.15,0.1,0.05,0,' .
+      '9.81,287.04,50,290,100000';
+    $regrid_parameters =
+      "&REGRID=$regrid&LAMBERT=$lambert&ELLIPSOID=$ellipsoid&GRID=$grid" .
+      "&LEVELS=$levels";
+  } elsif ( index( $cmaq_coverage, 'cmaq.discover.md' ) != -1 ) {
+    $lambert = '33,45,-97,40';
+    $ellipsoid = '6370000,6370000';
+    $grid = '304,336,1594000,-98000,1000,1000';
+    $levels =
+      '35,7,5000,1,0.9975,0.995,0.99,0.985,0.98,0.97,0.96,0.95,0.94,' .
+      '0.93,0.92,0.91,0.9,0.88,0.86,0.84,0.82,0.8,0.77,0.74,0.7,0.65,0.6,' .
+      '0.55,0.5,0.45,0.4,0.35,0.3,0.25,0.2,0.15,0.1,0.05,0,' .
+      '9.81,287.04,50,290,100000';
+    $regrid_parameters =
+      "&REGRID=$regrid&LAMBERT=$lambert&ELLIPSOID=$ellipsoid&GRID=$grid" .
+      "&LEVELS=$levels";
+  } elsif ( index( $cmaq_coverage, 'geoschem' ) != -1 ) {
+
+    if ( index( $cmaq_coverage, '.conus4km.' ) != -1 ) {
+      $lambert = '20,60,-96,40';
+      $ellipsoid = '6370000,6370000';
+      $grid = '1087,688,-2226761.99224,-1518748.18797,4000,4000';
+      $regrid_parameters =
+        "&REGRID=$regrid&LAMBERT=$lambert&ELLIPSOID=$ellipsoid&GRID=$grid";
+    } elsif ( index( $cmaq_coverage, '.conus.' ) != -1 ) {
+      $lambert = '33,45,-97,40';
+      $ellipsoid = '6370000,6370000';
+      $grid = '459,299,-2556000,-1728000,12000,12000';
+      $regrid_parameters =
+        "&REGRID=$regrid&LAMBERT=$lambert&ELLIPSOID=$ellipsoid&GRID=$grid";
+    }
+  }
+
+  if ( $regrid_parameters ne '' ) { # Matched CMAQ grid so edit query_string:
+
+    # Erase operator:
+
+    $query_string =~ s/-cmaq.*&/&/;
+    $query_string =~ s/-geoschem.*&/&/;
+
+    my $r = index( uc( $query_string ), '&REGRID=' );
+
+    if ( $r != -1 ) {
+      $query_string = substr( $query_string, 0, $r - 1 ) . $regrid_parameters;
+    } else {
+      $query_string .= $regrid_parameters;
+    }
+
+    $result = 1;
+  }
+
+  return $result;
+}
+
+
+
+# Check that all required 'options' have been specified:
+
+sub required_options_specified {
+  my $result = 0;
+
+  if ( $service eq '' ) {
+    print STDERR "\nMissing option: 'SERVICE'\n";
+  } elsif ( $version eq '' ) {
+    print STDERR "\nMissing option: 'VERSION'\n";
+  } elsif ( $request eq '' ) {
+    print STDERR "\nMissing option: 'REQUEST'\n";
+  } elsif ( $request eq 'getcoverage' ) {
+
+    if ( $coverage eq '' ) {
+      print STDERR "\nMissing option: 'COVERAGE'\n";
+    } elsif ( $format eq '' ) {
+      print STDERR "\nMissing option: 'FORMAT'\n";
+    } elsif ( $time eq '' ) {
+      print STDERR "\nMissing option: 'TIME'\n";
+    } elsif ( $bbox eq '' ) {
+      print STDERR "\nMissing option: 'BBOX'\n";
+    } else {
+      my $regrid_count = 0;
+      $regrid_count += $regrid ne '';
+      $regrid_count += $ellipsoid ne '';
+      $regrid_count += $grid ne '';
+      my $projection_count = 0;
+      $projection_count += $lambert ne '';
+      $projection_count += $stereographic ne '';
+      $projection_count += $mercator ne '';
+      $projection_count += $lonlat ne '';        
+
+      $result =
+        $regrid_count == 0 && $projection_count == 0 ||
+        $regrid_count == 3 && $projection_count == 1;
+
+      if ( ! $result ) {
+        print STDERR "\nInvalid options: 'REGRID/";
+        print STDERR "LAMBERT/STEREOGRAPHIC/MERCATOR/LONLAT/";
+        print STDERR "GRID/ELLIPSOID'\n";
+      }
+    }
+  } else {
+    $result = 1;
+  }
+
+  return $result;
+}
+
+
+
+# Construct compare command.
+
+sub construct_compare_command {
+  my $my_format = "$format";
+  $my_format =~ s/netcdf-//;
+  my $my_corners = '';
+
+  if ( $corners ne '' && $corners == 1 ) {
+    $my_corners = '&CORNERS=1';
+  }
+
+  my $my_compress = "";
+
+  if ( "$compress" eq '1' ) {
+    $my_compress = " | $compressor";
+  }
+
+  my $my_operator = "$operator";
+  $my_operator =~ s/abs/absolute/;
+  $my_operator =~ s/diff/difference/;
+  my $result = "$wget_command'$rsigserver_path$query_string";
+  $result =~ s/-$cmaq_coverage-/-/;
+  $result =~ s/-$operator//;
+  $result =~ s/COMPRESS=$compress//;
+  $result =~ s/FORMAT=$format/FORMAT=xdr/;
+  $result .= $my_corners;
+  $result .= "' | $xdrconvert -compare $my_operator";
+  $result .= " $temp_file_name -$my_format";
+  $result .= "$my_compress";
+
+  return $result;
+}
+
+
+
+# Is coverage comparison valid?
+
+sub valid_coverage {
+  my $comparison = shift;
+  my $result = 1;
+
+  if ( index( $comparison, 'cmaq.cdc.' ) != -1 ) {
+    $result =
+      ( index( $comparison, 'cmaq.cdc.east.aconc.o3' ) != -1 ||
+        index( $comparison, 'cmaq.cdc.conus.aconc.o3' ) != -1 ||
+        index( $comparison, 'cmaq.cdc.east.pm25.pm25' ) != -1 ||
+        index( $comparison, 'cmaq.cdc.conus.pm25.pm25' ) != -1 );
+  }
+
+  return $result;
+}
+
+
+
+# description_sentence: construct description sentence from operator, etc.
+# my $this_description = description_sentence( $operator, $variable_index );
+
+sub description_sentence {
+  my $operator = shift;
+  my $variable_index = shift;
+  my $result = '';
+
+  if ( $operator eq 'replace' ) {
+    $result =
+      'Replace ' . $descriptions[ $variable_index ] .
+      ' with CMAQ modeled variable.';
+  } else {
+    $result =
+      $operator . ' between ' . $descriptions[ $variable_index ] .
+      ' and CMAQ modeled variable.';
+  }
+
+  # Edit operator name into English:
+
+  $result =~ s /abs_diff/Absolute difference/g;
+  $result =~ s /percent_diff/Percent difference/g;
+  
+  if ( $operator eq 'diff' ) {
+    $result =~ s /diff/Difference/g;
+  }
+
+  $result =~ s /ratio/Ratio/g;
+  
+  return $result;
+}
+
+
+
+############################### HELPER ROUTINES ##############################
+
+
+
+# debug( message );
+
+sub debug {
+  my $message = shift;
+
+  if ( $debugging ) {
+    print STDERR "\n$message\n";
+####print STDOUT "\n$message\n";
+  }
+}
+
+
+
+# Execute command and echo its output to STDOUT. E.g., execute_command( 'ls' );
+
+sub execute_command {
+  my $command = shift;
+  my $result = 0;
+  my $the_pipe = 0;
+
+  # Untaint command (match expression is arbitrary as far as -T is concerned):
+
+  if ( $command =~ m#^(/[\w-]+/[\w_ \-/\.:,>'@|?&=]+)$# ) {
+    $command = $1; # Re-assign first match, which is enough to satisfy -T.
+    debug( "$0 executing command = $command" );
+    %ENV = (); # Unset all environment variables prior to popen.
+    # Complicated, supposedly safer way to open a readable pipe to command:
+    my $pid = open( the_pipe, "-|" );
+
+    if ( ! defined( $pid ) ) {
+      die "Couldn't open pipe to subprocess";
+    } elsif ( $pid ) { # Parent process.
+
+      while ( <the_pipe> ) {
+        print;
+      }
+
+      close( the_pipe ) or die $!;
+      $result = ! $?;
+    } else { # Child process.
+      exec( $command ) or die "can't exec program: $!";
+    }
+  } else {
+    print STDERR "\n$0: '$command' contains invalid characters.\n";
+  }
+
+  return $result;
+}
+
+
+
+# my $result = parse_option( $option, $value, $option_name, $valid_values );
+# my $result = parse_option( $coverage, $value, 'COVERAGE', 'ozone pm25' );
+
+sub parse_option {
+  my ( $option, $value, $option_name, $valid_values ) = @_;
+  my $result = 0;
+
+  if ( $option ne '' ) {
+    print STDERR "\nRedundant $option_name option: '$value'\n";
+  } else {
+    $result = index( " $valid_values ", " $value " ) != -1;
+
+    if ( $result ) {
+      $_[ 0 ] = $value;
+    } else {
+      print STDERR "\nInvalid $option_name option: '$value'\n";
+    }
+  }
+
+  return $result;
+}
+
+
+
+# my $ok = in_range( $value, $minimum, $maximum );
+
+sub in_range {
+  my ( $value, $minimum, $maximum ) = @_;
+  my $result = $value >= $minimum && $value <= $maximum;
+  return $result;
+}
+
+
+
+# my $is_valid = is_valid_time( '2001-08-26t20:00:00z/2001-08-27t23:59:59z' );
+
+sub is_valid_time {
+  my $time = shift;
+  my $result = 0;
+  my $length = length( $time );
+
+  if ( $length == 41 ) {
+    $result = is_valid_time( substr( $time, 0, 20 ) );
+    $result = $result && substr( $time, 20, 1 ) eq '/';
+    $result = $result && is_valid_time( substr( $time, 21, 20 ) );
+    $result = $result && substr( $time, 0, 20 ) le substr( $time, 21, 20 );
+  } elsif ( $length == 20 ) {
+    my $year   = substr( $time, 0, 4 );
+    my $month  = substr( $time, 5, 2 );
+    my $day    = substr( $time, 8, 2 );
+    my $hour   = substr( $time, 11, 2 );
+    my $minute = substr( $time, 14, 2 );
+    my $second = substr( $time, 17, 2 );
+    $result = in_range( $year, 1900, 3000 );
+    $result = $result && in_range( $month, 1, 12 );
+    $result = $result && in_range( $day, 1, days_in_month( $year, $month ) );
+    $result = $result && in_range( $hour, 0, 23 );
+    $result = $result && in_range( $minute, 0, 59 );
+    $result = $result && in_range( $second, 0, 59 );
+    $result = $result && substr( $time, 4, 1 ) eq '-';
+    $result = $result && substr( $time, 7, 1 ) eq '-';
+    $result = $result && substr( $time, 10, 1 ) eq 't';
+    $result = $result && substr( $time, 13, 1 ) eq ':';
+    $result = $result && substr( $time, 16, 1 ) eq ':';
+    $result = $result && substr( $time, 19, 1 ) eq 'z';
+  }
+
+  return $result;
+}
+
+
+
+# my $leap = is_leap_year( $year );
+
+sub is_leap_year {
+  my $year = shift;
+  my $result = $year % 4 == 0 && ( $year % 100 != 0 || $year % 400 == 0 );
+  return $result;
+}
+
+
+
+# my $days = days_in_month( $year, $month );
+
+sub days_in_month {
+  my $year  = shift;
+  my $month = shift;
+
+  # 30 days hath September, April, June and November...
+
+  my @days_per_month = ( 31, 28, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31 );
+  my $result = $days_per_month[ $month - 1 ];
+
+  if ( $month == 2 ) {
+
+    if ( is_leap_year( $year ) ) {
+      ++$result;
+    }
+  }
+
+  return $result;
+}
+
+
+
+

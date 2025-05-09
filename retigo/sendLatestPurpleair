@@ -1,0 +1,35 @@
+#!/bin/csh -f
+#
+# args: - crs
+
+set crs = $1
+set maplines = $2
+set format = $3
+
+if ($format == "kml") then
+  cat /rsig/WMS/data/output/purpleair_pm25aqi_latest.kml
+else
+  #if ( $crs == "epsg:3857" && $maplines == "maplines" && -e /rsig/WMS/data/output/purpleair_pm25_latest_epsg3857_maplines.png ) then
+  if ( $crs == "epsg:3857" && $maplines == "maplines" && -e /rsig/WMS/data/output/purpleair_pm25aqi_latest_epsg3857_maplines.png ) then
+    #cat /rsig/WMS/data/output/purpleair_pm25_latest_epsg3857_maplines.png
+    cat /rsig/WMS/data/output/purpleair_pm25aqi_latest_epsg3857_maplines.png
+
+  #else if ( $crs == "epsg:3857" && $maplines == "nomaplines" && -e /rsig/WMS/data/output/purpleair_pm25_latest_epsg3857_nomaplines.png ) then
+  else if ( $crs == "epsg:3857" && $maplines == "nomaplines" && -e /rsig/WMS/data/output/purpleair_pm25aqi_latest_epsg3857_nomaplines.png ) then
+    #cat /rsig/WMS/data/output/purpleair_pm25_latest_epsg3857_nomaplines.png
+    cat /rsig/WMS/data/output/purpleair_pm25aqi_latest_epsg3857_nomaplines.png
+
+  #else if ( $crs == "epsg:4326" && $maplines == "maplines" && -e /rsig/WMS/data/output/purpleair_pm25_latest_epsg4326_maplines.png ) then
+  else if ( $crs == "epsg:4326" && $maplines == "maplines" && -e /rsig/WMS/data/output/purpleair_pm25aqi_latest_epsg4326_maplines.png ) then
+    #cat /rsig/WMS/data/output/purpleair_pm25_latest_epsg4326_maplines.png
+    cat /rsig/WMS/data/output/purpleair_pm25aqi_latest_epsg4326_maplines.png
+
+  #else if ( $crs == "epsg:4326" && $maplines == "nomaplines" && -e /rsig/WMS/data/output/purpleair_pm25_latest_epsg4326_nomaplines.png ) then
+  else if ( $crs == "epsg:4326" && $maplines == "nomaplines" && -e /rsig/WMS/data/output/purpleair_pm25aqi_latest_epsg4326_nomaplines.png ) then
+    #cat /rsig/WMS/data/output/purpleair_pm25_latest_epsg4326_nomaplines.png
+    cat /rsig/WMS/data/output/purpleair_pm25aqi_latest_epsg4326_nomaplines.png
+
+  endif
+endif
+
+

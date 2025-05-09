@@ -1,0 +1,2 @@
+30 3 * * * /data/GASP/get_gasp_files > /dev/null 2>&1
+

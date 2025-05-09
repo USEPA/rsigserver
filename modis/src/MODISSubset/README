@@ -1,0 +1,31 @@
+
+2005/11
+
+This directory contains the C source code for the MODISSubset program.
+
+It uses these external libraries:
+HDFEOS, HDF4, jpeg, zlib, szip libraries.
+See makeit.
+
+
+Files:
+------
+
+README             - This file.
+MODISSubset.c      - C source file for MODISSubset program (has main())
+makeit             - C Shell script to compile the program.
+
+
+Compiling:
+----------
+
+Run 'makeit' to compile the program.
+
+Running and Program Usage Documentation:
+----------------------------------------
+
+For MODISSubset program usage documentation simply execute 
+./MODISSubset |& more
+to see what command-line options are required/available and
+the format of the resulting output files.
+

@@ -1,0 +1,16 @@
+#!/bin/sh
+
+clear
+
+echo
+echo "Compiling convert_lonlats_file utility program ..."
+
+gcc -m64 -Wall -D_FILE_OFFSET_BITS=64 -D_LARGEFILE_SOURCE -DNDEBUG -O -I. -o convert_lonlats_file convert_lonlats_file.c -L. -lnetcdf4 -lhdf5_hl -lhdf5 -lcurl -lz -ldl -lm -lc
+strip convert_lonlats_file
+ls -l convert_lonlats_file
+file  convert_lonlats_file
+ldd   convert_lonlats_file
+
+ls -Fsalt | head
+echo Done
+

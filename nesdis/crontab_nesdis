@@ -1,0 +1,2 @@
+0 2 * * * /data/NESDIS/get_nesdis_pm25sat_files > /dev/null 2>&1
+

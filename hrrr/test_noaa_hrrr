@@ -1,0 +1,6 @@
+#!/bin/csh -f
+
+curl 'https://nomads.ncep.noaa.gov/cgi-bin/filter_hrrr_2d.pl?file=hrrr.t00z.wrfsfcf00.grib2&lev_10_m_above_ground=on&var_UGRD=on&var_VGRD=on&subregion=&leftlon=-130&rightlon=-55&toplat=50&bottomlat=24&dir=/hrrr.20200209/conus' > hrrr_wind.grib2
+
+ls -l hrrr_wind.grib2
+

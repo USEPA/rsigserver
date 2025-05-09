@@ -1,0 +1,15 @@
+#!/bin/sh
+
+clear
+
+echo
+echo "Compiling "
+gcc -m64 -Wall -D_FILE_OFFSET_BITS=64 -D_LARGEFILE_SOURCE -DNDEBUG -O -o dods2bin dods2bin.c -lm
+strip dods2bin
+ls -l dods2bin
+file  dods2bin
+ldd   dods2bin
+
+ls -Fsalt | head
+echo Done
+

@@ -1,0 +1,10 @@
+#!/bin/sh
+
+# Compile HRRRSubset:
+
+gcc -m64 -Wall -D_FILE_OFFSET_BITS=64 -D_LARGEFILE_SOURCE -DNDEBUG -O -I. -o HRRRSubset HRRRSubset.c ReadData.c Utilities.c -L. -lgrib2 -lm -lc
+strip HRRRSubset
+ls -l HRRRSubset
+file  HRRRSubset
+ldd   HRRRSubset
+

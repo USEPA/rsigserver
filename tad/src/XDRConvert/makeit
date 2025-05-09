@@ -1,0 +1,22 @@
+#!/bin/sh
+
+clear
+
+echo
+echo "Compiling Utilities..."
+cd Utilities
+gcc -m64 -Wall -D_FILE_OFFSET_BITS=64 -D_LARGEFILE_SOURCE -DNO_ASSERTIONS -DSERIAL_REGRID -O -I. -c Utilities.c BasicNumerics.c DateTime.c Failure.c Memory.c Stream.c Projector.c Lambert.c Stereographic.c Mercator.c VoidList.c Grid.c elevation.c RegridQuadrilaterals.c
+ls -l *.o
+cd ..
+
+echo
+echo "Compiling XDRConvert..."
+gcc -m64 -Wall -D_FILE_OFFSET_BITS=64 -D_LARGEFILE_SOURCE -DNDEBUG -DNO_ASSERTIONS -O -I./Utilities -I. -o XDRConvert XDRConvert.c Aircraft.c Point.c Site.c CALIPSO.c CMAQ.c Swath.c M3IO.c Profile.c Grid.c NetCDFUtilities.c Helpers.c -L. Utilities/*.o -lNetCDF -lm -lc
+strip XDRConvert
+ls -l XDRConvert
+file  XDRConvert
+ldd   XDRConvert
+
+ls -Fsalt | head
+echo Done
+

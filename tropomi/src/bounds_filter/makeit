@@ -1,0 +1,9 @@
+#!/bin/sh
+# Compile bounds_filter:
+
+gcc -m64 -Wall -D_FILE_OFFSET_BITS=64 -D_LARGEFILE_SOURCE -DNDEBUG -O -I. -o bounds_filter bounds_filter.c -L. -lnetcdf4 -lhdf5_hl -lhdf5 -lcurl -lz -ldl -lm -lc
+strip bounds_filter
+ls -l bounds_filter
+file  bounds_filter
+ldd   bounds_filter
+

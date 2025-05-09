@@ -1,0 +1,2 @@
+0 23 * * * /data/VIIRS/get_viirs_files > /dev/null 2>&1
+

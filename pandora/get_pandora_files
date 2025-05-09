@@ -1,0 +1,105 @@
+#!/bin/csh -f
+# Download Pandora*.txt files.
+# 2023-01-05 plessel.todd@epa.gov
+
+set here = /data/Pandora
+set data_directory = $here/data
+set url = 'http://data.pandonia-global-network.org'
+set curl_command = 'curl -k --silent --retry 0 -L --tcp-nodelay --max-time 300'
+set temp_file = "$here/junk_pandora.$$"
+
+# Get list of sub-directories (except calibration and operation files):
+
+set subdirectories = `$curl_command "$url" | grep href | grep '/' | grep -v '\.\.' | grep -v calibrationfiles | grep -v operationfiles | grep '/"' | awk -F/ '{ print $2 }'`
+
+foreach subdirectory ($subdirectories)
+  echo "$subdirectory"
+  set instruments = `$curl_command "$url/$subdirectory" | grep 'href="./Pandora' | awk -F/ '{print $2}'`
+
+  foreach instrument ($instruments)
+    echo "  $instrument"
+    set instrument_files = `$curl_command "$url/$subdirectory/$instrument/L2" | grep 'href="./Pandora' | awk -F/ '{print $2}' | tr -d '[">]'`
+
+    foreach instrument_file ($instrument_files)
+      echo "    $instrument_file"
+      set output_file = "$data_directory/$instrument_file"
+
+      # The following file was a temporary transient superceeded by non-_live:
+ 
+      if ("$instrument_file" == 'Pandora101s1_Izana_L2_rsus1_p1-8_live.txt') then
+        continue
+      endif
+
+      if ( "$1" == 'replace' ) then
+        echo "Replacing $output_file with downloaded entire file."
+        mv $output_file $output_file.orig
+      endif
+
+      # If file exists then check that it has the required number of columns.
+      # If it has too few columns then remove it and re-retrieve it.
+  
+      if ( -f $output_file ) then
+        @ required_columns = `head -500 $output_file | awk '/^Column/ { while ( $1 == "Column" ) { m = $2; getline } print m }' | tr -d ':'`
+        set actual_columns = `cat $output_file | awk '/^20/ { print NF }' | uniq | sort | uniq`
+        @ bad = 0
+
+        foreach columns ( $actual_columns )
+
+          if ( $columns < $required_columns ) then
+            @ bad = 1
+          endif
+        end
+
+        if ( $bad ) then
+          echo "Replacing bad $output_file with short column count required $required_columns actual $actual_columns"
+          \rm -f $output_file
+        endif
+      endif
+      
+      if ( ! -f $output_file ) then
+        echo "    Retrieving entire file."
+        $curl_command "$url/$subdirectory/$instrument/L2/$instrument_file" > $output_file
+      else
+        set file_bytes = `ls -l $output_file | awk '{ print $5 }'`
+        echo "    Retrieving bytes beyond $file_bytes."
+        $curl_command -r $file_bytes- "$url/$subdirectory/$instrument/L2/$instrument_file" > $temp_file
+
+        # Check that the retrieved bytes appear as valid data lines starting
+        # with a date 20YY:
+
+        grep '^20' $temp_file >& /dev/null
+
+        if ( $status == 0 ) then
+          echo "    Concatenating $file_bytes bytes onto $output_file."
+          cat $temp_file >> $output_file
+        endif
+
+        rm $temp_file
+      endif
+
+      set file_bytes = `ls -l $output_file | awk '{ print $5 }'`
+
+      # Check that small files contain valid data lines starting
+      # with a date 20YY:
+
+      if ( $file_bytes < 15000 ) then
+        grep '^20' $output_file >& /dev/null
+
+        if ( $status != 0 ) then
+          echo "    Removing invalid file $output_file"
+          rm -f $output_file
+        endif
+      endif
+
+      if ( -f $output_file ) then
+        ls -l $output_file
+      endif
+    end
+  end
+end
+
+echo
+echo Done
+echo
+
+

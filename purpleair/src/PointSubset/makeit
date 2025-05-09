@@ -1,0 +1,15 @@
+#!/bin/sh
+
+clear
+
+echo
+echo "Compiling PointSubset"
+gcc -m64 -Wall -D_FILE_OFFSET_BITS=64 -D_LARGEFILE_SOURCE -DNDEBUG -O -I. -o PointSubset PointSubset.c Utilities.c -L. -lm -lc
+strip PointSubset
+ls -l PointSubset
+file  PointSubset
+ldd   PointSubset
+
+ls -Fsalt | head
+echo Done
+

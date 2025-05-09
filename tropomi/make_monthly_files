@@ -1,0 +1,57 @@
+#!/bin/csh -f
+# Make monthly files.
+
+@ yyyymm = `date -u "+%Y%m"`
+
+set offl_variables = ( \
+  no2.nitrogendioxide_tropospheric_column \
+  ch4.methane_mixing_ratio \
+  hcho.formaldehyde_tropospheric_vertical_column \
+  co.carbonmonoxide_total_column \
+)
+
+set rpro_variables = ( \
+  no2.nitrogendioxide_tropospheric_column \
+  ch4.methane_mixing_ratio \
+)
+
+foreach product ( offl rpro )
+
+  if ( $product == 'offl' ) then
+    set variables = "$offl_variables"
+  else if ( $product == 'rpro' ) then
+    set variables = "$rpro_variables"
+  endif
+
+  foreach variable2 ( $variables )
+    foreach yyyy ( 2018 2019 2020 2021 2022 2023 2024 2025 )
+      foreach mm ( 01 02 03 04 05 06 07 08 09 10 11 12 )
+        @ yyyymm2 = $yyyy$mm
+
+        if ( $yyyymm2 < $yyyymm ) then
+          set var      = `echo $variable2 | awk -F. '{ print $1 }'`
+          set variable = `echo $variable2 | awk -F. '{ print $2 }'`
+          set output =  /data/TROPOMI/data/regridded/regridded_conus_monthly_mean_tropomi_${product}_${var}_$yyyy-$mm.ncf
+
+          if ( ! -f $output ) then
+            set dd = `cal $mm $yyyy | tr ' ' '\n' | grep -v ^$ | tail -1`
+            set url =  "https://YOUR_WEBSERVER_HOST/rsig/rsigserver?SERVICE=wcs&VERSION=1.0.0&REQUEST=GetCoverage&FORMAT=netcdf-ioapi&TIME=$yyyy-$mm-01T00:00:00Z/$yyyy-$mm-${dd}T23:59:59Z&BBOX=-136,20,-53,57&COVERAGE=tropomi.$product.$var.$variable&CORNERS=1&MINIMUM_QUALITY=75&REGRID=weighted&LAMBERT=33,45,-97,40&ELLIPSOID=6370000,6370000&GRID=459,299,-2556000,-1728000,12000,12000&REGRID_AGGREGATE=all"
+            curl -k --silent --retry 0 -L --tcp-nodelay --max-time 0 "'$url'" > $output
+
+if ($product == 'offl' && $yyyy == 2025 ) then
+echo "$url" ; ls -l $output
+endif
+
+            @ file_size = `ls -l $output | awk '{ print $5 }'`
+
+            if ( $file_size == 0 ) then
+              /bin/rm -f $output
+            endif
+          endif
+        endif
+      end
+    end
+  end
+end
+
+

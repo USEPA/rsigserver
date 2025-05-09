@@ -1,0 +1,162 @@
+#!/bin/csh -f
+# get_hms_files - Get HMS fire and smoke files from NOAA web site.
+# Contact: SSDFireTeam@noaa.gov
+
+if ( $#argv != 1 ) then
+  echo
+  echo "usage: $0 yyyy"
+  echo "example: $0 2021"
+  echo
+  exit 1
+endif
+
+set URL = 'https://satepsanone.nesdis.noaa.gov/pub/FIRE/web/HMS'
+set URL_TXT = "$URL/Fire_Points/Text"         # /YYYY/MM/hms_fireYYYYMMDD.txt
+set URL_SHP = "$URL/Smoke_Polygons/Shapefile" # /YYYY/MM/hms_smokeYYYYMMDD.zip
+set BINDIR = '/rsig/current/code/bin/Linux.x86_64'
+set CURL    = "$BINDIR/curl -k --silent --retry 0 -L --tcp-nodelay --max-time 300 -o -"
+set DBFDUMP = "$BINDIR/dbfdump"
+set SHPDUMP = "$BINDIR/shpdump"
+set UNZIP   = "$BINDIR/unzip"
+
+cd /data/HMS
+
+@ yyyy = $1
+@ days = 366
+@ yyyymmdd = ${yyyy}1231
+
+while ( $days )
+  @ days -= 1
+
+  @ yyyy = $yyyymmdd / 10000
+  @ mm = $yyyymmdd / 100 % 100
+  @ dd = $yyyymmdd % 100
+
+  if ( ! -d data/$yyyy ) then
+    mkdir data/$yyyy
+  endif
+
+  foreach file_type ( hms_fire hms_smoke )
+    set ext = 'txt'
+
+    if ( $file_type == 'hms_smoke' ) then
+      set ext = 'dbf' # Download .zip file containing .dbf, .shx, .shp.
+    endif
+
+    set data_file = "$file_type$yyyymmdd.$ext"
+    set output_file = "data/$yyyy/$data_file"
+    set output_file2 = '' # shx.
+    set output_file3 = '' # shp.
+
+    if ( -f $output_file ) then # File already exists, check it is ok.
+ 
+      if ( $ext == 'txt' ) then # Check txt file.
+        grep '404 Not Found' $output_file >& /dev/null
+        if ( $status == 0 ) /bin/rm -f $output_file
+      else
+        $DBFDUMP $output_file >& /dev/null
+        if ( $status != 0 ) /bin/rm -f $output_file
+      endif
+    endif
+
+    if ( ! -f $output_file ) then # File does not exist so download it.
+      set ok = 0
+
+      if ( $ext == 'dbf' ) then
+        set download_file = "$data_file:r".zip
+
+        # Download zip file:
+
+        set MM = `printf "%02d" $mm`
+
+        echo \
+         "$CURL '$URL_SHP/$yyyy/$MM/$download_file' > $download_file"
+          $CURL "$URL_SHP/$yyyy/$MM/$download_file" > $download_file
+
+        if ( $status == 0 ) then
+
+          # Unzip the file:
+
+          $UNZIP $download_file
+
+          if ( $status == 0 ) then
+            set output_file2 = $output_file:r.shx
+            set output_file3 = $output_file:r.shp
+            mv $download_file:r.dbf $output_file
+            mv $download_file:r.shx $output_file2
+            mv $download_file:r.shp $output_file3
+
+            # Check dbf file:
+
+            $DBFDUMP $output_file >& /dev/null
+
+            if ( $status == 0 ) then
+
+              # Check shp file (and implicitly shx file):
+
+              $SHPDUMP $output_file3 >& /dev/null
+
+              if ( $status == 0 ) then
+                set ok = 1
+              endif
+            endif
+          endif
+
+          /bin/rm -f $download_file:r.???
+        endif
+
+      else if ( $ext == 'txt' ) then
+
+        # Download txt file:
+
+        set MM = `printf "%02d" $mm`
+
+        echo \
+         "$CURL '$URL_TXT/$yyyy/$MM/$data_file' > $output_file"
+          $CURL "$URL_TXT/$yyyy/$MM/$data_file" > $output_file
+
+        if ( $status == 0 ) then
+
+          # Check the file:
+
+          grep '404 Not Found' $output_file >& /dev/null
+
+          if ( $status != 0 ) then
+            set ok = 1
+          endif
+        endif
+      endif
+
+      if ( $ok == 1 ) then
+        chmod 444 $output_file $output_file2 $output_file3 # Avoid overwrites.
+        ls -l $output_file $output_file2 $output_file3
+      else
+        /bin/rm -f $output_file $output_file2 $output_file3
+      endif
+
+    endif
+  end
+
+  # Compute previous date:
+ 
+  @ dd -= 1
+
+  if ( $dd < 1 ) then
+    @ mm -= 1
+
+    if ( $mm < 1 ) then
+      @ yyyy -= 1
+      @ mm = 12
+    endif
+
+    # Get days in month mm:
+
+    @ dd = `cal $mm $yyyy | grep -v '^ ' | grep -v ^$ | tail -1 | awk '{print $NF}'`
+
+  endif
+
+  @ yyyymmdd = $yyyy * 10000 + $mm * 100 + $dd
+
+end
+
+

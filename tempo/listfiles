@@ -1,0 +1,474 @@
+#!/bin/csh -f
+# listfiles - List TEMPO data files for given PRODUCT, YYYYMMDDHH, HOURS, BBOX.
+# 2022-09-16 plessel.todd@epa.gov 919-541-5500
+
+############################## Tunable parameters #############################
+
+set directory = /data/TEMPO
+set tempdir = /data/tmp
+set bindir = $directory
+set BOUNDS_FILTER = $bindir/bounds_filter
+set NCDUMP = /rsig/current/code/bin/Linux.x86_64/ncdump
+set CURL = /rsig/current/code/bin/Linux.x86_64/curl
+set data_directory = $directory/data
+set temp  = $tempdir/listfiles.$$
+set temp2 = $tempdir/listfiles2.$$
+set temp3 = $tempdir/listfiles3.$$
+set temp_run_file = $tempdir/listfiles_run_file.$$
+
+# If use_cmr = 1 (and a cmr_id is found for the file type) then use CURL to
+# call the external webservice to very quickly generate a file list based on
+# TIME and BBOX (checked against swath POLYGON so fewer false positive matches).
+# Otherwise /bin/ls will be used to generate the file list based on TIME then
+# bounds_filter will be used (parallel instances) to filter the list based on
+# BBOX.
+# Note the maximum number of files returned is limited by the maximum page_size
+# (2000). Since there can be 130 or more files per day, the webservice is
+# called sequentially for at most 10 days at a time.
+# If the webservice cannot be used or fails then bounds_filter will be used.
+
+set CMR_URL = "https://cmr.earthdata.nasa.gov/search/granules?page_size=2000"
+@ use_cmr = 1
+
+# If using bounds_filter then run task-parallel instances on subsets of the
+# full file list. (Set to 1 to run just one instance on the full file list.)
+
+@ parallel_processes = 24
+
+###############################################################################
+
+# Make tail+ work!
+setenv _POSIX2_VERSION 199209
+set _POSIX2_VERSION=199209
+
+###############################################################################
+# Read and check command-line arguments.
+# Note key is optional and is empty '' if not specified.
+# Without a key the file versions must be checked to filter-out files with
+# versions that are not authorized by NASA.
+# temposerver contains the valid key to check against and if valid then it will
+# be passed as the last argument. If not valid then the key argument will be ''.
+
+@ ok = 0
+@ yyyymmddhh = 0
+@ hours      = 0
+set lonmin = 0
+set lonmax = 0
+set latmin = 0
+set latmax = 0
+
+if ( $#argv == 7 || $#argv == 8 ) then
+  set key = "$8"
+  set product  = `echo $1 | awk -F. '{ print toupper($2)"_"toupper($1) }'`
+  set level    = `echo $1 | awk -F. '{ print toupper($1) }'`
+
+  @ yyyymmddhh = $2
+  @ hours      = $3
+  set lonmin   = $4
+  set latmin   = $5
+  set lonmax   = $6
+  set latmax   = $7
+  @ ok = ($yyyymmddhh >= 1990010100 && $yyyymmddhh <= 2147123123 && $hours >= 1)
+  
+  if ( $ok ) then
+    @ ok = `echo $lonmin $lonmax $latmin $latmax | awk '{ lonmin = $1; lonmax = $2; latmin = $3; latmax = $4; print ( lonmin >= -180 && lonmin <= 180 && lonmax >= lonmin && lonmax <= 180 && latmin >= -90 && latmin <= 90 && latmax >= latmin && latmax <= 90 ) }'`
+  endif
+
+  if ( ! $ok ) then
+    echo "$0 Invalid command-line arguments $*"
+  endif
+endif
+
+
+
+###############################################################################
+# If invalid then print usage instructions and an example:
+
+if ( ! $ok ) then
+  echo
+  echo "$0 - List TEMPO data files for given PRODUCT and starting YYYYMMDDHH and HOURS and lon-lat bounds."
+  echo "usage: $0 PRODUCT YYYYMMDDHH HOURS LONMIN LATMIN LONMAX LATMAX [KEY]"
+  echo "example: $0 l2.no2 2023101716 24 -73 42 -72 43 TEMPOST"
+  echo /data/TEMPO/data/2023/10/TEMPO_NO2_L2_V01_20231017T160036Z_S007G02.nc
+  echo /data/TEMPO/data/2023/10/TEMPO_NO2_L2_V01_20231017T160716Z_S007G03.nc
+  echo /data/TEMPO/data/2023/10/TEMPO_NO2_L2_V01_20231017T170036Z_S008G02.nc
+  echo /data/TEMPO/data/2023/10/TEMPO_NO2_L2_V01_20231017T170716Z_S008G03.nc
+  echo /data/TEMPO/data/2023/10/TEMPO_NO2_L2_V01_20231017T180036Z_S009G02.nc
+  echo /data/TEMPO/data/2023/10/TEMPO_NO2_L2_V01_20231017T180716Z_S009G03.nc
+  echo /data/TEMPO/data/2023/10/TEMPO_NO2_L2_V01_20231017T190010Z_S010G02.nc
+  echo /data/TEMPO/data/2023/10/TEMPO_NO2_L2_V01_20231017T190623Z_S010G03.nc
+  exit 1
+endif
+
+
+
+###############################################################################
+# ADP_L2 files are from two satellites - east (G16) and west (G18) and
+# the file names can clash so they must be stored in separate sub-directories.
+# subdir is set to match the names of those sub-directories.
+
+set subdir = ''
+
+if ( $product == 'ADP_L2' ) then
+  set subdir = 'G??/'
+endif
+
+
+
+###############################################################################
+# Check for cmr id that matches file type:
+
+set cmr_product_ids = ( \
+  'NO2_L2,C2930725014-LARC_CLOUD' \
+  'HCHO_L2,C2930730944-LARC_CLOUD' \
+  'O3TOT_L2,C2930726639-LARC_CLOUD' \
+  'CLDO4_L2,C2930760329-LARC_CLOUD' \
+  'NO2_L3,C2930763263-LARC_CLOUD' \
+  'HCHO_L3,C2930761273-LARC_CLOUD' \
+  'O3TOT_L3,C2930764281-LARC_CLOUD' \
+  'CLDO4_L3,C2930727817-LARC_CLOUD' \
+)
+
+set cmr_id = ''
+
+if ( $use_cmr ) then
+
+  foreach product_id ( $cmr_product_ids )
+    set cmr_id = `echo $product,$product_id | awk -F, '{if ($1 == $2) print $3}'`
+
+    if ( "$cmr_id" != '' ) then # Found match so quit looping.
+      break
+    endif
+  end
+
+endif
+
+
+
+###############################################################################
+# file_count is the number of files in the temp list.
+# It gets reduced by various filtering steps.
+
+@ file_count = 0
+
+# Set initial time variables:
+
+set days_per_month = ( 31 28 31 30 31 30 31 31 30 31 30 31 )
+@ yyyy =   $yyyymmddhh / 1000000
+@ mm   = ( $yyyymmddhh / 10000 ) % 100
+@ dd   = ( $yyyymmddhh / 100 ) % 100
+@ hh   =   $yyyymmddhh % 100
+
+@ leap = ( $yyyy % 4 == 0 && ! ( $yyyy % 100 == 0 && ! $yyyy % 400 == 0 ) )
+@ days_per_year = 365 + $leap
+
+
+
+###############################################################################
+# If cmr_id exists then use CURL to call the webservice with at most 10 days
+# at a time.
+###############################################################################
+
+if ( "$cmr_id" != '' ) then
+  set YYYY1 = `printf "%04d" $yyyy`
+  set MM1   = `printf "%02d" $mm`
+  set DD1   = `printf "%02d" $dd`
+  set HH1   = `printf "%02d" $hh`
+  @ h = 1
+
+  while ( $h <= $hours )
+
+    # End timestamp is at most 10 days later since the cmr page size limit is
+    # 2000 and there can be 130 files (or more?) per day.
+
+    @ days = 1
+
+    while ( $days <= 10 && $h <= $hours )
+      @ hh += 1
+
+      if ( $hh == 24 ) then
+        @ hh = 0
+        @ dd += 1
+        @ days += 1
+
+        @ days_this_month = $days_per_month[$mm]
+
+        if ( $mm == 2 ) then
+          @ days_this_month += $leap
+        endif
+
+        if ( $dd > $days_this_month ) then
+          @ dd = 1
+          @ mm += 1
+
+          if ( $mm > 12 ) then
+            @ mm = 1
+            @ yyyy += 1
+            @ leap = ( $yyyy % 4 == 0 && ! ( $yyyy % 100 == 0 && ! $yyyy % 400 == 0 ) )
+          endif
+        endif
+      endif
+
+      @ h += 1
+    end
+
+    set YYYY2 = `printf "%04d" $yyyy`
+    set MM2   = `printf "%02d" $mm`
+    set DD2   = `printf "%02d" $dd`
+    set HH2   = `printf "%02d" $hh`
+
+    # UGLY: cmr webservice uses [] in the URL! Must use --globoff to work.
+    # Parse out the .nc file names from the XML then extract the yyyy/mm and
+    # prepend local directory which contains one month of files.
+
+    $CURL --silent --globoff "$CMR_URL&concept_id=$cmr_id&bounding_box[]=$lonmin,$latmin,$lonmax,$latmax&temporal=$YYYY1-$MM1-${DD1}T${HH1}:00:00Z,$YYYY2-$MM2-${DD2}T${HH2}:59:59Z" \
+      | tr '[<>]' '\n' | grep '\.nc' | \
+      awk -F_ -v dir="$data_directory" -v subdir="$subdir" \
+        '{ if ( index( $NF, "Z.nc" ) ) { timestamp = $NF } else { timestamp = $(NF-1) } yyyy = substr( timestamp, 1, 4 ); mm = substr( timestamp, 5, 2 ); printf "%s/%s/%s/%s%s\n", dir, yyyy, mm, subdir, $0 }' >> $temp
+
+    set YYYY1 = $YYYY2
+    set MM1   = $MM2
+    set DD1   = $DD2
+    set HH1   = $HH2
+  end
+
+  touch $temp
+  sort $temp | uniq > $temp2
+  mv $temp2 $temp
+  @ file_count = `grep '\.nc' $temp | wc -l`
+endif
+
+
+
+###############################################################################
+# If cmr was not used or failed to generate the file list then use /bin/ls -f1
+# Listing a directory containing thousands of files is slow.
+# Using the -f1 flag avoids further slowness of coloring, etc.
+# File names look like this:
+# TEMPO_NO2_L2_V01_20231017T190623Z_S010G03.nc
+# TEMPO-ABI_PM25_L3_V03_20230826T150000Z.nc
+
+if ( $file_count == 0 ) then
+  set cmr_id = '' # cmr_id was not successful.
+  @ h = 1
+
+  while ( $h <= $hours )
+
+    # List files matching yyyymmdd hh:
+
+    @ yyyymmdd = `printf "%04d%02d%02d" $yyyy $mm $dd`
+    set hh0 = `printf "%02d" $hh`
+    set YYYY = `echo $yyyymmdd | awk '{ printf  "%04d", substr( $1, 1, 4 ) }'`
+    set MM   = `echo $yyyymmdd | awk '{ printf  "%02d", substr( $1, 5, 2 ) }'`
+    /bin/ls -f1 $data_directory/$YYYY/$MM/${subdir}TEMPO*_${product}_*_${yyyymmdd}T$hh0*Z*.nc |& grep -v 'ls: ' >> $temp
+
+    @ hh += 1
+
+    if ( $hh == 24 ) then
+      @ hh = 0
+      @ dd += 1
+
+      @ days_this_month = $days_per_month[$mm]
+
+      if ( $mm == 2 ) then
+        @ days_this_month += $leap
+      endif
+
+      if ( $dd > $days_this_month ) then
+        @ dd = 1
+        @ mm += 1
+
+        if ( $mm > 12 ) then
+          @ mm = 1
+          @ yyyy += 1
+          @ leap = ( $yyyy % 4 == 0 && ! ( $yyyy % 100 == 0 && ! $yyyy % 400 == 0 ) )
+        endif
+      endif
+    endif
+
+    @ h += 1
+  end
+
+  touch $temp
+  sort $temp | uniq > $temp2
+  mv $temp2 $temp
+  @ file_count = `cat $temp | wc -l`
+endif
+
+
+
+###############################################################################
+# If key was not specified then filter the file list based on file version and
+# file date:
+# File names look like this:
+# TEMPO_NO2_L2_V01_20231017T190623Z_S010G03.nc
+# TEMPO-ABI_PM25_L3_V03_20230826T150000Z.nc
+
+if ( $file_count > 0 && "$key" == '' ) then
+  set data_files = `cat $temp`
+  touch $temp2
+  rm $temp2
+
+  foreach data_file ( $data_files )
+    set file_name = $data_file:t:r
+
+    if ( $product == 'PM25_L3' ) then
+      set file_version = `echo $file_name | awk -F_ '{ print $(NF - 1) }'`
+      @ file_yyyymmdd  = `echo $file_name | awk -F_ '{ print substr( $NF, 1, 8 ) }'`
+    else
+      set file_version = `echo $file_name | awk -F_ '{ print $(NF - 2) }'`
+      @ file_yyyymmdd  = `echo $file_name | awk -F_ '{ print substr( $(NF - 1), 1, 8 ) }'`
+    endif
+
+    # Per georgina.hayes-crepps@nasa.gov email on 2024-05-29
+    # no key is needed for file version >= V03:
+
+    @ ok = `echo $file_version | awk '{ print ( $1 >= "V03" ) }'`
+
+    if ( ! $ok ) then
+
+      # Per georgina.hayes-crepps@nasa.gov email on 2024-01-22,
+      # no key is needed for these preliminary/mini-release/pre-V03 files:
+
+      if ( $file_yyyymmdd == 20230802 || \
+           $file_yyyymmdd == 20230809 || \
+           $file_yyyymmdd == 20230816 || \
+           $file_yyyymmdd == 20230821 || \
+           $file_yyyymmdd == 20230822 || \
+           $file_yyyymmdd == 20230823 || \
+           $file_yyyymmdd == 20230825 || \
+           $file_yyyymmdd == 20230826 ) then
+        @ ok = 1
+      else if ( $file_yyyymmdd >= 20231217 && $file_yyyymmdd <= 20231230 ) then
+        @ ok = 1
+      endif
+    endif
+
+    if ( $ok ) then
+      echo $data_file >> $temp2
+    endif
+  end
+
+  if ( -f $temp2 ) then
+    mv $temp2 $temp
+  else # All files were filtered-out:
+    rm $temp
+  endif
+
+  touch $temp
+  @ file_count = `cat $temp | wc -l`
+endif
+
+
+
+###############################################################################
+# Filter file list by lon-lat bounds (unless cmr_id was successfully used):
+
+if ( $file_count > 0 && $cmr_id == '' ) then
+
+  if ( $product == 'ADP_L2' ) then
+
+    # Must use NCDUMP instead of bounds_filter program on these files because
+    # the global attributes geospatial_lon_min, etc. are strings (UGLY)
+    # and they are not readable using nc_inq_attlen() and nc_get_att_text().
+    # NetCDF BUG?
+
+    set input_files = `cat $temp`
+
+    foreach input_file ( $input_files )
+      set file_bounds = `$NCDUMP -h $input_file | grep ':geospatial_l' | tr -d '[:"=;]' | awk '{ print $2 " " $3 }' | sort`
+
+      if ( "$file_bounds" != '' ) then
+        echo $lonmin $latmin $lonmax $latmax $file_bounds \
+        | awk -v file_name="$input_file" '{ lonmin = $1; latmin = $2; lonmax = $3; latmax = $4; file_lat_max = $6; file_lat_min = $8; file_lon_max = $10; file_lon_min = $12; outside = ( file_lon_min > lonmax || file_lon_max < lonmin || file_lat_min > latmax || file_lat_max < latmin ); if ( ! outside ) { print file_name } }' \
+        >> $temp2
+      else # Output file anyway and let subsetter filter:
+        echo $input_file >> $temp2
+      endif
+    end
+
+    mv $temp2 $temp
+  else
+
+    if ( $parallel_processes <= 1 || $file_count <= $parallel_processes ) then
+      $BOUNDS_FILTER -files $temp -domain $lonmin $latmin $lonmax $latmax \
+        > $temp2
+    else
+
+      # Create sh program to run parallel instances of bounds_filter then wait:
+
+      @ files_per_process = $file_count / $parallel_processes
+      @ remaining_files = $file_count % $parallel_processes
+      @ process = 1
+      @ skip = 1
+      @ count = $files_per_process
+
+      echo '#\!/bin/sh' > $temp_run_file
+
+      while ( $process <= $parallel_processes )
+
+        if ( $process == $parallel_processes ) then
+          @ count += $remaining_files
+        endif
+
+        tail +$skip $temp | head -$count > $temp2.$process
+        echo "$BOUNDS_FILTER -files $temp2.$process -domain $lonmin $latmin $lonmax $latmax > $temp3.$process &" >> $temp_run_file
+        @ skip += $count
+        @ process += 1
+      end
+
+      echo wait >> $temp_run_file
+
+      # Run bounds_filter instances and wait for them all to finish:
+
+      chmod +x $temp_run_file
+      $temp_run_file >& /dev/null
+
+      # Concatenate their sorted uniq file list output:
+
+      cat $temp3.* | sort | uniq > $temp2
+      rm $temp2.* $temp3.* $temp_run_file
+      mv $temp2 $temp
+    endif
+
+    @ file_count = `cat $temp | wc -l`
+  endif
+endif
+
+
+
+###############################################################################
+# If there are _L3_ (grid) files then only output the mode (most common)
+# version since different versions (e.g., V02 vs V03) have different grids and
+# RSIG code does not support unmatched grids. HACK.
+
+if ( $file_count > 0 ) then
+  grep '_L3_V' $temp >& /dev/null
+
+  if ( $status == 0 ) then
+    set uniq_versions = `cat $temp | tr '_' ' ' | awk '{ printf "_L3_%s_\n", $(NF-2) }' | sort | uniq`
+    @ unique_count = $#uniq_versions
+
+    if ( $unique_count > 1 ) then
+
+      foreach version ( $uniq_versions )
+        printf "%s " $version >> $temp2
+        grep -c $version $temp >> $temp2
+      end
+
+      set mode_version = `cat $temp2 | sort -n -r -k 2 | head -1 | awk '{ print $1 }'`
+      grep $mode_version $temp > $temp2
+      mv $temp2 $temp
+      @ file_count = `cat $temp | wc -l`
+    endif
+  endif
+endif
+
+
+
+###############################################################################
+# Finally output the filtered file list (or empty) then remove the file:
+
+touch $temp
+cat $temp
+rm $temp

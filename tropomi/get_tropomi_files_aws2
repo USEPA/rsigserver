@@ -1,0 +1,141 @@
+#!/bin/csh -f
+# get_tropomi_files_aws2 - Download TROPOMI NRTI/OFFL NO2/HCHO/CO/CH4 NetCDF files from Amazon Web Services (AWS) server.
+
+if ( $#argv != 1 && $#argv != 2 ) then
+  echo
+  echo "$0 - Download TROPOMI NO2/CO/HCHO/CH4 NetCDF files from AWS server."
+  echo "Usage: $0 TYPE VARIABLE [YYYYMMDD]"
+  echo "Examples:"
+  echo "$0L NO2 20180531"
+  echo "ls -last data/20180531/*OFFL* | head"
+  echo "$0 NO2"
+  echo "ls -last data/20180531/*NRTI* | head"
+  echo
+  exit 1
+endif
+
+set VARIABLE = $1
+
+if ( $#argv == 2 ) then
+  @ YYYYMMDD = $2
+else
+##@ YYYYMMDD = `date -u "+%Y%m%d"`
+  @ YYYYMMDD = `date "+%Y%m%d"`
+endif
+
+set YYYY = `echo $YYYYMMDD | cut -c1-4`
+set MM   = `echo $YYYYMMDD | cut -c5-6`
+set DD   = `echo $YYYYMMDD | cut -c7-8`
+
+
+set NCDUMP = /rsig/current/code/bin/Linux.x86_64/ncdump
+set directory = /data/TROPOMI
+set data_directory = $directory/data
+set remote_host = aws2
+
+set template_file = $directory/${remote_host}_template
+set tempfile1 = $directory/junk_aws2.$$.csh
+set tempfile2 = $directory/junk_aws2.$$.xml
+
+# Get the list of available VARIABLE data file names and Ids:
+
+# Global coverage:
+@ first_hour = 0
+@ last_hour  = 23
+# CONUS based on first and last hour of flyover:
+#@ first_hour = 15
+#@ last_hour  = 21
+
+# Construct VARIABLE name with length = 6 and zero or more trailing underscores:
+# E.g., CO => CO___, NO2 => NO2__, HCHO => HCHO_
+
+set VARIABLE_ = `echo $VARIABLE | awk '{ v = $1; n = length( v ); while ( n++ < 6 ) v = v "_"; print v }'`
+#@ h = $first_hour
+
+echo '#\!/bin/csh -f' > $tempfile1
+
+#while ( $h <= $last_hour )
+  #set HH = `printf "%02d" $h`
+
+  cat $template_file | \
+    sed "s/VARIABLE/$VARIABLE_/g" | \
+    sed "s/YYYY/$YYYY/g" | \
+    sed "s/MM/$MM/g" | \
+    sed "s/DD/$DD/g" >> $tempfile1
+
+  #@ h += 1
+#end
+
+if ( ! -d  $data_directory/$YYYYMMDD ) then
+  mkdir $data_directory/$YYYYMMDD
+  chmod 775 $data_directory/$YYYYMMDD
+endif
+
+#if ( ! -d  $data_directory/$YYYYMMDD/aws ) then
+#  mkdir $data_directory/$YYYYMMDD/aws
+#  chmod 775 $data_directory/$YYYYMMDD/aws
+#endif
+
+chmod +x $tempfile1
+
+set data_files = `$tempfile1 | tr -d '\r'`
+
+# report number of files
+echo $#data_files data files
+
+
+# S5P_OFFL_L2__NO2____20180206T162223_20180206T180353_01650_01_001108_20180210T174143.nc
+# S5P_NRTI_L2__NO2____20180206T162223_20180206T180353_01650_01_001108_20180210T174143.nc
+
+foreach data_file ( $data_files )
+  #set name = `echo "${data_file}.nc" | awk -F, '{ print $1 }'` # up to 2024/11/18
+  set name = `echo "${data_file}" | awk  '{ print $1 }'` # 2024/11/19 and beyond
+
+echo "name = $name yo"
+
+  #if ( ! -d  $data_directory/$YYYYMMDD/aws ) then
+  #  mkdir $data_directory/$YYYYMMDD/aws
+  #  chmod 775 $data_directory/$YYYYMMDD/aws
+  #endif
+
+  #set output_file = $data_directory/$YYYYMMDD/aws/${name}
+  set output_file = $data_directory/$YYYYMMDD/${name}
+
+  # Check if the file already exists and is valid:
+  if ( -f $output_file ) then
+    $NCDUMP -h $output_file >& /dev/null
+
+    if ( $status != 0 ) then # Remove invalid file.
+      echo "Removing invalid existing file $output_file"
+      \rm -f $output_file
+    endif
+  endif
+
+  if ( ! -f $output_file ) then # Retrieve file:
+    ##set command = "/data/TROPOMI/aws/dist/aws s3 cp --no-sign-request s3://meeo-s5p/${TYPE}/L2__${VARIABLE_}/${YYYY}/${MM}/${DD}/$data_file ${data_directory}/$YYYYMMDD/aws/"
+    #set command = "/data/TROPOMI/aws/dist/aws s3 cp --profile copernicus-ds --endpoint-url https://s3.dataspace.copernicus.eu s3://eodata/Sentinel-5P/TROPOMI/L2__${VARIABLE_}/${YYYY}/${MM}/${DD}/${data_file}/${data_file}.nc ${data_directory}/$YYYYMMDD/"
+    set command = "/data/TROPOMI/aws/dist/aws s3 cp --profile copernicus-ds --endpoint-url https://s3.dataspace.copernicus.eu s3://eodata/Sentinel-5P/TROPOMI/L2__${VARIABLE_}/${YYYY}/${MM}/${DD}/${data_file} ${data_directory}/$YYYYMMDD/"
+    echo "$command"
+    echo '#\!/bin/csh -f' > $tempfile2
+    echo "$command" >> $tempfile2
+    chmod +x $tempfile2
+
+    $tempfile2
+
+    # Check if file is valid and if not then remove it:
+    $NCDUMP -h $output_file >& /dev/null
+
+    if ( $status != 0 ) then # Remove invalid file.
+      echo "Removing invalid downloaded file $output_file"
+      \rm -f $output_file
+      sleep 30
+    else
+      chmod 444 $output_file
+      ls -l $output_file
+    endif
+  endif
+end
+
+echo "Done"
+\rm -f $tempfile1 $tempfile2
+

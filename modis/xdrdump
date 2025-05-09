@@ -1,0 +1,473 @@
+#!/bin/csh -f
+# PURPOSE: xdrdump - Translate XDR binary file to ASCII text format.
+# NOTES: Example usage: xdrdump file.xdr | more
+#        Uses fdd program.
+# HISTORY: 2007-05-16 plessel.todd@epa.gov Created.
+# STATUS: unreviewed, tested
+
+
+# Check usage:
+
+if ( ! ( $#argv == 1 || $#argv == 2 ) ) then
+  echo " "
+  echo "$0 - Translate XDR binary file to ASCII text format."
+  echo "usage: $0 [-g] <file.xdr>"
+  echo "example: $0 modis_4.xdr | more"
+  echo " "
+  exit 1
+endif
+
+set gformat = '/bin/cat'
+set awk_file = ".junk.awk.$$"
+
+if ( $#argv == 2 && "$1" == '-g' ) then
+  set gformat = "awk -f $awk_file"
+  echo '{ printf "%g\n", $1 }' > $awk_file
+  shift
+endif
+
+set input_file = "$1"
+
+
+# Determine the platform using uname:
+
+set uname_ = "`uname`"
+set uname_m = "`uname -m`"
+
+if ( "$uname_" == "Linux" ) then
+  set platform = "$uname_.$uname_m"
+else
+  set platform = "$uname_"
+endif
+
+
+# Select appropriate fdd command to translate 32/64-bit integers and reals:
+
+@ is_little_endian = 0
+
+if ( "$platform:r" == "Linux" || "$platform" == "Darwin" ) then
+  @ is_little_endian = 1
+endif
+
+set SHPDUMP = "../../shpdump"
+set DBFDUMP = "../../dbfdump"
+set FDD     = "../../fdd"
+
+set FDD_INTEGER_4 = "$FDD conv=integer4-ascii"
+set FDD_INTEGER_8 = "$FDD conv=integer8-ascii"
+set FDD_REAL_4    = "$FDD conv=real4-ascii"
+set FDD_REAL_8    = "$FDD conv=real8-ascii"
+
+if ( $is_little_endian ) then
+  set FDD_INTEGER_4 = "$FDD_INTEGER_4 conv=swab4"
+  set FDD_INTEGER_8 = "$FDD_INTEGER_8 conv=swab8"
+  set FDD_REAL_4    = "$FDD_REAL_4 conv=swab4"
+  set FDD_REAL_8    = "$FDD_REAL_8 conv=swab8"
+endif
+
+# Read first line to determine type of XDR file:
+
+set file_type = `head -1 $input_file`
+
+if ( "$file_type" == "Point 1.0" ) then
+  @ has_notes = `head -10 $input_file | tail -1 | awk '{ print ( $2 == "char" ) }'`
+  @ header_lines = 10 + $has_notes
+  @ dimension_line = 5
+  set dimensions = `tail +$dimension_line $input_file | head -1`
+  set dimensions = ( $dimensions )
+  @ variables = $dimensions[1]
+  @ points = $dimensions[2]
+  @ bytes = $variables * $points * 8
+  @ header_lines += $has_notes * $points
+  @ tail_lines = $header_lines + 1
+  head -$header_lines $input_file
+  tail +$tail_lines $input_file | $FDD_REAL_8 | $gformat
+else if ( "$file_type" == "SITE 1.0" ) then
+  @ header_lines = 12
+  @ tail_lines = $header_lines + 1
+  set HEAD_INPUT_FILE = "head -$header_lines $input_file"
+  set TAIL_INPUT_FILE = "tail +$tail_lines   $input_file"
+  @ dimension_line = 5
+  set dimensions = `tail +$dimension_line $input_file | head -1`
+  set dimensions = ( $dimensions )
+  @ stations = $dimensions[2]
+  @ bytes = $stations * 4
+  $HEAD_INPUT_FILE
+  $TAIL_INPUT_FILE | $FDD_INTEGER_4 count=$bytes
+  $TAIL_INPUT_FILE | $FDD_REAL_4    iseek=$bytes | $gformat
+else if ( "$file_type" == "SITE 2.0" ) then
+  @ dimension_line = 5
+  set dimensions = `tail +$dimension_line $input_file | head -1`
+  set dimensions = ( $dimensions )
+  @ stations = $dimensions[2]
+  @ header_lines = 13 + $stations
+  @ tail_lines = $header_lines + 1
+  set HEAD_INPUT_FILE = "head -$header_lines $input_file"
+  set TAIL_INPUT_FILE = "tail +$tail_lines   $input_file"
+  @ bytes = $stations * 4
+  $HEAD_INPUT_FILE
+  $TAIL_INPUT_FILE | $FDD_INTEGER_4 count=$bytes
+  $TAIL_INPUT_FILE | $FDD_REAL_4    iseek=$bytes | $gformat
+else if ( "$file_type" == "REGRIDDED-SITE 1.0" ) then
+  @ header_lines = 15
+  @ tail_lines = $header_lines + 1
+  set HEAD_INPUT_FILE = "head -$header_lines $input_file"
+  set TAIL_INPUT_FILE = "tail +$tail_lines   $input_file"
+  @ dimension_line = 5
+  @ timesteps = `tail +$dimension_line $input_file | head -1`
+  @ bytes = $timesteps * 4
+  $HEAD_INPUT_FILE
+  $TAIL_INPUT_FILE | $FDD_INTEGER_4 count=$bytes
+  @ total_points = `$TAIL_INPUT_FILE | $FDD_INTEGER_4 count=$bytes | awk '{sum += $1} END { print sum }'`
+  @ skip_bytes = $bytes
+  @ bytes = $total_points * 4 * 2
+  $TAIL_INPUT_FILE | $FDD_REAL_4 iseek=$skip_bytes count=$bytes | $gformat
+  @ skip_bytes = $skip_bytes + $bytes
+  $TAIL_INPUT_FILE | $FDD_INTEGER_4 iseek=$skip_bytes count=$bytes
+  @ skip_bytes = $skip_bytes + $bytes
+  $TAIL_INPUT_FILE | $FDD_REAL_4 iseek=$skip_bytes | $gformat
+else if ( "$file_type" == "REGRIDDED-Point 1.0" || \
+          "$file_type" == "REGRIDDED-SITE 2.0" || \
+          "$file_type" == "REGRIDDED-Grid 1.0" ) then
+  @ has_elevation = `head -17 $input_file | tail -1 | awk '{ print ( index( $0, "elevation" ) > -1 ) }'`
+  @ header_lines = 19 + $has_elevation + $has_elevation
+  @ tail_lines = $header_lines + 1
+  set HEAD_INPUT_FILE = "head -$header_lines $input_file"
+  set TAIL_INPUT_FILE = "tail +$tail_lines   $input_file"
+  @ dimension_line = 5
+  @ timesteps = `tail +$dimension_line $input_file | head -1`
+  @ bytes = $timesteps * 4
+  $HEAD_INPUT_FILE
+  $TAIL_INPUT_FILE | $FDD_INTEGER_4 count=$bytes
+  @ total_points = `$TAIL_INPUT_FILE | $FDD_INTEGER_4 count=$bytes | awk '{sum += $1} END { print sum }'`
+  @ skip_bytes = $bytes
+  @ bytes = $total_points * 4 * ( 2 + $has_elevation )
+  $TAIL_INPUT_FILE | $FDD_REAL_4 iseek=$skip_bytes count=$bytes | $gformat
+  @ skip_bytes = $skip_bytes + $bytes
+  $TAIL_INPUT_FILE | $FDD_INTEGER_4 iseek=$skip_bytes count=$bytes
+  @ skip_bytes = $skip_bytes + $bytes
+  $TAIL_INPUT_FILE | $FDD_REAL_4 iseek=$skip_bytes | $gformat
+else if ( "$file_type" == "SUBSET 9.0 CMAQ" ) then
+  @ header_lines = 17
+  @ tail_lines = $header_lines + 1
+  set HEAD_INPUT_FILE = "head -$header_lines $input_file"
+  set TAIL_INPUT_FILE = "tail +$tail_lines   $input_file"
+  $HEAD_INPUT_FILE
+  $TAIL_INPUT_FILE | $FDD_REAL_4 | $gformat
+else if ( "$file_type" == "Grid 1.0" ) then
+  @ header_lines = 12
+  @ tail_lines = $header_lines + 1
+  set HEAD_INPUT_FILE = "head -$header_lines $input_file"
+  set TAIL_INPUT_FILE = "tail +$tail_lines   $input_file"
+  $HEAD_INPUT_FILE
+  $TAIL_INPUT_FILE | $FDD_REAL_8 | $gformat
+else if ( "$file_type" == "MODIS 1.0" || \
+          "$file_type" == "CALIPSO 1.0" || \
+          "$file_type" == "Swath 1.0" ) then
+  @ header_lines = 15
+  @ tail_lines = $header_lines + 1
+  set HEAD_INPUT_FILE = "head -$header_lines $input_file"
+  set TAIL_INPUT_FILE = "tail +$tail_lines   $input_file"
+  @ dimension_line = 5
+  set dimensions = `tail +$dimension_line $input_file | head -1`
+  set dimensions = ( $dimensions )
+  @ swaths = $dimensions[3]
+  $HEAD_INPUT_FILE
+  @ read_bytes = $swaths * 8
+  $TAIL_INPUT_FILE | $FDD_INTEGER_8 count=$read_bytes
+  @ skip_bytes = $read_bytes
+  @ read_bytes = $swaths * 2 * 2 * 8
+  $TAIL_INPUT_FILE | $FDD_REAL_8 iseek=$skip_bytes count=$read_bytes | $gformat
+  @ skip_bytes = $skip_bytes + $read_bytes
+  @ read_bytes = $swaths * 2 * 8
+  $TAIL_INPUT_FILE | $FDD_INTEGER_8 iseek=$skip_bytes count=$read_bytes
+  @ skip_bytes = $skip_bytes + $read_bytes
+  $TAIL_INPUT_FILE | $FDD_REAL_8    iseek=$skip_bytes | $gformat
+else if ( "$file_type" == "Swath 2.0" || "$file_type" == "GASP 1.0" ) then
+  @ header_lines = 14
+  @ tail_lines = $header_lines + 1
+  set HEAD_INPUT_FILE = "head -$header_lines $input_file"
+  set TAIL_INPUT_FILE = "tail +$tail_lines   $input_file"
+  @ dimension_line = 5
+  set dimensions = `tail +$dimension_line $input_file | head -1`
+  set dimensions = ( $dimensions )
+  @ scans = $dimensions[3]
+  $HEAD_INPUT_FILE
+  @ read_bytes = 2 * $scans * 8
+  $TAIL_INPUT_FILE | $FDD_INTEGER_8 count=$read_bytes
+  @ skip_bytes = $read_bytes
+  $TAIL_INPUT_FILE | $FDD_REAL_8 iseek=$skip_bytes | $gformat
+else if ( "$file_type" == "REGRIDDED-MODIS 1.0" || \
+          "$file_type" == "REGRIDDED-GASP 1.0" ) then
+  @ header_lines = 15
+  @ tail_lines = $header_lines + 1
+  set HEAD_INPUT_FILE = "head -$header_lines $input_file"
+  set TAIL_INPUT_FILE = "tail +$tail_lines   $input_file"
+  @ dimension_line = 5
+  @ timesteps = `tail +$dimension_line $input_file | head -1`
+  $HEAD_INPUT_FILE
+  @ bytes = $timesteps * 8
+  $TAIL_INPUT_FILE | $FDD_INTEGER_8 count=$bytes
+  @ total_points = `$TAIL_INPUT_FILE | $FDD_INTEGER_8 count=$bytes | awk '{sum += $1} END { print sum }'`
+  @ skip_bytes = $bytes
+  @ bytes = $total_points * 8 * 2
+  $TAIL_INPUT_FILE | $FDD_REAL_8    iseek=$skip_bytes count=$bytes | $gformat
+  @ skip_bytes = $skip_bytes + $bytes
+  @ bytes = $total_points * 8 * 2
+  $TAIL_INPUT_FILE | $FDD_INTEGER_8 iseek=$skip_bytes count=$bytes
+  @ skip_bytes = $skip_bytes + $bytes
+  $TAIL_INPUT_FILE | $FDD_REAL_8    iseek=$skip_bytes | $gformat
+else if ( "$file_type" == "REGRIDDED-Swath 2.0" || \
+          "$file_type" == "REGRIDDED-MODIS 2.0" || \
+          "$file_type" == "REGRIDDED-GASP 2.0" ) then
+  @ header_lines = 19
+  # Check if the header includes the line for counts:
+  head -$header_lines $input_file | tail -1 | grep ':' >& /dev/null
+  if ( $status ) @ header_lines += 1
+  @ tail_lines = $header_lines + 1
+  set HEAD_INPUT_FILE = "head -$header_lines $input_file"
+  set TAIL_INPUT_FILE = "tail +$tail_lines   $input_file"
+  @ dimension_line = 5
+  @ timesteps = `tail +$dimension_line $input_file | head -1`
+  $HEAD_INPUT_FILE
+  @ bytes = $timesteps * 8
+  $TAIL_INPUT_FILE | $FDD_INTEGER_8 count=$bytes
+  @ total_points = `$TAIL_INPUT_FILE | $FDD_INTEGER_8 count=$bytes | awk '{sum += $1} END { print sum }'`
+  @ skip_bytes = $bytes
+  @ bytes = $total_points * 8 * 2
+  $TAIL_INPUT_FILE | $FDD_REAL_8    iseek=$skip_bytes count=$bytes | $gformat
+  @ skip_bytes = $skip_bytes + $bytes
+  @ bytes = $total_points * 8 * 2
+  $TAIL_INPUT_FILE | $FDD_INTEGER_8 iseek=$skip_bytes count=$bytes
+  @ skip_bytes = $skip_bytes + $bytes
+  $TAIL_INPUT_FILE | $FDD_REAL_8    iseek=$skip_bytes | $gformat
+else if ( "$file_type" == "REGRIDDED-CALIPSO 1.0" ) then
+  @ header_lines = 16
+  @ tail_lines = $header_lines + 1
+  set HEAD_INPUT_FILE = "head -$header_lines $input_file"
+  set TAIL_INPUT_FILE = "tail +$tail_lines   $input_file"
+  @ dimension_line = 5
+  set dimensions = `tail +$dimension_line $input_file | head -1`
+  set dimensions = ( $dimensions )
+  @ timesteps = $dimensions[1]
+  @ layers    = $dimensions[2]
+  $HEAD_INPUT_FILE
+  @ bytes = $timesteps * 8
+  $TAIL_INPUT_FILE | $FDD_INTEGER_8 count=$bytes
+  @ total_points = `$TAIL_INPUT_FILE | $FDD_INTEGER_8 count=$bytes | awk '{sum += $1} END { print sum }'`
+  @ skip_bytes = $bytes
+  @ bytes = $total_points * 8 * 2
+  $TAIL_INPUT_FILE | $FDD_REAL_8    iseek=$skip_bytes count=$bytes | $gformat
+  @ skip_bytes = $skip_bytes + $bytes
+  @ bytes = $total_points * 8 * 2
+  $TAIL_INPUT_FILE | $FDD_INTEGER_8 iseek=$skip_bytes count=$bytes
+  @ skip_bytes = $skip_bytes + $bytes
+  $TAIL_INPUT_FILE | $FDD_REAL_8    iseek=$skip_bytes | $gformat
+else if ( "$file_type" == "REGRIDDED-CALIPSO 2.0" ) then
+  @ header_lines = 21
+  @ tail_lines = $header_lines + 1
+  set HEAD_INPUT_FILE = "head -$header_lines $input_file"
+  set TAIL_INPUT_FILE = "tail +$tail_lines   $input_file"
+  @ dimension_line = 5
+  set dimensions = `tail +$dimension_line $input_file | head -1`
+  set dimensions = ( $dimensions )
+  @ timesteps = $dimensions[1]
+  @ layers    = $dimensions[2]
+  $HEAD_INPUT_FILE
+  @ bytes = $timesteps * 8
+  $TAIL_INPUT_FILE | $FDD_INTEGER_8 count=$bytes
+  @ total_points = `$TAIL_INPUT_FILE | $FDD_INTEGER_8 count=$bytes | awk '{sum += $1} END { print sum }'`
+  @ skip_bytes = $bytes
+  @ bytes = ( $total_points * 2 + $total_points * $layers ) * 8
+  $TAIL_INPUT_FILE | $FDD_REAL_8    iseek=$skip_bytes count=$bytes | $gformat
+  @ skip_bytes = $skip_bytes + $bytes
+  $TAIL_INPUT_FILE | $FDD_INTEGER_8 iseek=$skip_bytes count=$bytes
+  @ skip_bytes = $skip_bytes + $bytes
+  $TAIL_INPUT_FILE | $FDD_REAL_8    iseek=$skip_bytes | $gformat
+else if ( "$file_type" == "Aircraft 1.0" ) then
+  @ header_lines = 14
+  @ tail_lines = $header_lines + 1
+  set HEAD_INPUT_FILE = "head -$header_lines $input_file"
+  set TAIL_INPUT_FILE = "tail +$tail_lines   $input_file"
+  @ dimension_line = 7
+  set dimensions = `tail +$dimension_line $input_file | head -1`
+  set dimensions = ( $dimensions )
+  @ tracks = $dimensions[3]
+  $HEAD_INPUT_FILE
+  # real bounds[ tracks ][ 2 ][ 2 ]:
+  @ read_bytes = $tracks * 2 * 2 * 8
+  $TAIL_INPUT_FILE | $FDD_REAL_8 count=$read_bytes | $gformat
+  # integer points[ tracks ]:
+  @ skip_bytes = $read_bytes
+  @ read_bytes = $tracks * 8
+  $TAIL_INPUT_FILE | $FDD_INTEGER_8 iseek=$skip_bytes count=$read_bytes
+  # real data:
+  @ skip_bytes = $skip_bytes + $read_bytes
+  $TAIL_INPUT_FILE | $FDD_REAL_8 iseek=$skip_bytes | $gformat
+else if ( "$file_type" == "Aircraft 2.0" ) then
+  @ header_lines = 15
+  @ tail_lines = $header_lines + 1
+  set HEAD_INPUT_FILE = "head -$header_lines $input_file"
+  set TAIL_INPUT_FILE = "tail +$tail_lines   $input_file"
+  @ dimension_line = 7
+  set dimensions = `tail +$dimension_line $input_file | head -1`
+  set dimensions = ( $dimensions )
+  @ tracks = $dimensions[3]
+  $HEAD_INPUT_FILE
+  # char note[ tracks ][ 80 ]:
+  @ read_bytes = $tracks * 80
+  $TAIL_INPUT_FILE | $FDD count=$read_bytes
+  @ skip_bytes = $read_bytes
+  # real bounds[ tracks ][ 2 ][ 2 ]:
+  @ read_bytes = $tracks * 2 * 2 * 8
+  $TAIL_INPUT_FILE | $FDD_REAL_8 iseek=$skip_bytes count=$read_bytes | $gformat
+  # integer points[ tracks ]:
+  @ skip_bytes += $read_bytes
+  @ read_bytes = $tracks * 8
+  $TAIL_INPUT_FILE | $FDD_INTEGER_8 iseek=$skip_bytes count=$read_bytes
+  # real data:
+  @ skip_bytes += $read_bytes
+  $TAIL_INPUT_FILE | $FDD_REAL_8 iseek=$skip_bytes | $gformat
+else if ( "$file_type" == "REGRIDDED-Aircraft 1.0" || \
+          "$file_type" == "REGRIDDED-Profile 1.0" ) then
+  @ header_lines = 17
+  @ tail_lines = $header_lines + 1
+  set HEAD_INPUT_FILE = "head -$header_lines $input_file"
+  set TAIL_INPUT_FILE = "tail +$tail_lines   $input_file"
+  @ dimension_line = 5
+  @ timesteps = `tail +$dimension_line $input_file | head -1`
+  $HEAD_INPUT_FILE
+  @ bytes = $timesteps * 8
+  $TAIL_INPUT_FILE | $FDD_INTEGER_8 count=$bytes
+  @ total_points = `$TAIL_INPUT_FILE | $FDD_INTEGER_8 count=$bytes | awk '{sum += $1} END { print sum }'`
+  @ skip_bytes = $bytes
+  @ bytes = $total_points * 8 * 3
+  $TAIL_INPUT_FILE | $FDD_REAL_8 iseek=$skip_bytes count=$bytes | $gformat
+  @ skip_bytes = $skip_bytes + $bytes
+  $TAIL_INPUT_FILE | $FDD_INTEGER_8 iseek=$skip_bytes count=$bytes
+  @ skip_bytes = $skip_bytes + $bytes
+  @ bytes = $total_points * 8
+  $TAIL_INPUT_FILE | $FDD_REAL_8 iseek=$skip_bytes | $gformat
+else if ( "$file_type" == "REGRIDDED-Aircraft 2.0" ) then
+  @ header_lines = 18
+  @ tail_lines = $header_lines + 1
+  set HEAD_INPUT_FILE = "head -$header_lines $input_file"
+  set TAIL_INPUT_FILE = "tail +$tail_lines   $input_file"
+  @ dimension_line = 5
+  @ timesteps = `tail +$dimension_line $input_file | head -1`
+  $HEAD_INPUT_FILE
+  @ bytes = $timesteps * 8
+  $TAIL_INPUT_FILE | $FDD_INTEGER_8 count=$bytes
+  @ total_points = `$TAIL_INPUT_FILE | $FDD_INTEGER_8 count=$bytes | awk '{sum += $1} END { print sum }'`
+  @ skip_bytes = $bytes
+  @ bytes = $total_points * 256  
+  $TAIL_INPUT_FILE | $FDD iseek=$skip_bytes count=$bytes
+  @ skip_bytes += $bytes
+  @ bytes = $total_points * 8 * 3
+  $TAIL_INPUT_FILE | $FDD_REAL_8 iseek=$skip_bytes count=$bytes | $gformat
+  @ skip_bytes = $skip_bytes + $bytes
+  $TAIL_INPUT_FILE | $FDD_INTEGER_8 iseek=$skip_bytes count=$bytes
+  @ skip_bytes = $skip_bytes + $bytes
+  @ bytes = $total_points * 8
+  $TAIL_INPUT_FILE | $FDD_REAL_8 iseek=$skip_bytes | $gformat
+else if ( "$file_type" == "REGRIDDED-Aircraft 3.0" ) then
+  @ header_lines = 22
+  @ tail_lines = $header_lines + 1
+  set HEAD_INPUT_FILE = "head -$header_lines $input_file"
+  set TAIL_INPUT_FILE = "tail +$tail_lines   $input_file"
+  @ dimension_line = 5
+  @ timesteps = `tail +$dimension_line $input_file | head -1`
+  $HEAD_INPUT_FILE
+  @ bytes = $timesteps * 8
+  $TAIL_INPUT_FILE | $FDD_INTEGER_8 count=$bytes
+  @ total_points = `$TAIL_INPUT_FILE | $FDD_INTEGER_8 count=$bytes | awk '{sum += $1} END { print sum }'`
+  @ skip_bytes = $bytes
+  @ bytes = $total_points * 256  
+  $TAIL_INPUT_FILE | $FDD iseek=$skip_bytes count=$bytes
+  @ skip_bytes += $bytes
+  @ bytes = $total_points * 3 * 8
+  $TAIL_INPUT_FILE | $FDD_REAL_8 iseek=$skip_bytes count=$bytes | $gformat
+  @ skip_bytes = $skip_bytes + $bytes
+  $TAIL_INPUT_FILE | $FDD_INTEGER_8 iseek=$skip_bytes count=$bytes
+  @ skip_bytes = $skip_bytes + $bytes
+  @ bytes = $total_points * 8
+  $TAIL_INPUT_FILE | $FDD_REAL_8 iseek=$skip_bytes | $gformat
+else if ( "$file_type" == "REGRIDDED-Profile 2.0" ) then
+  @ header_lines = 21
+  @ tail_lines = $header_lines + 1
+  set HEAD_INPUT_FILE = "head -$header_lines $input_file"
+  set TAIL_INPUT_FILE = "tail +$tail_lines   $input_file"
+  @ dimension_line = 5
+  @ timesteps = `tail +$dimension_line $input_file | head -1`
+  $HEAD_INPUT_FILE
+  @ bytes = $timesteps * 8
+  $TAIL_INPUT_FILE | $FDD_INTEGER_8 count=$bytes
+  @ total_points = `$TAIL_INPUT_FILE | $FDD_INTEGER_8 count=$bytes | awk '{sum += $1} END { print sum }'`
+  @ skip_bytes = $bytes
+  @ bytes = $total_points * 3 * 8
+  $TAIL_INPUT_FILE | $FDD_REAL_8 iseek=$skip_bytes count=$bytes | $gformat
+  @ skip_bytes = $skip_bytes + $bytes
+  $TAIL_INPUT_FILE | $FDD_INTEGER_8 iseek=$skip_bytes count=$bytes
+  @ skip_bytes = $skip_bytes + $bytes
+  @ bytes = $total_points * 8
+  $TAIL_INPUT_FILE | $FDD_REAL_8 iseek=$skip_bytes | $gformat
+else if ( "$file_type" == "Profile 1.0" ) then
+  @ header_lines = 13
+  @ tail_lines = $header_lines + 1
+  set HEAD_INPUT_FILE = "head -$header_lines $input_file"
+  set TAIL_INPUT_FILE = "tail +$tail_lines   $input_file"
+  @ dimension_line = 7
+  set dimensions = `tail +$dimension_line $input_file | head -1`
+  set dimensions = ( $dimensions )
+  @ profiles = $dimensions[2]
+  $HEAD_INPUT_FILE
+  # integer points[ profiles ]:
+  @ read_bytes = $profiles * 8
+  $TAIL_INPUT_FILE | $FDD_INTEGER_8 count=$read_bytes
+  # real data:
+  @ skip_bytes = $read_bytes
+  $TAIL_INPUT_FILE | $FDD_REAL_8 iseek=$skip_bytes | $gformat
+else if ( "$file_type" == "Profile 2.0" ) then
+  @ dimension_line = 7
+  set dimensions = `tail +$dimension_line $input_file | head -1`
+  set dimensions = ( $dimensions )
+  @ variables = $dimensions[1]
+  @ profiles  = $dimensions[2]
+  @ header_lines = 14 + $profiles # char notes[profiles].
+  @ tail_lines = $header_lines + 1
+  set HEAD_INPUT_FILE = "head -$header_lines $input_file"
+  set TAIL_INPUT_FILE = "tail +$tail_lines   $input_file"
+  $HEAD_INPUT_FILE # Print header and notes.
+  # integer points[ profiles ]:
+  @ read_bytes = $profiles * 8
+  $TAIL_INPUT_FILE | $FDD_INTEGER_8 count=$read_bytes
+  # real data:
+  @ skip_bytes = $read_bytes
+  $TAIL_INPUT_FILE | $FDD_REAL_8 iseek=$skip_bytes | $gformat
+else if ( "$file_type" == "Polygon 1.0" ) then
+  @ header_lines = 9 + 1
+  head -$header_lines $input_file
+  set line      = `head -$header_lines $input_file | tail -1`
+  set name      = `echo $line | awk '{print $1}'`
+  set shx_bytes = `echo $line | awk '{print $2}'`
+  set shp_bytes = `echo $line | awk '{print $3}'`
+  set dbf_bytes = `echo $line | awk '{print $4}'`
+  @ tail_lines = $header_lines + 1
+  tail +$tail_lines $input_file | $FDD count=$shx_bytes > $name.shx
+  @ skip_bytes = $shx_bytes
+  tail +$tail_lines $input_file | $FDD iseek=$skip_bytes count=$shp_bytes > $name.shp
+  @ skip_bytes += $shp_bytes
+  tail +$tail_lines $input_file | $FDD iseek=$skip_bytes count=$dbf_bytes > $name.dbf
+  $SHPDUMP $name.shp
+  $DBFDUMP $name.dbf
+else if ( -f $input_file ) then
+  echo " "
+  echo "$0"': Invalid file type: '"'$file_type'"
+  echo " "
+  touch $awk_file; \rm $awk_file
+  exit 2
+endif
+
+touch $awk_file; \rm $awk_file
+
+

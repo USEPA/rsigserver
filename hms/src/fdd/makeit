@@ -1,0 +1,16 @@
+#!/bin/sh
+
+clear
+
+echo
+echo "Compiling fdd utility program used by run_parallel_swaths..."
+
+gcc -m64 -Wall -D_FILE_OFFSET_BITS=64 -D_LARGEFILE_SOURCE -DNDEBUG -O -o fdd fdd.c -lm -lc
+strip fdd
+ls -l fdd
+file  fdd
+ldd   fdd
+
+ls -Fsalt | head
+echo Done
+

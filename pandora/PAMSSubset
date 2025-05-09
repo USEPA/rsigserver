@@ -1,0 +1,64 @@
+#!/bin/csh -f
+# PAMSSubset - Subset program for pams_sites.txt.
+
+if ( $#argv != 7 || "$7" != 'ascii' && "$7" != 'xdr' ) then
+  echo
+  echo "Usage: $0 yyyymmdd1 yyyymmdd2 lonmin latmin lonmax latmax xdr|ascii"
+  echo "Example: $0 20230401 20230407 -126 28 -65 50 ascii"
+  echo
+  exit 1
+endif
+
+set FDD = /rsig/current/code/bin/Linux.x86_64/fdd
+set input = /data/Pandora/pams_sites.txt
+set temp = /data/tmp/junk_PAMS.$$
+set desc = 'https://www.epa.gov/amtic/photochemical-assessment-monitoring-stations-pams,PAMSSubset'
+
+@ yyyymmdd1 = $1
+@ yyyymmdd2 = $2
+set lonmin  = $3
+set latmin  = $4
+set lonmax  = $5
+set latmax  = $6
+set format  = $7
+
+@ YYYY1 = $yyyymmdd1 / 10000
+@ MM1   = $yyyymmdd1 / 100 % 100
+@ DD1   = $yyyymmdd1 % 100
+set yyyy_mm_dd1 = `echo $yyyymmdd1 | awk '{ yyyy = substr( $1, 1, 4 ); mm = substr( $1, 5, 2); dd = substr( $1, 7, 2); printf "%4d-%02d-%02d", yyyy, mm, dd }'`
+set yyyy_mm_dd2 = `echo $yyyymmdd2 | awk '{ yyyy = substr( $1, 1, 4 ); mm = substr( $1, 5, 2); dd = substr( $1, 7, 2); printf "%4d-%02d-%02d", yyyy, mm, dd }'`
+
+# Subset by lon-lat bounds and edit timestamp:
+
+awk -v lonmin="$lonmin" -v lonmax="$lonmax"  -v latmin="$latmin" -v latmax="$latmax" \
+'{ lon = $2; lat = $3; if ( lon >= lonmin && lon <= lonmax && lat >= latmin && lat <= latmax ) print }' \
+< $input | sed "s/YYYY-MM-DD/$yyyy_mm_dd1/g" > $temp
+@ subset_points = `cat $temp | wc -l`
+
+if ( $subset_points ) then
+
+  if ( $format == 'ascii' ) then
+    head -1 $input
+    cat $temp
+  else
+    echo "Point 1.0"
+    echo "$desc"
+    printf "%sT00:00:00-0000 %sT23:59:59-0000\n" $yyyy_mm_dd1 $yyyy_mm_dd2
+    echo '# Dimensions: variables points'
+    echo "4 $subset_points"
+    echo '# Variable names:'
+    echo 'timestamp longitude latitude yearly_id'
+    echo '# Variable units:'
+    echo 'yyyymmddhhmmss deg deg -'
+    echo '# char notes[points][80] and'
+    echo '# IEEE-754 64-bit reals data[variables][points]:'
+    cat $temp | awk '{ for ( i = 6; i <= NF; ++i ) { printf "%s ", $i } printf "\n" }' | awk '{ len = 79 - length( $0 ); while (len--) printf " "; print }'
+    awk -v yyyymmdd="$yyyymmdd1" '{ printf "%d000000\n", yyyymmdd }' < $temp | $FDD conv=ascii-real8 conv=swab8
+    awk '{ print $2 }' < $temp | $FDD conv=ascii-real8 conv=swab8
+    awk '{ print $3 }' < $temp | $FDD conv=ascii-real8 conv=swab8
+    awk '{ print $4 }' < $temp | $FDD conv=ascii-real8 conv=swab8
+  endif
+endif 
+
+rm $temp
+

@@ -1,0 +1,66 @@
+#!/bin/csh -f
+
+## wqdata_download - a wrapper for the WQData Live data system.
+##
+## NOTE: Access to WQData Live is IP restricted to maple only.
+##
+## args: - deviceID
+##       - parameter
+##       - format
+##       - from (optional date and time with encoded space e.g. 2022-08-09%2004:00:00)
+##       - to   (optional date and time with encoded space e.g. 2022-08-09%2004:00:00)
+##
+##       If from and to are omitted, only the latest data will be returned.
+##
+## e.g.  wqdata_download 2457 58242 ascii 2024-10-27%2000:00:00 2024-10-27%2023:59:59
+##       wqdata_download 2457 58242 ascii
+
+if ( $#argv < 3 | $#argv > 6 ) then
+  /bin/echo
+  /bin/echo "Usage: wqdata_download deviceID parameter format tzString from to"
+  /bin/echo
+  exit 1
+endif
+
+#set format = "ascii"
+
+set deviceID       = $1
+set parameter      = $2
+set format         = $3
+set tzString       = $4
+set fromIn         = $5
+set toIn           = $6
+
+set from = `echo $fromIn | sed s/t/%20/ | sed s/z//`
+set to   = `echo $toIn   | sed s/t/%20/ | sed s/z//`
+
+#echo $from
+#echo $to
+#echo $tzString
+
+#set apiKey = "47cdbe1559294e65881b6ba1e42bf531"
+set apiKey = "1ac56becf55b457ab506abe8ff650cce"
+
+#echo "deviceid $deviceID"
+#echo "param $parameter"
+#echo "format $format"
+#echo "from $from"
+#echo "to $to"
+
+set parser = 'tee' #default. if parser is not specified, then JSON will be returned
+if ($format == 'ascii') then
+  # parser reads json and returns ascii
+  set parser = "/bin/python3 /rsig/villageblue/wqdata_json_parser.py $tzString"
+endif
+
+if ( $#argv == 4 ) then
+  set webservice = "https://www.wqdatalive.com/api/v1/devices/${deviceID}/parameters/${parameter}/data/latest?"
+  set cmd        = "${webservice}apiKey=${apiKey}"
+else if ( $#argv >= 5 ) then
+  set webservice = "https://www.wqdatalive.com/api/v1/devices/${deviceID}/parameters/data?";
+  set cmd        = "${webservice}apiKey=${apiKey}&parameterIds=${parameter}&from=${from}&to=${to}"
+endif 
+
+
+#echo "$cmd"
+/usr/bin/curl -s "$cmd" | $parser

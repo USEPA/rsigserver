@@ -1,0 +1,2263 @@
+#!/usr/bin/perl -wT
+
+##############################################################################
+# PURPOSE: hrrrserver - Serve HRRR modeled surface wind data,
+#          subsetted by date/time range, longitude-latitude box,
+#          in ASCII, XDR, NetCDF-COARDS, NetCDF-IOAPI and original formats
+#          for use by other programs (e.g., via curl).
+# NOTES:   Server is WCS-compliant:
+#          https://www.opengeospatial.org/standards/wcs
+#          https://datafed.net/xs/OpenGIS/wcs/1.0.0/
+#          and modeled after a similar webserver application:
+#          https://webapps.datafed.net/ogc_EPA.wsfl
+#
+#          Launches C program HRRRSubset which streams the data back on STDOUT.
+#
+#          Example usage:
+#
+#          curl 'https://ofmpub.epa.gov/rsig/hrrrserver?\
+#                    SERVICE=wcs&\
+#                    VERSION=1.0.0&\
+#                    REQUEST=GetCoverage&\
+#                    COVERAGE=wind&\
+#                    TIME=2019-07-15T00:00:00Z/2019-07-15T23:59:59Z&\
+#                    BBOX=-90,30,-89,31&\
+#                    FORMAT=ascii'
+#
+# HISTORY: 2020-02-17 plessel.todd@epa.gov
+# STATUS:  unreviewed, tested
+##############################################################################
+
+
+use strict;
+package main;
+$| = 1; # Turn off output buffering so messages appear in correct order.
+alarm( 3600 ); # Kill process after 1 hour. Legitimate usage could be an hour!
+# Restrict PATH and ENV. (But before popen, ENV is cleared!)
+delete @ENV{ 'PATH', 'IFS', 'CDPATH', 'ENV', 'BASH_ENV' };
+
+
+############################## TUNABLE CONSTANTS #############################
+
+my $debugging = 0; # 1 = print debug messages to STDERR logs/error_log.
+
+my $maximum_parallel_retrievals = 24; # 1 = no parallel retrievals, 24 = 24 procs
+
+# Internal server where this program is installed:
+
+my $server_path = 'https://YOUR_WEBSERVER_HOST/cgi-bin';
+
+my $temp_directory = "/data/tmp/hrrrserver.$$"; # To write temporary files.
+my $temp_file_list = "$temp_directory/file_list"; # List of files to read/subset
+my $temp_downloader = "$temp_directory/downloader"; # Script par. download AWS.
+my $lonlat_file = '/data/HRRR/HRRR_lonlat.bin'; # Read by HRRRSubset.
+
+my $bindir     = '/rsig/current/code/bin/Linux.x86_64';
+my $subsetter  = "$bindir/HRRRSubset";
+my $xdrconvert = "$bindir/XDRConvert";
+my $compressor = "$bindir/gzip -c -1";
+my $curl =
+  '/usr/bin/curl -k --silent --retry 0 -L --tcp-nodelay --max-time 3600';
+
+my $external_url =
+#'https://pando-rgw01.chpc.utah.edu/hrrr/sfc/YYYYMMDD/hrrr.tHHz.wrfsfcf00.grib2';
+'https://noaa-hrrr-bdp-pds.s3.amazonaws.com/hrrr.YYYYMMDD/conus/hrrr.tHHz.wrfsfcf00.grib2';
+
+# Output messages when REQUEST=GetMetadata.
+# Print this message first:
+
+my $metadata_content = '
+HRRR CONUS modelled surface wind data accessed using RSIG.
+NCEP/ESRL HRRR model and University of Utah MesoWest HRRR archive.
+https://doi.org/10.1016/j.cageo.2017.08.005.
+https://home.chpc.utah.edu/~u0553130/Brian_Blaylock/
+RSIG: https://www.epa.gov/rsig
+';
+
+# If FORMAT=original then print this message second:
+
+my $metadata_content_original = '
+The list of original data files are shown below.
+
+';
+
+# Else FORMAT!=original then print this message second:
+
+my $metadata_content_processed = '
+Data processing was done using the RSIG programs HRRRSubset and XDRConvert.
+HRRRSubset is used to subset (by variable, lon-lat box and time range)
+and reorganize/reformat and filter the data.
+XDRConvert is optionally used to regrid, aggregate and reformat the data
+to other file formats.
+The list of original data files and the RSIG command used to process them
+are shown below.
+
+';
+
+
+# Variables in surface file:
+# https://home.chpc.utah.edu/~u0553130/Brian_Blaylock/HRRR_archive/hrrr_sfc_table_f00-f01.html
+# The retrieved .idx file has the byte offset for each variable.
+# The tag is where this appears for a variable.
+# curl --range start-end option is used to retrieve just the specified variable.
+
+my @metadata = (
+{ # Redundant entry for backward compatibility until updated RSIG3D is deployed.
+    'name' => 'wind',
+    'units' => 'm/s',
+    'description' => 'U/V-components of wind 10 meters above the surface.',
+    'components' => 2,
+    'tag' => ':UGRD:10 m '
+  },
+  {
+    'name' => 'wind_10m',
+    'units' => 'm/s',
+    'description' => 'U/V-components of wind 10 meters above the surface.',
+    'components' => 2,
+    'tag' => ':UGRD:10 m '
+  },
+  {
+    'name' => 'wind_80m',
+    'units' => 'm/s',
+    'description' => 'U/V-components of wind 80 meters above the surface.',
+    'components' => 2,
+    'tag' => ':UGRD:80 m '
+  },
+  {
+    'name' => 'wind_1000mb',
+    'units' => 'm/s',
+    'description' => 'U/V-components of wind at 1,000mb pressure level, ' .
+      'nominally 110.8m above the surface.',
+    'components' => 2,
+    'tag' => ':UGRD:1000 mb'
+  },
+  {
+    'name' => 'wind_925mb',
+    'units' => 'm/s',
+    'description' => 'U/V-components of wind at 925mb pressure level, ' .
+      'nominally 761.7m above the surface.',
+    'components' => 2,
+    'tag' => ':UGRD:925 mb'
+  },
+  {
+    'name' => 'wind_850mb',
+    'units' => 'm/s',
+    'description' => 'U/V-components of wind at 850mb pressure level, ' .
+      'nominally 1,456.7m above the surface.',
+    'components' => 2,
+    'tag' => ':UGRD:850 mb'
+  },
+  {
+    'name' => 'wind_700mb',
+    'units' => 'm/s',
+    'description' => 'U/V-components of wind at 700mb pressure level, ' .
+      'nominally 3,010.9m above the surface.',
+    'components' => 2,
+    'tag' => ':UGRD:700 mb'
+  },
+  {
+    'name' => 'wind_500mb',
+    'units' => 'm/s',
+    'description' => 'U/V-components of wind at 500mb pressure level, ' .
+      'nominally 5,572.1m above the surface.',
+    'components' => 2,
+    'tag' => ':UGRD:500 mb'
+  },
+  {
+    'name' => 'wind_300mb',
+    'units' => 'm/s',
+    'description' => 'U/V-components of wind at 300mb pressure level, ' .
+      'nominally 5,572.1m above the surface.',
+    'components' => 2,
+    'tag' => ':UGRD:300 mb'
+  },
+  {
+    'name' => 'wind_250mb',
+    'units' => 'm/s',
+    'description' => 'U/V-components of wind at 250mb pressure level, ' .
+      'nominally 10,358.5m above the surface.',
+    'components' => 2,
+    'tag' => ':UGRD:250 mb'
+  },
+  {
+    'name' => 'wind_speed_10m',
+    'units' => 'm/s',
+    'description' => 'Wind speed at 10m above the surface.',
+    'components' => 1,
+    'tag' => ':WIND:10 m '
+  },
+  {
+    'name' => 'wind_gust',
+    'units' => 'm/s',
+    'description' => 'Wind gust at the surface.',
+    'components' => 1,
+    'tag' => ':GUST:surface'
+  },
+  { # See https://www.theweatherprediction.com/habyhints/193/
+    'name' => 'wind_shear_0_1000m',
+    'units' => '1/s',
+    'description' =>
+      'Difference of U/V-components of wind at surface minus wind at ' .
+      ' 1,000m above the surface divided by the distance 1,000m then ' .
+      'multiplied by 1,000 (by convention to simplify for classification).',
+    'components' => 2,
+    'tag' => ':VUCSH:0-1000 '
+  },
+  {
+    'name' => 'wind_shear_0_6000m',
+    'units' => '1/s',
+    'description' =>
+      'Difference of U/V-components of wind at surface minus wind at ' .
+      ' 6,000m above the surface divided by the distance 6,000m then ' .
+      'multiplied by 1,000 (by convention to simplify for classification).',
+    'components' => 2,
+    'tag' => ':VUCSH:0-6000 '
+  },
+  {
+    'name' => 'storm_motion_0_6000m',
+    'units' => 'm/s',
+    'description' =>
+      'Difference of U/V-components of storm motion at surface minus ' .
+      'storm motion at 6,000m above the surface.',
+    'components' => 2,
+    'tag' => ':VSTM:0-6000 '
+  },
+  {
+    'name' => 'storm_relative_helicity_1000_0m',
+    'units' => 'm2/s2',
+    'description' =>
+      'Storm relative helicity at 1,000m above the surface minus ' .
+      'at the surface.',
+    'components' => 1,
+    'tag' => ':HLCY:1000-0 '
+  },
+  {
+    'name' => 'storm_relative_helicity_3000_0m',
+    'units' => 'm2/s2',
+    'description' =>
+      'Storm relative helicity at 3,000m above the surface minus ' .
+      'at the surface.',
+    'components' => 1,
+    'tag' => ':HLCY:3000-0 '
+  },
+  {
+    'name' => 'reflectivity_composite',
+    'units' => 'dB',
+    'description' => 'Reflectivity of the entire atmosphere.',
+    'components' => 1,
+    'tag' => ':REFC:entire '
+  },
+  {
+    'name' => 'reflectivity_1000m',
+    'units' => 'dB',
+    'description' => 'Reflectivity at 1,000m above the surface.',
+    'components' => 1,
+    'tag' => ':REFD:1000 m '
+  },
+  {
+    'name' => 'reflectivity_4000m',
+    'units' => 'dB',
+    'description' => 'Reflectivity at 4,000m above the surface.',
+    'components' => 1,
+    'tag' => ':REFD:4000 m '
+  },
+  {
+    'name' => 'reflectivity_263k',
+    'units' => 'dB',
+    'description' => 'Reflectivity at 263K temperature level.',
+    'components' => 1,
+    'tag' => ':REFD:263 K '
+  },
+  {
+    'name' => 'cloud_top',
+    'units' => 'm',
+    'description' => 'Height of highest cloud.',
+    'components' => 1,
+    'tag' => ':RETOP:cloud top'
+  },
+  {
+    'name' => 'cloud_cover_low',
+    'units' => '%',
+    'description' => 'Percent of low cloud layer.',
+    'components' => 1,
+    'tag' => ':LCDC:low '
+  },
+  {
+    'name' => 'cloud_cover_middle',
+    'units' => '%',
+    'description' => 'Percent of middle cloud layer.',
+    'components' => 1,
+    'tag' => ':MCDC:middle '
+  },
+  {
+    'name' => 'cloud_cover_high',
+    'units' => '%',
+    'description' => 'Percent of high cloud layer.',
+    'components' => 1,
+    'tag' => ':HCDC:high '
+  },
+  {
+    'name' => 'cloud_cover_total',
+    'units' => '%',
+    'description' => 'Percent of cloud layer in entire atmosphere.',
+    'components' => 1,
+    'tag' => ':TCDC:entire '
+  },
+  {
+    'name' => 'geopotential_height_condensation',
+    'units' => 'm',
+    'description' =>
+      'Geopotential height of adiabatic condensation from surface.',
+    'components' => 1,
+    'tag' => ':HGT:level '
+  },
+  {
+    'name' => 'geopotential_height_equilibrium',
+    'units' => 'm',
+    'description' => 'Geopotential height of equilibrium level.',
+    'components' => 1,
+    'tag' => ':HGT:equilibrium '
+  },
+  {
+    'name' => 'geopotential_height_surface',
+    'units' => 'm',
+    'description' => 'Geopotential height at surface.',
+    'components' => 1,
+    'tag' => ':HGT:surface'
+  },
+  {
+    'name' => 'geopotential_height_1000mb',
+    'units' => 'm',
+    'description' => 'Geopotential height at 1,000mb pressure level.',
+    'components' => 1,
+    'tag' => ':HGT:1000 mb'
+  },
+  {
+    'name' => 'geopotential_height_850mb',
+    'units' => 'm',
+    'description' => 'Geopotential height at 850mb pressure level.',
+    'components' => 1,
+    'tag' => ':HGT:850 mb'
+  },
+  {
+    'name' => 'geopotential_height_700mb',
+    'units' => 'm',
+    'description' => 'Geopotential height at 700mb pressure level.',
+    'components' => 1,
+    'tag' => ':HGT:700 mb'
+  },
+  {
+    'name' => 'geopotential_height_500mb',
+    'units' => 'm',
+    'description' => 'Geopotential height at 500mb pressure level.',
+    'components' => 1,
+    'tag' => ':HGT:500 mb'
+  },
+  {
+    'name' => 'geopotential_height_cloud_base',
+    'units' => 'm',
+    'description' => 'Geopotential height at cloud base level.',
+    'components' => 1,
+    'tag' => ':HGT:cloud base'
+  },
+  {
+    'name' => 'geopotential_height_cloud_ceiling',
+    'units' => 'm',
+    'description' => 'Geopotential height at cloud ceiling level.',
+    'components' => 1,
+    'tag' => ':HGT:cloud ceiling'
+  },
+  {
+    'name' => 'geopotential_height_cloud_top',
+    'units' => 'm',
+    'description' => 'Geopotential height at cloud top level.',
+    'components' => 1,
+    'tag' => ':HGT:cloud top'
+  },
+  {
+    'name' => 'pressure_surface',
+    'units' => 'Pa',
+    'description' => 'Pressure at the surface.',
+    'components' => 1,
+    'tag' => ':PRES:surface'
+  },
+  {
+    'name' => 'pressure_cloud_base',
+    'units' => 'Pa',
+    'description' => 'Pressure at the lowest cloud layer.',
+    'components' => 1,
+    'tag' => ':PRES:cloud base'
+  },
+  {
+    'name' => 'pressure_cloud_top',
+    'units' => 'Pa',
+    'description' => 'Pressure at the highest cloud layer.',
+    'components' => 1,
+    'tag' => ':PRES:cloud top'
+  },
+  {
+    'name' => 'pressure_0c',
+    'units' => 'Pa',
+    'description' => 'Pressure at the 0C degree isotherm layer.',
+    'components' => 1,
+    'tag' => ':PRES:0C '
+  },
+  {
+    'name' => 'pressure_tropospheric_freezing',
+    'units' => 'Pa',
+    'description' => 'Pressure at the highest tropospheric freezing level.',
+    'components' => 1,
+    'tag' => ':PRES:highest '
+  },
+  {
+    'name' => 'pressure_lifted_255mb',
+    'units' => 'Pa',
+    'description' => 'Pressure of level from which parcel was lifted ' .
+      '255-0mb above surface.',
+    'components' => 1,
+    'tag' => ':PLPL:255-0 mb'
+  },
+  {
+    'name' => 'boundary_layer_height',
+    'units' => 'm',
+    'description' => 'Height of planetary boundary layer.',
+    'components' => 1,
+    'tag' => ':HPBL:surface'
+  },
+  {
+    'name' => 'lifted_index_180mb',
+    'units' => 'K',
+    'description' => 'Best 4-layer lifted index 180-0mb.',
+    'components' => 1,
+    'tag' => ':4LFTX:180-0 mb'
+  },
+  {
+    'name' => 'temperature_surface',
+    'units' => 'K',
+    'description' => 'Temperature at the surface.',
+    'components' => 1,
+    'tag' => ':TMP:surface'
+  },
+  {
+    'name' => 'temperature_2m',
+    'units' => 'K',
+    'description' => 'Temperature at 2m above the surface.',
+    'components' => 1,
+    'tag' => ':TMP:2 m '
+  },
+  {
+    'name' => 'temperature_1000mb',
+    'units' => 'K',
+    'description' => 'Temperature at 1,000mb pressure level.',
+    'components' => 1,
+    'tag' => ':TMP:1000 mb'
+  },
+  {
+    'name' => 'temperature_925mb',
+    'units' => 'K',
+    'description' => 'Temperature at 925mb pressure level.',
+    'components' => 1,
+    'tag' => ':TMP:925 mb'
+  },
+  {
+    'name' => 'temperature_850mb',
+    'units' => 'K',
+    'description' => 'Temperature at 850mb pressure level.',
+    'components' => 1,
+    'tag' => ':TMP:850 mb'
+  },
+  {
+    'name' => 'temperature_700mb',
+    'units' => 'K',
+    'description' => 'Temperature at 700mb pressure level.',
+    'components' => 1,
+    'tag' => ':TMP:500 mb'
+  },
+  {
+    'name' => 'temperature_500mb',
+    'units' => 'K',
+    'description' => 'Temperature at 5 pressure level.',
+    'components' => 1,
+    'tag' => ':TMP:700 mb'
+  },
+  { # See https://www.theweatherprediction.com/habyhints2/456/
+    'name' => 'dew_point_temperature_2m',
+    'units' => 'K',
+    'description' => 'Dew point temperature at 2m above the surface.',
+    'components' => 1,
+    'tag' => ':DPT:2 m '
+  },
+  {
+    'name' => 'dew_point_temperature_1000mb',
+    'units' => 'K',
+    'description' => 'Dew point temperature at 1,000mb pressure level.',
+    'components' => 1,
+    'tag' => ':DPT:1000 mb'
+  },
+  {
+    'name' => 'dew_point_temperature_925mb',
+    'units' => 'K',
+    'description' => 'Dew point temperature at 925mb pressure level.',
+    'components' => 1,
+    'tag' => ':DPT:925 mb'
+  },
+  {
+    'name' => 'dew_point_temperature_850mb',
+    'units' => 'K',
+    'description' => 'Dew point temperature at 850mb pressure level.',
+    'components' => 1,
+    'tag' => ':DPT:850 mb'
+  },
+  {
+    'name' => 'dew_point_temperature_700mb',
+    'units' => 'K',
+    'description' => 'Dew point temperature at 700mb pressure level.',
+    'components' => 1,
+    'tag' => ':DPT:700 mb'
+  },
+  {
+    'name' => 'dew_point_temperature_500mb',
+    'units' => 'K',
+    'description' => 'Dew point temperature at 500mb pressure level.',
+    'components' => 1,
+    'tag' => ':DPT:500 mb'
+  },
+  {
+    'name' => 'relative_humidity_2m',
+    'units' => '%',
+    'description' => 'Relative humidity at 2m above the surface.',
+    'components' => 1,
+    'tag' => ':RH:2 m '
+  },
+  {
+    'name' => 'relative_humidity_0c',
+    'units' => '%',
+    'description' => 'Relative humidity at 0C temperature isotherm.',
+    'components' => 1,
+    'tag' => ':RH:0C '
+  },
+  {
+    'name' => 'relative_humidity_tropo_freezing',
+    'units' => '%',
+    'description' =>
+      'Relative humidity at highest tropospheric freezing level.',
+    'components' => 1,
+    'tag' => ':RH:highest '
+  },
+  {
+    'name' => 'relative_humidity_total',
+    'units' => '%',
+    'description' => 'Relative humidity with respect to precipitable water ' .
+      'in entire atmosphere.',
+    'components' => 1,
+    'tag' => ':RHPW:entire '
+  },
+  {
+    'name' => 'total_precipitable_water',
+    'units' => 'kg/m2',
+    'description' => 'Precipitable water in entire atmosphere.',
+    'components' => 1,
+    'tag' => ':PWAT:entire'
+  },
+  {
+    'name' => 'precipitation',
+    'units' => 'kg/m2',
+    'description' => 'Total accumulated precipitation at the surface.',
+    'components' => 1,
+    'tag' => ':APCP:surface'
+  },
+  {
+    'name' => 'precipitation_rate',
+    'units' => 'kg/m2/s',
+    'description' => 'Rate of total accumulated precipitation at the surface.',
+    'components' => 1,
+    'tag' => ':PRATE:surface'
+  },
+  {
+    'name' => 'precipitation_frozen',
+    'units' => '%',
+    'description' => 'Percent of accumulated precipitation that is frozen.',
+    'components' => 1,
+    'tag' => ':CPOFP:surface'
+  },
+  {
+    'name' => 'snow',
+    'units' => 'kg/m2',
+    'description' => 'Water equivalent of accumulated snow depth.',
+    'components' => 1,
+    'tag' => ':WEASD:surface'
+  },
+  {
+    'name' => 'snow_fraction',
+    'units' => '-',
+    'description' => 'Fraction of precipitation that is snow.',
+    'components' => 1,
+    'tag' => ':CSNOW:surface'
+  },
+  {
+    'name' => 'frozen_rain',
+    'units' => 'kg/m2',
+    'description' => 'Accumulated frozen rain.',
+    'components' => 1,
+    'tag' => ':FROZR:surface'
+  },
+  {
+    'name' => 'ice_fraction',
+    'units' => '-',
+    'description' => 'Fraction of precipitation that is ice pellets.',
+    'components' => 1,
+    'tag' => ':CICEP:surface'
+  },
+  {
+    'name' => 'freezing_rain_fraction',
+    'units' => '-',
+    'description' => 'Fraction of precipitation that is freezing rain.',
+    'components' => 1,
+    'tag' => ':CFRZR:surface'
+  },
+  {
+    'name' => 'rain_fraction',
+    'units' => '-',
+    'description' => 'Fraction of precipitation that is rain.',
+    'components' => 1,
+    'tag' => ':CRAIN:surface'
+  },
+  {
+    'name' => 'baseflow_groundwater_runoff',
+    'units' => 'kg/m2',
+    'description' => 'Baseflow groundwater runoff.',
+    'components' => 1,
+    'tag' => ':BGRUN:surface'
+  },
+  {
+    'name' => 'storm_runoff',
+    'units' => 'kg/m2',
+    'description' => 'Storm surface runoff.',
+    'components' => 1,
+    'tag' => ':SSRUN:surface'
+  },
+  {
+    'name' => 'vertically_integrated_liquid_water',
+    'units' => 'kg/m2',
+    'description' => 'Vertically-integrated liquid water in entire atmosphere.',
+    'components' => 1,
+    'tag' => ':VIL:entire '
+  },
+  {
+    'name' => 'surface_roughness',
+    'units' => 'm',
+    'description' => 'Surface roughness.',
+    'components' => 1,
+    'tag' => ':SFCR:surface'
+  },
+  {
+    'name' => 'frictional_velocity',
+    'units' => 'm/s',
+    'description' => 'Frictional velocity at the surface.',
+    'components' => 1,
+    'tag' => ':FRICV:surface'
+  },
+  {
+    'name' => 'sensible_heat_flux',
+    'units' => 'W/m2',
+    'description' => 'Sensible heat flux at the surface.',
+    'components' => 1,
+    'tag' => ':SHTFL:surface'
+  },
+  {
+    'name' => 'latent_heat_flux',
+    'units' => 'W/m2',
+    'description' => 'Latent net heat flux at the surface.',
+    'components' => 1,
+    'tag' => ':LHTFL:surface'
+  },
+  {
+    'name' => 'ground_heat_flux',
+    'units' => 'W/m2',
+    'description' => 'Ground heat flux.',
+    'components' => 1,
+    'tag' => ':GFLUX:surface'
+  },
+  {
+    'name' => 'surface_lifted_index',
+    'units' => 'K',
+    'description' => 'Surface lifted index 500-1000mb.',
+    'components' => 1,
+    'tag' => ':LFTX:500-1000 mb'
+  },
+  {
+    'name' => 'convective_available_potential_energy_surface',
+    'units' => 'J/kg',
+    'description' => 'Convective available potential energy.',
+    'components' => 1,
+    'tag' => ':CAPE:surface'
+  },
+  {
+    'name' => 'convective_available_potential_energy_255mb',
+    'units' => 'J/kg',
+    'description' => 'Convective available potential energy ' .
+      'at 255-0mb pressure level.',
+    'components' => 1,
+    'tag' => ':CAPE:255-0 mb'
+  },
+  {
+    'name' => 'convective_available_potential_energy_180mb',
+    'units' => 'J/kg',
+    'description' => 'Convective available potential energy ' .
+      'at 180-0mb pressure level.',
+    'components' => 1,
+    'tag' => ':CAPE:180-0 mb'
+  },
+  {
+    'name' => 'convective_available_potential_energy_90mb',
+    'units' => 'J/kg',
+    'description' => 'Convective available potential energy ' .
+      'at 90-0mb pressure level.',
+    'components' => 1,
+    'tag' => ':CAPE:90-0 mb'
+  },
+  {
+    'name' => 'convective_inhibition_surface',
+    'units' => 'J/kg',
+    'description' => 'Convective inhibition at the surface.',
+    'components' => 1,
+    'tag' => ':CIN:surface'
+  },
+  {
+    'name' => 'convective_inhibition_255mb',
+    'units' => 'J/kg',
+    'description' => 'Convective inhibition at 255mb pressure level.',
+    'components' => 1,
+    'tag' => ':CIN:255-0 mb'
+  },
+  {
+    'name' => 'convective_inhibition_180mb',
+    'units' => 'J/kg',
+    'description' => 'Convective inhibition at 180mb pressure level.',
+    'components' => 1,
+    'tag' => ':CIN:180-0 mb'
+  },
+  {
+    'name' => 'convective_inhibition_90mb',
+    'units' => 'J/kg',
+    'description' => 'Convective inhibition at 90mb pressure level.',
+    'components' => 1,
+    'tag' => ':CIN:90-0 mb'
+  },
+  {
+    'name' => 'vegetation_type',
+    'units' => '-',
+    'description' => 'Vegetation type 0-13.',
+    'components' => 1,
+    'tag' => ':VGTYP:surface'
+  },
+  {
+    'name' => 'land_cover',
+    'units' => '-',
+    'description' => '0 = water, 1 = land.',
+    'components' => 1,
+    'tag' => ':LAND:surface'
+  },
+  {
+    'name' => 'ice_cover',
+    'units' => '-',
+    'description' => 'Fraction of ice on surface.',
+    'components' => 1,
+    'tag' => ':ICEC:surface'
+  },
+  {
+    'name' => 'temperature_goes12_channel3',
+    'units' => 'K',
+    'description' => 'Simulated brightness temperature for GOES-12 channel 3.',
+    'components' => 1,
+    'tag' => ':SBT123:top'
+  },
+  {
+    'name' => 'temperature_goes12_channel4',
+    'units' => 'K',
+    'description' => 'Simulated brightness temperature for GOES-12 channel 4.',
+    'components' => 1,
+    'tag' => ':SBT124:top'
+  },
+  {
+    'name' => 'temperature_goes11_channel3',
+    'units' => 'K',
+    'description' => 'Simulated brightness temperature for GOES-11 channel 3.',
+    'components' => 1,
+    'tag' => ':SBT113:top'
+  },
+  {
+    'name' => 'temperature_goes11_channel4',
+    'units' => 'K',
+    'description' => 'Simulated brightness temperature for GOES-11 channel 4.',
+    'components' => 1,
+    'tag' => ':SBT114:top'
+  },
+  {
+    'name' => 'visibility',
+    'units' => 'm',
+    'description' => 'Visibility at the surface.',
+    'components' => 1,
+    'tag' => ':VIS:surface'
+  }
+);
+
+
+my $begin_date = '2016-07-15';
+#my $end_date   = '2020-02-17';
+
+
+# Query string parsing routine dispatch table:
+
+my %parsers = (
+  'service'          => \&parse_service_option,
+  'version'          => \&parse_version_option,
+  'request'          => \&parse_request_option,
+  'coverage'         => \&parse_coverage_option,
+  'time'             => \&parse_time_option,
+  'bbox'             => \&parse_bbox_option,
+  'format'           => \&parse_format_option,
+  'compress'         => \&parse_compress_option,
+  'regrid'           => \&parse_regrid_option,
+  'regrid_aggregate' => \&parse_regrid_aggregate_option,
+  'lambert'          => \&parse_lambert_option,
+  'stereographic'    => \&parse_stereographic_option,
+  'mercator'         => \&parse_mercator_option,
+  'lonlat'           => \&parse_lonlat_option,
+  'ellipsoid'        => \&parse_ellipsoid_option,
+  'grid'             => \&parse_grid_option,
+  'levels'           => \&parse_levels_option,
+  'cmaq'             => \&parse_cmaq_option
+);
+
+# Webserver content types for each output format:
+
+my %content_types = (
+  'ascii'         => 'text/plain',
+  'xdr'           => 'application/octet-stream',
+  'netcdf-coards' => 'application/netcdf',
+  'netcdf-ioapi'  => 'application/netcdf',
+  'original'      => 'application/octet-stream'
+);
+
+# Full URL path to this program:
+
+my @pathed_program_parts = split( /\//, $0 );
+my $program_name = $pathed_program_parts[ @pathed_program_parts - 1 ];
+my $program = "$server_path/$program_name";
+
+################################## VARIABLES #################################
+
+
+# Parsed from the URL query string:
+
+my $service       = ''; # wcs.
+my $version       = ''; # 1.0.0.
+my $request       = ''; # getcapabilities or describecoverage or getcoverage.
+my $coverage      = ''; # wind.
+my $format        = ''; # xdr, ascii, netcdf, original.
+my $compress      = ''; # 1 = | gzip -c otherwise don't compress (default).
+my $time          = ''; # E.g., 2008-06-21t00:00:00z/2008-06-22t23:59:59z.
+my $bbox          = ''; # E.g., -76,34,-74,36,0,0.
+my $regrid        = ''; # E.g., nearest, mean, weighted.
+my $regrid_aggregate = ''; # E.g., none, all, daily.
+my $lambert       = ''; # E.g., 33,45,-97,40.
+my $stereographic = ''; # E.g., -98,90,45.
+my $mercator      = ''; # E.g., -98.
+my $lonlat        = '';
+my $ellipsoid     = ''; # E.g., 6370000,6370000.
+my $grid          = ''; # E.g., 279,240,-1008000,-1620000,12000,12000.
+my $levels        = ''; # E.g,22,2,10000,1.0,...,0.0,9.81,287.04,50,290,100000.
+my $cmaq          = ''; # CMAQ=0 for Grid XDR format, 1 = SUBSET CMAQ format.
+
+# Derived from the above parsed values:
+
+my $starting_timestamp = 0; # yyyymmddhh, e.g., 2008062100.
+my $ending_timestamp   = 0; # yyyymmddhh, e.g., 2008062200.
+my $hours              = 0; # E.g., 5 days = 5 x 24 = 120.
+my $variable_index     = 0;
+
+################################## ROUTINES ##################################
+
+
+main();
+
+
+sub main {
+  my $result = 0;
+
+  if ( ! parse_url() ) {
+    print "Content-type: text/plain; charset=iso-8859-1\n\n"; # For webserver
+  } elsif ( $request eq 'getcapabilities' ) {
+    print "Content-type: text/xml; charset=iso-8859-1\n\n"; # For webserver
+    print_capabilities();
+    $result = 1;
+  } elsif ( $request eq 'describecoverage' ) {
+    print "Content-type: text/xml; charset=iso-8859-1\n\n"; # For webserver
+    print_coverage_description();
+    $result = 1;
+  } elsif ( $request eq 'getcoverage' ) {
+    print "Content-type: $content_types{ $format }; charset=iso-8859-1\n\n";
+    compute_time_range();
+    my $processes =
+      $hours < $maximum_parallel_retrievals ? $hours
+      : $maximum_parallel_retrievals;
+
+    $result = retrieve_data( $processes );
+
+    if ( $result ) {
+      my $command = construct_subsetter_command();
+      $result = execute_command( $command );
+    }
+
+    if ( ! $debugging ) {
+      #unlink( $temp_directory );
+      execute_command( "/bin/rm -rf $temp_directory" );
+    }
+  } elsif ( $request eq 'getmetadata' ) {
+    print "Content-type: text/plain; charset=iso-8859-1\n\n"; # For webserver
+    compute_time_range();
+    print $metadata_content;
+
+    if ( $format eq 'original' ) {
+      print $metadata_content_original;
+      $result = retrieve_data( 0 );
+      print "\n";
+    } else {
+      print $metadata_content_processed;
+      $result = retrieve_data( 0 );
+      my $command = construct_subsetter_command();
+      print "\n$command\n\n";
+    }
+
+    if ( ! $debugging ) {
+      #unlink( $temp_directory );
+      execute_command( "/bin/rm -rf $temp_directory" );
+    }
+  }
+
+  $result = 1 - $result; # UNIX: zero is success, non-zero is failure.
+  debug( "$program exit result = $result" );
+  exit $result;
+}
+
+
+
+# Print web server capabilities metadata.
+
+sub print_capabilities {
+  print '<?xml version="1.0" encoding="UTF-8" ?>' . "\n";
+  print '<WCS_Capabilities version="1.0.0" ';
+  print 'xmlns="https://www.opengeospatial.org/standards/wcs" ';
+  print 'xmlns:gml="https://www.opengis.net//gml" ';
+  print 'xmlns:xlink="https://www.w3.org/1999/xlink">';
+  print '
+    <Service>
+        <metadataLink xlink:type="simple" xlink:href="https://www.star.nesdis.noaa.gov/smcd/emb/hrrr_aerosol/" metadataType="other" />
+        <description>EPA HRRR Web Server 1.0.0</description>
+        <name>EPA_HRRR_OGC_WCS_1.0.0</name>
+        <label>EPA HRRR Web Server 1.0.0</label>
+        <keywords>
+            <keyword>EPA</keyword>
+            <keyword>HRRR</keyword>
+            <keyword>interoperability</keyword>
+        </keywords>
+        <responsibleParty>
+            <individualName>Todd Plessel</individualName>
+            <organisationName>EPA Vislab</organisationName>
+            <contactInfo>
+                <onlineResource xlink:type="simple" xlink:href="mailto:plessel.todd@epa.gov" />
+            </contactInfo>
+        </responsibleParty>
+        <fees>NONE</fees>
+        <accessConstraints>NONE</accessConstraints>
+    </Service>
+    <Capability>
+        <Request>
+            <GetCapabilities>
+                <DCPType>
+                    <HTTP>
+                        <Get>
+                            <OnlineResource xlink:type="simple" xlink:href="https://ofmpub.epa.gov/rsig/hrrrserver?" />
+                        </Get>
+                        <Post>
+                            <OnlineResource xlink:type="simple" xlink:href="https://ofmpub.epa.gov/rsig/hrrrserver" />
+                        </Post>
+                    </HTTP>
+                </DCPType>
+            </GetCapabilities>
+            <DescribeCoverage>
+                <DCPType>
+                    <HTTP>
+                        <Get>
+                            <OnlineResource xlink:type="simple" xlink:href="https://ofmpub.epa.gov/rsig/hrrrserver?" />
+                        </Get>
+                        <Post>
+                            <OnlineResource xlink:type="simple" xlink:href="https://ofmpub.epa.gov/rsig/hrrrserver" />
+                        </Post>
+                    </HTTP>
+                </DCPType>
+            </DescribeCoverage>
+            <GetCoverage>
+                <DCPType>
+                    <HTTP>
+                        <Get>
+                            <OnlineResource xlink:type="simple" xlink:href="https://ofmpub.epa.gov/rsig/hrrrserver?" />
+                        </Get>
+                        <Post>
+                            <OnlineResource xlink:type="simple" xlink:href="https://ofmpub.epa.gov/rsig/hrrrserver" />
+                        </Post>
+                    </HTTP>
+                </DCPType>
+            </GetCoverage>
+        </Request>
+        <Exception>
+            <Format>text/xml; charset="utf-8"</Format>
+        </Exception>
+    </Capability>
+    <ContentMetadata version="1.0.0">';
+  print "\n";
+
+  my $variable_count = @metadata;
+
+  for ( my $variable = 0; $variable < $variable_count; ++$variable ) {
+    my $name        = $metadata[ $variable ]->{ name };
+    my $units       = $metadata[ $variable ]->{ units };
+    my $description = $metadata[ $variable ]->{ description };
+    print "        <CoverageOfferingBrief>\n";
+    print "            <name>$name</name>\n";
+    print "            <label>$name($units)</label>\n";
+    print "            <description>$description</description>\n";
+    print '            <lonLatEnvelope srsName="WGS84(DD)">';
+    print "\n";
+    print "                <gml:pos>-60 20</gml:pos>\n";
+    print "                <gml:pos>-123 53</gml:pos>\n";
+    print "            </lonLatEnvelope>\n";
+    print "        </CoverageOfferingBrief>\n";
+  }
+
+  print "    </ContentMetadata>\n";
+  print "</WCS_Capabilities>\n";
+}
+
+
+
+# Print web server coverage description metadata.
+
+sub print_coverage_description {
+  print '<?xml version="1.0" encoding="UTF-8" ?>';
+  print '<CoverageDescription version="1.0.0" ';
+  print 'xmlns="https://www.opengeospatial.org/standards/wcs" ';
+  print 'xmlns:gml="https://www.opengis.net/gml" ';
+  print 'xmlns:xlink="https://www.w3.org/1999/xlink">';
+  print "\n";
+
+  my $variable_count = @metadata;
+
+  for ( my $variable = 0; $variable < $variable_count; ++$variable ) {
+    my $name        = $metadata[ $variable ]->{ name };
+    my $units       = $metadata[ $variable ]->{ units };
+    my $description = $metadata[ $variable ]->{ description };
+
+    if ( $coverage eq '' || $coverage eq $name ) {
+      print "    <CoverageOffering>\n";
+      print "        <name>$name</name>\n";
+      print "        <label>$name($units)</label>\n";
+      print "        <description>$description</description>\n";
+      print "        <domainSet>\n";
+      print "            <spatialDomain>\n";
+      print '                <gml:Envelope srsName="WGS84(DD)">';
+      print "\n";
+      print "                    <gml:pos>-60 20</gml:pos>\n";
+      print "                    <gml:pos>-123 53</gml:pos>\n";
+      print "                </gml:Envelope>\n";
+      print "            </spatialDomain>\n";
+      print "            <temporalDomain>\n";
+      print "                <timePeriod>\n";
+      print "                    <beginPosition>$begin_date";
+      print "T00:00:00Z</beginPosition>\n";
+      print "                    <timeResolution>PT1H</timeResolution>\n";
+      print "                </timePeriod>\n";
+      print "            </temporalDomain>\n";
+      print "        </domainSet>\n";
+      print "        <rangeSet>\n";
+      print "            <RangeSet>\n";
+      print "                <name>$name</name>\n";
+      print "                <label>$name($units)</label>\n";
+      print "                <description>$description</description>";
+      print '
+          <nullValues>
+              <singleValue>-9999.0</singleValue>
+          </nullValues>
+      </RangeSet>
+  </rangeSet>
+  <supportedCRSs>
+      <requestResponseCRSs>CRS:84</requestResponseCRSs>
+      <nativeCRSs>CRS:84</nativeCRSs>
+  </supportedCRSs>
+  <supportedFormats>
+      <formats>ASCII XDR NetCDF-COARDS NetCDF-IOAPI</formats>
+  </supportedFormats>
+  <supportedInterpolations>
+      <interpolationMethod>none</interpolationMethod>
+  </supportedInterpolations>
+  </CoverageOffering>
+  ';
+    }
+  }
+
+  print "</CoverageDescription>\n";
+}
+
+
+# Parse URL parameters into variables.
+
+sub parse_url {
+  use CGI qw/ untaint /;     # Load Safe untainting CGI routines.
+  $CGI::DISABLE_UPLOADS = 1; # Disable uploads.
+  $CGI::POST_MAX = 1024;     # Limit posts to 1024 bytes.
+  my $query = new CGI;       # Parse QUERY_STRING.
+  %ENV = ();                 # Unset all environment variables.
+  my @names = $query->param; # Extract names of parameters.
+  my $count = @names;
+  my $result = 0;
+  debug( "@names\n$count" );
+
+  for ( my $parameter = 0; $parameter < $count; ++$parameter) {
+    $_ = $names[ $parameter ];                # $_ is tainted.
+    s/[^A-Za-z1]/_/go;                        # Untaint $_.
+    my $option = $_;                          # $option is untainted.
+    $_ = $query->param( $option );            # $_ is tainted.
+    s/[^\w\-.,:\/]/_/go;                      # Untaint $_.
+    my $value = $_;                           # $value is untainted.
+    my $lowercase_option = lc( $option );
+    my $lowercase_value  = lc( $value );
+    debug( "$lowercase_option $lowercase_value" );
+
+    if ( $parsers{ $lowercase_option } ) {
+      $result = $parsers{ $lowercase_option }->( $lowercase_value );
+    } else {
+      print STDERR "\nInvalid option #$parameter\n";
+      $result = 0;
+    }
+
+    if ( ! $result ) {
+      $parameter = $count; # Finish looping.
+    }
+  }
+
+  $result = $result && required_options_specified();
+  return $result;
+}
+
+
+
+# Parse service option.
+
+sub parse_service_option {
+  my $value = shift;
+  my $result = parse_option( $service, $value, 'SERVICE', 'wcs' );
+  return $result;
+}
+
+
+
+# Parse version option.
+
+sub parse_version_option {
+  my $value = shift;
+  my $result = parse_option( $version, $value, 'VERSION', '1.0.0' );
+  return $result;
+}
+
+
+
+# Parse request option.
+
+sub parse_request_option {
+  my $value = shift;
+  my $result =
+    parse_option( $request, $value, 'REQUEST',
+                  'getcoverage getcapabilities describecoverage getmetadata' );
+  return $result;
+}
+
+
+
+# Parse coverage option.
+
+sub parse_coverage_option {
+  my $value = shift;
+  my $result = 0;
+  my $variable_count = @metadata;
+
+  for ( my $variable = 0; $variable < $variable_count; ++$variable ) {
+    my $name = $metadata[ $variable ]->{ name };
+
+    if ( $value eq lc( $name ) ) {
+      $coverage = $name;
+      $variable_index = $variable;
+      $result = 1;
+      return $result;
+    }
+  }
+
+  return $result;
+}
+
+
+
+# Parse format option:
+
+sub parse_format_option {
+  my $value = shift;
+  my $result = parse_option( $format, $value, 'FORMAT',
+                             'xdr ascii netcdf-coards netcdf-ioapi original' );
+  return $result;
+}
+
+
+
+# Parse time option.
+
+sub parse_time_option {
+  my $value = shift;
+  my $result = 0;
+
+  if ( $time ne '' ) {
+    print STDERR "\nRedundant TIME option\n";
+  } else {
+    $time = $value;
+    my $is_valid = is_valid_time( $time );
+
+    if ( ! $is_valid ) {
+      print STDERR "\nInvalid TIME option\n";
+    } else {
+      $result = 1;
+    }
+  }
+
+  return $result;
+}
+
+
+
+# Parse bbox option.
+
+sub parse_bbox_option {
+  my $value = shift;
+  my $result = 0;
+
+  if ( $bbox ne '' ) {
+    print STDERR "\nRedundant BBOX option\n";
+  } else {
+    $bbox = $value;
+    my @bounds = split( /,/, $bbox );
+    my $bounds_count = @bounds;
+
+    if ( $bounds_count != 4 && $bounds_count != 6 ) {
+      print STDERR "\nInvalid BBOX option (requires 4 or 6 numbers).\n";
+    } elsif ( ! in_range( $bounds[ 0 ], -180.0, 180.0 ) ) {
+      print STDERR "\nInvalid BBOX option (1st number)\n";
+    } elsif ( ! in_range( $bounds[ 1 ], -90.0, 90.0 ) ) {
+      print STDERR "\nInvalid BBOX option (2nd number)\n";
+    } elsif ( ! in_range( $bounds[ 2 ], $bounds[ 0 ], 180.0 ) ) {
+      print STDERR "\nInvalid BBOX option (3rd number)\n";
+    } elsif ( ! in_range( $bounds[ 3 ], $bounds[ 1 ], 90.0 ) ) {
+      print STDERR "\nInvalid BBOX option (4th number)\n";
+    } else {
+      $result = 1;
+    }
+  }
+
+  return $result;
+}
+
+
+
+# Parse compress option.
+
+sub parse_compress_option {
+  my $value = shift;
+  my $result = 0;
+
+  if ( $compress ne '' ) {
+    print STDERR "\nRedundant COMPRESS option\n";
+  } else {
+    $compress = $value;
+    my $is_valid = $compress == 0 || $compress == 1;
+
+    if ( ! $is_valid ) {
+      print STDERR "\nInvalid COMPRESS option (requires 0 or 1)\n";
+    } else {
+      $result = 1;
+    }
+  }
+
+  return $result;
+}
+
+
+
+# Parse regrid option:
+
+sub parse_regrid_option {
+  my $value = shift;
+  my $result = parse_option( $regrid, $value, 'REGRID',
+                             'nearest mean weighted' );
+  return $result;
+}
+
+
+
+# Parse regrid_aggregate option:
+
+sub parse_regrid_aggregate_option {
+  my $value = shift;
+  my $result = parse_option( $regrid_aggregate, $value, 'REGRID_AGGREGATE',
+                             'none all daily' );
+  return $result;
+}
+
+
+
+# Parse lambert option.
+
+sub parse_lambert_option {
+  my $value = shift;
+  my $result = 0;
+
+  if ( $lambert ne '' ) {
+    print STDERR "\nRedundant LAMBERT option\n";
+  } else {
+    $lambert = $value;
+    my @values = split( /,/, $value );
+    my $count = @values;
+
+    if ( $count != 4 ) {
+      print STDERR "\nInvalid LAMBERT option (requires 4 numbers)\n";
+    } elsif ( ! in_range( $values[ 0 ], -89.0, 89.0 ) ) {
+      print STDERR "\nInvalid LAMBERT option (1st number)\n";
+    } elsif ( ! in_range( $values[ 1 ], -89.0, 89.0 ) ) {
+      print STDERR "\nInvalid LAMBERT option (2nd number)\n";
+    } elsif ( ! in_range( $values[ 2 ], -180.0, 180.0 ) ) {
+      print STDERR "\nInvalid LAMBERT option: (3rd number)'\n";
+    } elsif ( ! in_range( $values[ 3 ], -89.0, 89.0 ) ) {
+      print STDERR "\nInvalid LAMBERT option:  (4th number)\n";
+    } elsif ( $values[ 0 ] > $values[ 1 ] ) {
+      print STDERR "\nInvalid LAMBERT option: (require 1st > 2nd number)\n";
+    } elsif ( $values[ 0 ] > 0.0 && $values[ 1 ] < 0.0 ) {
+      print STDERR "\nInvalid LAMBERT option: (require 1st and 2nd same sign)\n";
+    } elsif ( $values[ 0 ] < 0.0 && $values[ 1 ] > 0.0 ) {
+      print STDERR "\nInvalid LAMBERT option: (require 1st and 2nd same sign)\n";
+    } else {
+      $result = 1;
+    }
+  }
+
+  return $result;
+}
+
+
+
+# Parse stereographic option.
+
+sub parse_stereographic_option {
+  my $value = shift;
+  my $result = 0;
+
+  if ( $stereographic ne '' ) {
+    print STDERR "\nRedundant STEREOGRAPHIC option\n";
+  } else {
+    $stereographic = $value;
+    my @values = split( /,/, $value );
+    my $count = @values;
+
+    if ( $count != 3 ) {
+      print STDERR "\nInvalid STEREOGRAPHIC option (require 3 numbers)\n";
+    } elsif ( ! in_range( $values[ 0 ], -180.0, 180.0 ) ) {
+      print STDERR "\nInvalid STEREOGRAPHIC option: (require 1st in [-180, 180])\n";
+    } elsif ( ! in_range( $values[ 1 ], -90.0, 90.0 ) ) {
+      print STDERR "\nInvalid STEREOGRAPHIC option: (require 2nd in [-90, 90])\n";
+    } elsif ( ! in_range( $values[ 2 ], -90.0, 90.0 ) ) {
+      print STDERR "\nInvalid STEREOGRAPHIC option: (require 3rd in [-90, 90])\n";
+    } else {
+      $result = 1;
+    }
+  }
+
+  return $result;
+}
+
+
+
+# Parse mercator option.
+
+sub parse_mercator_option {
+  my $value = shift;
+  my $result = 0;
+
+  if ( $mercator ne '' ) {
+    print STDERR "\nRedundant MERCATOR option\n";
+  } else {
+    $mercator = $value;
+    my @values = split( /,/, $value );
+    my $count = @values;
+
+    if ( $count != 1 ) {
+      print STDERR "\nInvalid MERCATOR option (require 1 number)\n";
+    } elsif ( ! in_range( $values[ 0 ], -180.0, 180.0 ) ) {
+      print STDERR "\nInvalid MERCATOR option (require number in [-180, 180])\n";
+    } else {
+      $result = 1;
+    }
+  }
+
+  return $result;
+}
+
+
+
+# Parse lonlat option.
+
+sub parse_lonlat_option {
+  my $value = shift;
+  my $result = 0;
+
+  if ( $lonlat ne '' ) {
+    print STDERR "\nRedundant LONLAT option\n";
+  } else {
+    $lonlat = 1;
+    $result = 1;
+  }
+
+  return $result;
+}
+
+
+
+# Parse ellipsoid option.
+
+sub parse_ellipsoid_option {
+  my $value = shift;
+  my $result = 0;
+
+  if ( $ellipsoid ne '' ) {
+    print STDERR "\nRedundant ELLIPSOID option\n";
+  } else {
+    $ellipsoid = $value;
+    my @values = split( /,/, $value );
+    my $count = @values;
+
+    if ( $count != 1 && $count != 2 ) {
+      print STDERR "\nInvalid ELLIPSOID option (require 1 or 2 numbers)\n";
+    } elsif ( ! in_range( $values[ 0 ], 1.0, 1e10 ) ) {
+      print STDERR "\nInvalid ELLIPSOID option (1st number)\n";
+    } elsif ( $count == 2 ) {
+
+      if ( ! in_range( $values[ 1 ], $values[ 0 ], 1e10 ) ) {
+        print STDERR "\nInvalid ELLIPSOID option: (2nd number)\n";
+      } else {
+        $result = 1;
+      }
+    } else {
+      $result = 1;
+    }
+  }
+
+  return $result;
+}
+
+
+
+# Parse grid option.
+
+sub parse_grid_option {
+  my $value = shift;
+  my $result = 0;
+
+  if ( $grid ne '' ) {
+    print STDERR "\nRedundant GRID option\n";
+  } else {
+    $grid = $value;
+    my @values = split( /,/, $value );
+    my $count = @values;
+
+    if ( $count != 6 ) {
+      print STDERR "\nInvalid GRID option (require 6 numbers)\n";
+    } elsif ( $values[ 0 ] < 1 ) {
+      print STDERR "\nInvalid GRID option (1st number)\n";
+    } elsif ( $values[ 1 ] < 1 ) {
+      print STDERR "\nInvalid GRID option (2nd number)\n";
+    } elsif ( ! in_range( $values[ 2 ], -1e10, 1e10 ) ) {
+      print STDERR "\nInvalid GRID option (3rd number)\n";
+    } elsif ( ! in_range( $values[ 3 ], -1e10, 1e10 ) ) {
+      print STDERR "\nInvalid GRID option (4th number)\n";
+    } elsif ( ! in_range( $values[ 4 ], 0.01, 1e10 ) ) {
+      print STDERR "\nInvalid GRID option (5th number)\n";
+    } elsif ( ! in_range( $values[ 5 ], 0.01, 1e10 ) ) {
+      print STDERR "\nInvalid GRID option (6th number)\n";
+    } else {
+      $result = 1;
+    }
+  }
+
+  return $result;
+}
+
+
+
+# Parse levels option.
+
+sub parse_levels_option {
+  my $value = shift;
+  my $result = 0;
+
+  if ( $levels ne '' ) {
+    print STDERR "\nRedundant LEVELS option\n";
+  } else {
+    $levels = $value;
+    my @values = split( /,/, $value );
+    my $count = @values;
+
+    if ( $count != 3 + $values[ 0 ] + 1 + 5 ) {
+      print STDERR "\nInvalid LEVELS option (count)\n";
+    } elsif ( ! in_range( $values[ 0 ], 1, 100 ) ) {
+      print STDERR "\nInvalid LEVELS option (1st number)\n";
+    } elsif ( ! in_range( $values[ 1 ], 1, 7 ) ) {
+      print STDERR "\nInvalid LEVELS option (2nd number)\n";
+    } elsif ( ! in_range( $values[ 2 ], 0.0, 1e8 ) ) {
+      print STDERR "\nInvalid LEVELS option (3rd number)\n";
+    } else {
+
+      # Ensure level values are ordered decreasing if sigma-p else increasing:
+
+      my $end = $count - 5;
+      my $minimum = 0.0;
+      my $maximum = $lonlat ne '' ? 100000.0 : 1.0;
+      my $ok = 0;
+
+      for ( my $index = 3; $index < $end; ++$index ) {
+        my $level_value = $values[ $index ];
+        $ok = in_range( $level_value, $minimum, $maximum );
+
+        if ( ! $ok ) {
+          print STDERR "\nInvalid LEVELS option (number $index)\n";
+          $index = $count;
+        } elsif ( $lonlat ne '' ) {
+          $minimum = $level_value;
+        } else {
+          $maximum = $level_value;
+        }
+      }
+
+      # Check last parameter constants:
+
+      if ( $ok == 1 ) {
+        my $index = $count - 5;
+
+        if ( ! in_range( $values[ $index ], 0.01, 1e2 ) ) {
+          print STDERR "\nInvalid LEVELS option\n";
+        } elsif ( ! in_range( $values[ $index + 1 ], 0.01, 1e4 ) ) {
+          print STDERR "\nInvalid LEVELS option\n";
+        } elsif ( ! in_range( $values[ $index + 2 ], 0.01, 1e4 ) ) {
+          print STDERR "\nInvalid LEVELS option\n";
+        } elsif ( ! in_range( $values[ $index + 3 ], 0.01, 1e4 ) ) {
+          print STDERR "\nInvalid LEVELS option\n";
+        } elsif ( ! in_range( $values[ $index + 4 ], 0.01, 1e6 ) ) {
+          print STDERR "\nInvalid LEVELS option\n";
+        } else {
+          $result = 1;
+        }
+      }
+    }
+  }
+
+  return $result;
+}
+
+
+
+# Parse cmaq option.
+
+sub parse_cmaq_option {
+  my $value = shift;
+  my $result = 0;
+
+  if ( $cmaq ne '' ) {
+    print STDERR "\nRedundant CMAQ option\n";
+  } else {
+    $cmaq = $value;
+    my $is_valid = $cmaq == 0 || $cmaq == 1;
+
+    if ( ! $is_valid ) {
+      print STDERR "\nInvalid CMAQ option (requires 0 or 1)\n";
+    } else {
+      $result = 1;
+    }
+  }
+
+  return $result;
+}
+
+
+
+# Check that all required 'options' have been specified:
+
+sub required_options_specified {
+  my $result = 0;
+
+  if ( $service eq '' ) {
+    print STDERR "\nMissing option: 'SERVICE'\n";
+  } elsif ( $version eq '' ) {
+    print STDERR "\nMissing option: 'VERSION'\n";
+  } elsif ( $request eq '' ) {
+    print STDERR "\nMissing option: 'REQUEST'\n";
+  } elsif ( $request eq 'getcoverage' || $request eq 'getmetadata' ) {
+
+    if ( $coverage eq '' ) {
+      print STDERR "\nMissing option: 'COVERAGE'\n";
+    } elsif ( $format eq '' ) {
+      print STDERR "\nMissing option: 'FORMAT'\n";
+    } elsif ( $time eq '' ) {
+      print STDERR "\nMissing option: 'TIME'\n";
+    } elsif ( $bbox eq '' ) {
+      print STDERR "\nMissing option: 'BBOX'\n";
+    } else {
+      my $regrid_count = 0;
+      $regrid_count += $regrid ne '';
+      $regrid_count += $ellipsoid ne '';
+      $regrid_count += $grid ne '';
+      my $projection_count = 0;
+      $projection_count += $lambert ne '';
+      $projection_count += $stereographic ne '';
+      $projection_count += $mercator ne '';
+      $projection_count += $lonlat ne '';
+
+      $result =
+        $regrid_count == 0 && $projection_count == 0 ||
+        $regrid_count == 3 && $projection_count == 1;
+
+      if ( ! $result ) {
+        print STDERR "\nInvalid options: 'REGRID/";
+        print STDERR "LAMBERT/STEREOGRAPHIC/MERCATOR/LONLAT/";
+        print STDERR "GRID/ELLIPSOID'\n";
+      }
+    }
+  } else {
+    $result = 1;
+  }
+
+  return $result;
+}
+
+
+
+# Compute starting_timestamp and hours.
+# inputs:  $time = '2001-08-26t00:00:00z/2001-08-30t23:59:59z'
+# outputs: $starting_timestamp = 2005082600
+#          $hours = 120
+
+sub compute_time_range {
+  my $yyyy1 = substr( $time, 0, 4 );
+  my $mm1   = substr( $time, 5, 2 );
+  my $dd1   = substr( $time, 8, 2 );
+  my $hh1   = substr( $time, 11, 2 );
+  my $i     = index( $time, '/' );
+
+  $starting_timestamp = integer_timestamp( $yyyy1, $mm1, $dd1, $hh1 );
+  $ending_timestamp   = $starting_timestamp;
+  $hours = 1;
+
+  if ( $i != -1 ) {
+    ++$i;
+    my $yyyy2 = substr( $time, $i + 0, 4 );
+    my $mm2   = substr( $time, $i + 5, 2 );
+    my $dd2   = substr( $time, $i + 8, 2 );
+    my $hh2   = substr( $time, $i + 11, 2 );
+    my $yyyy  = $yyyy1;
+    my $mm    = $mm1;
+    my $dd    = $dd1;
+    my $hh    = $hh1;
+    $ending_timestamp = integer_timestamp( $yyyy2, $mm2, $dd2, $hh2 );
+
+    while ( integer_timestamp( $yyyy, $mm, $dd, $hh ) != $ending_timestamp ) {
+      increment_timestamp( $yyyy, $mm, $dd, $hh );
+      ++$hours;
+    }
+  }
+}
+
+
+
+# Retrieve data files from the external web service to $temp_directory.
+# If processes is 0 just print command to retrieve data.
+# If processes is 1 retrieve each subset data file sequentially.
+# If processes is > 1 create and execute a csh program to retrieve each subset
+# data file concurrently.
+
+sub retrieve_data {
+  my $processes = shift;
+  my $p = 0;
+  my $result = 1;
+  my $yyyymmdd = substr( $starting_timestamp, 0, 8 );
+  my $hh       = substr( $starting_timestamp, 8, 2 );
+  my $yyyy = substr( $yyyymmdd, 0, 4 );
+  my $mm   = substr( $yyyymmdd, 4, 2 );
+  my $dd   = substr( $yyyymmdd, 6, 2 );
+  my $file_list_file = undef;
+  my $downloader_file = undef;
+
+  mkdir $temp_directory;
+  open $file_list_file, '>', $temp_file_list or die "Can't create file $!";
+
+  debug( "retrieve_data() processes = $processes, hours = $hours\n" );
+
+  if ( $processes > 1 ) {
+
+    # Create $temp_downloader program to retrieve idx files concurrently
+    # then execute the program:
+
+    open $downloader_file, '>', $temp_downloader or die "Can't create file $!";
+    print $downloader_file "#!/bin/sh\n";
+
+    for ( my $h = 0; $h < $hours && $result == 1; ++$h ) {
+      my $url = $external_url;
+      $url =~ s/YYYYMMDD/$yyyy$mm$dd/g;
+      $url =~ s/HH/$hh/g;
+
+      # Retrieve idx file:
+
+      my $url_idx = $url . '.idx';
+      my $last_slash = rindex( $url_idx, '/' );
+      my $file = substr( $url_idx, $last_slash + 1 );
+      my $idx_file_name = "$temp_directory/$yyyy$mm$dd" . "_$file";
+      my $command = "$curl '$url_idx' > $idx_file_name";
+
+      debug("( $command & )\n");
+      print $downloader_file "$command &\n";
+
+      ++$p;
+
+      if ( $p == $processes ) {
+        debug( "wait\n" );
+        print $downloader_file "wait\n";
+        $p = 0;
+      }
+
+      increment_timestamp( $yyyy, $mm, $dd, $hh );
+      $mm = sprintf( "%02d", $mm );
+      $dd = sprintf( "%02d", $dd );
+      $hh = sprintf( "%02d", $hh );
+    }
+
+    if ( $p != 0 ) {
+      print $downloader_file "wait\n";
+    }
+
+    close $downloader_file;
+    $downloader_file = undef;
+    chmod 0755, $temp_downloader;
+    $result = execute_command( "$temp_downloader 2>&1 /dev/null" );
+    unlink( $temp_downloader );
+
+    # Recreate $temp_downloader program to retrieve data files concurrently:
+
+    if ( $result ) {
+      open $downloader_file, '>', $temp_downloader or die "Can't create file $!";
+      print $downloader_file "#!/bin/sh\n";
+    }
+
+    # Reinitialize yyyy, mm, dd for subsequent for loop on data files:
+
+    $yyyy = substr( $yyyymmdd, 0, 4 );
+    $mm   = substr( $yyyymmdd, 4, 2 );
+    $dd   = substr( $yyyymmdd, 6, 2 );
+    $hh   = substr( $starting_timestamp, 8, 2 );
+  }
+
+  debug( "result = $result, $yyyy $mm $dd $hh" );
+
+  for ( my $h = 0; $h < $hours && $result == 1; ++$h ) {
+    my $url = $external_url;
+    $url =~ s/YYYYMMDD/$yyyy$mm$dd/g;
+    $url =~ s/HH/$hh/g;
+
+    # Retrieve idx file:
+
+    my $url_idx = $url . '.idx';
+    my $last_slash = rindex( $url_idx, '/' );
+    my $file = substr( $url_idx, $last_slash + 1 );
+    my $idx_file_name = "$temp_directory/$yyyy$mm$dd" . "_$file";
+    my $command = "$curl '$url_idx' > $idx_file_name";
+
+    debug( "  idx_file_name = $idx_file_name" );
+
+    if ( $processes <= 1 ) {
+      $result = execute_command( $command );
+      debug( "    result = $result" );
+    }
+
+    debug( "  result = $result" );
+
+    if ( $result ) {
+
+      # Read idx file into idx_content:
+
+      open my $idx_file, '<', $idx_file_name or die "Can't read file $!";
+      read $idx_file, my $idx_content, -s $idx_file;
+      close $idx_file;
+
+      # Parse byte start/end for surface wind variables:
+      # 59:41289569:d=2018010100:UGRD:10 m above ground:anl
+      # 60:42469846:d=2018010100:VGRD:10 m above ground:anl
+      # 61:43656673:d=2018010100:WIND:10 m above ground:0-0 day max fcst
+
+      my $tag        = $metadata[ $variable_index ]->{ tag };
+      my $components = $metadata[ $variable_index ]->{ components };
+      my $start_byte = '';
+      my $end_byte = '';
+      debug( "calling parse_bytes( ..., $tag, $components, ..., ... )" );
+      parse_bytes( $idx_content, $tag, $components, $start_byte, $end_byte );
+      debug( "after: start_byte = '$start_byte', end_byte = '$end_byte'" );
+
+      if ( $start_byte ne '' ) { # Retrieve specified variable:
+        $last_slash = rindex( $url, '/' );
+        $file = substr( $url, $last_slash + 1 );
+        my $data_file_name = "$temp_directory/$yyyy$mm$dd" . "_$file";
+        $command =
+          "$curl --range $start_byte-$end_byte '$url' > $data_file_name";
+
+        if ( $processes > 1 ) {
+          ++$p;
+
+          if ( $p == $processes ) {
+            debug("wait\n");
+            print $downloader_file "wait\n";
+            $p = 0;
+          }
+
+          debug("$command &\n");
+          print $downloader_file "$command &\n";
+        } elsif ( $processes == 1 ) {
+          $result = execute_command( $command );
+        } else {
+          print "$command\n";
+        }
+
+        print $file_list_file "$data_file_name\n";
+      }
+    }
+
+    increment_timestamp( $yyyy, $mm, $dd, $hh );
+    $mm = sprintf( "%02d", $mm );
+    $dd = sprintf( "%02d", $dd );
+    $hh = sprintf( "%02d", $hh );
+  }
+
+  if ( $processes > 1 ) {
+    print $downloader_file "wait\n";
+    close $downloader_file;
+    $downloader_file = undef;
+    chmod 0755, $temp_downloader;
+    $result = execute_command( "$temp_downloader 2>&1 /dev/null" );
+  }
+
+  close $file_list_file;
+
+  return $result;
+}
+
+
+
+# Parse bytes from tag in idx content:
+# 59:41289569:d=2018010100:UGRD:10 m above ground:anl
+# parse_bytes( $idx_content, ':UGRD:10 m ', 2, $start_byte, $end_byte );
+# $start_byte is '41289569', $end_byte = '43656673'
+
+sub parse_bytes {
+  my ( $idx_content, $tag, $components, $start_byte, $end_byte ) = @_;
+  my $len = length( $idx_content );
+  my $end = index( $idx_content, $tag );
+  $start_byte = '';
+  $end_byte = '';
+
+  if ( $end >= 4 ) {
+    --$end;
+
+    while ( $end >= 3 && substr( $idx_content, $end, 1 ) ne ':' ) {
+      --$end;
+    }
+
+    if ( $end >= 3 ) {
+      my $start = $end - 1;
+
+      while ( $start >= 1 && substr( $idx_content, $start, 1 ) ne ':' ) {
+        --$start;
+      }
+
+      if ( $start >= 1 ) {
+        ++$start;
+        $start_byte = substr( $idx_content, $start, $end - $start );
+
+        # Skip $component lines then parse $end_byte:
+
+        my $skip = $components;
+
+
+        while ( $skip-- ) {
+
+          while ( $start < $len && substr( $idx_content, $start, 1 ) ne "\n" ) {
+            ++$start;
+          }
+
+          ++$start; # Skip newline.
+        }
+
+        if ( $start < $len ) {
+
+          while ( $start < $len && substr( $idx_content, $start, 1) ne ':') {
+            ++$start;
+          }
+
+          if ( $start + 2 < $len ) {
+            ++$start; # Skip colon.
+            $end = $start;
+
+            while ( $end < $len && substr( $idx_content, $end, 1 ) ne ':' ) {
+              ++$end;
+            }
+
+            if ( $end < $len ) {
+              $end_byte = substr( $idx_content, $start, $end - $start );
+            }
+          }
+        }
+      }
+    }
+  }
+
+  $_[ 3 ] = $start_byte;
+  $_[ 4 ] = $end_byte;
+}
+
+
+
+# Construct subsetter command.
+
+sub construct_subsetter_command {
+  my $result = '';
+
+  if ( $format eq 'original' ) {
+    $result =
+      "/bin/cat $temp_file_list | " .
+      "/usr/bin/xargs /bin/gtar -zcO";
+  } else {
+    my @bounds = split( /,/, $bbox );
+    my $domain = " -domain $bounds[0] $bounds[1] $bounds[2] $bounds[3] ";
+    my $my_xdrconvert = '';
+    my $my_compressor = '';
+    my $minimum_quality_option = '';
+
+    if ( $regrid ne '' || $format ne 'xdr' ) {
+      my $xdrconvert_format = $format;
+      my @format_parts = split( /-/, $format );
+      my $format_parts_count = @format_parts;
+
+      if ( $format_parts_count == 2 ) {
+        $xdrconvert_format = $format_parts[ 1 ];
+      }
+
+      my $regrid_args = '';
+
+      if ( $regrid ne '' ) {
+        my $projection_args =
+          $lambert ne '' ? "-lambert $lambert "
+          : $stereographic ne '' ? "-stereographic $stereographic "
+          : $mercator ne '' ? "-mercator $mercator "
+          : "-lonlat ";
+
+        $projection_args =~ tr/,/ /;
+        my @ellipsoid_args = split( /,/, $ellipsoid );
+        my $ellipsoid_args_count = @ellipsoid_args;
+        my $major_semiaxis = $ellipsoid_args[ 0 ];
+        my $minor_semiaxis =
+          $ellipsoid_args_count == 1 ? $major_semiaxis : $ellipsoid_args[ 1 ];
+        my $grid_args = "-grid $grid ";
+        $grid_args =~ tr/,/ /;
+
+        my $regrid_aggregate_option = '';
+
+        if ( $regrid_aggregate eq 'daily' ) {
+          $regrid_aggregate_option = '-aggregate 24';
+        } elsif ( $regrid_aggregate eq 'all' ) {
+          $regrid_aggregate_option = "-aggregate $hours";
+        }
+
+        $regrid_args =
+          "-regrid $regrid " .
+          $projection_args .
+          "-ellipsoid $major_semiaxis $minor_semiaxis " .
+          $grid_args .
+          $regrid_aggregate_option;
+      }
+
+      $my_xdrconvert = " | $xdrconvert $regrid_args -$xdrconvert_format";
+    }
+
+    if ( $compress ne '' && $compress == 1 ) {
+      $my_compressor = " | $compressor";
+    }
+
+    my $name       = $metadata[ $variable_index ]->{ name };
+    my $units      = $metadata[ $variable_index ]->{ units };
+    my $components = $metadata[ $variable_index ]->{ components };
+    my $vector_option  = $components > 1 ? ' -is_vector2 ' : '';
+    my $cmaq_option = $cmaq eq '1' ? ' -cmaq ' : '';
+
+    $result =
+      "$subsetter" .
+      " -lonlats $lonlat_file " .
+      " -files $temp_file_list -tmpdir $temp_directory " .
+      " -desc https://home.chpc.utah.edu/~u0553130/Brian_Blaylock/," .
+        "HRRRSubset" .
+      " -timestamp $starting_timestamp -hours $hours " .
+      " -variable $name " .
+      " -units $units " .
+      $vector_option .
+      $cmaq_option .
+      $domain .
+      "$my_xdrconvert$my_compressor";
+  }
+
+  return $result;
+}
+
+
+
+############################### HELPER ROUTINES ##############################
+
+
+
+# debug( message );
+
+sub debug {
+  my $message = shift;
+
+  if ( $debugging ) {
+    print STDERR "\n$message\n";
+  }
+}
+
+
+
+# Execute command and echo its output to STDOUT. E.g., execute_command( 'ls' );
+
+sub execute_command {
+  my $command = shift;
+  my $result = 0;
+  my $the_pipe = 0;
+
+  # Untaint command (match expression is arbitrary as far as -T is concerned):
+
+  if ( $command =~ m#^(/[\w-]+/[\w -/.;:,>&'@|~]+)$# ) {
+    $command = $1; # Re-assign first match, which is enough to satisfy -T.
+    debug( "$0 executing command = $command" );
+    %ENV = (); # Unset all environment variables prior to popen.
+    # Complicated, supposedly safer way to open a readable pipe to command:
+    my $pid = open( the_pipe, "-|" );
+
+    if ( ! defined( $pid ) ) {
+      die "Couldn't open pipe to subprocess";
+    } elsif ( $pid ) { # Parent process.
+
+      while ( <the_pipe> ) {
+        print;
+      }
+
+      close( the_pipe ) or die $!;
+      $result = ! $?;
+    } else { # Child process.
+      exec( $command ) or die "can't exec program: $!";
+    }
+  } else {
+    print STDERR "\n$0: command contains invalid characters.\n";
+  }
+
+  return $result;
+}
+
+
+
+# my $result = parse_option( $option, $value, $option_name, $valid_values );
+# my $result = parse_option( $variable, $value, 'COVERAGE', 'ozone pm25' );
+
+sub parse_option {
+  my ( $option, $value, $option_name, $valid_values ) = @_;
+  my $result = 0;
+
+  if ( $option ne '' ) {
+    print STDERR "\nRedundant $option_name option\n";
+  } else {
+    $result = index( " $valid_values ", " $value " ) != -1;
+
+    if ( $result ) {
+      $_[ 0 ] = $value;
+    } else {
+      print STDERR "\nInvalid $option_name option\n";
+    }
+  }
+
+  return $result;
+}
+
+
+
+# my $result = parse_range_ption( $option, $value, $option_name ) ;
+# my $result = parse_range_option( $aod_range, $value, 'AOD_RANGE' );
+
+sub parse_range_option {
+  my ( $option, $value, $option_name ) = @_;
+  my $result = 0;
+  my @values = split( /,/, $value );
+  my $count = @values;
+
+  if ( $option ne '' ) {
+    print STDERR "\nRedundant $option_name option\n";
+  } elsif ( $count != 2 ) {
+    print STDERR "\nRedundant $option_name option (require 2 numbers)\n";
+  } else {
+    $_[ 0 ] = $value;
+    $result = 1;
+  }
+
+  return $result;
+}
+
+
+
+# my $ok = in_range( $value, $minimum, $maximum );
+
+sub in_range {
+  my ( $value, $minimum, $maximum ) = @_;
+  my $result = $value >= $minimum && $value <= $maximum;
+  return $result;
+}
+
+
+
+# my $is_valid = is_valid_time( '2001-08-26t20:00:00z/2001-08-27t23:59:59z' );
+
+sub is_valid_time {
+  my $time = shift;
+  my $result = 0;
+  my $length = length( $time );
+
+  if ( $length == 41 ) {
+    $result = is_valid_time( substr( $time, 0, 20 ) );
+    $result = $result && substr( $time, 20, 1 ) eq '/';
+    $result = $result && is_valid_time( substr( $time, 21, 20 ) );
+    $result = $result && substr( $time, 0, 20 ) le substr( $time, 21, 20 );
+  } elsif ( $length == 20 ) {
+    my $year   = substr( $time, 0, 4 );
+    my $month  = substr( $time, 5, 2 );
+    my $day    = substr( $time, 8, 2 );
+    my $hour   = substr( $time, 11, 2 );
+    my $minute = substr( $time, 14, 2 );
+    my $second = substr( $time, 17, 2 );
+    $result = in_range( $year, 1900, 3000 );
+    $result = $result && in_range( $month, 1, 12 );
+    $result = $result && in_range( $day, 1, days_in_month( $year, $month ) );
+    $result = $result && in_range( $hour, 0, 23 );
+    $result = $result && in_range( $minute, 0, 59 );
+    $result = $result && in_range( $second, 0, 59 );
+    $result = $result && substr( $time, 4, 1 ) eq '-';
+    $result = $result && substr( $time, 7, 1 ) eq '-';
+    $result = $result && substr( $time, 10, 1 ) eq 't';
+    $result = $result && substr( $time, 13, 1 ) eq ':';
+    $result = $result && substr( $time, 16, 1 ) eq ':';
+    $result = $result && substr( $time, 19, 1 ) eq 'z';
+  }
+
+  return $result;
+}
+
+
+
+# increment_timestamp( $yyyy, $mm, $dd, $hh );
+
+sub increment_timestamp {
+  my ( $yyyy, $mm, $dd, $hh ) = @_;
+  my $hours_per_day   = 23;
+  my $months_per_year = 12;
+  my $days_this_month = days_in_month( $yyyy, $mm );
+  ++$hh;
+
+  if ( $hh > $hours_per_day ) {
+    $hh = 0;
+    ++$dd;
+
+    if ( $dd > $days_this_month ) {
+      $dd = 1;
+      ++$mm;
+
+      if ( $mm > $months_per_year ) {
+        $mm = 1;
+        ++$yyyy;
+      }
+    }
+  }
+
+  $_[ 0 ] = $yyyy;
+  $_[ 1 ] = $mm;
+  $_[ 2 ] = $dd;
+  $_[ 3 ] = $hh;
+}
+
+
+
+# my $yyyymmddhh = integer_timestamp( $yyyy, $mm, $dd, $hh );
+
+sub integer_timestamp {
+  my ( $yyyy, $mm, $dd, $hh ) = @_;
+  my $result = int( $yyyy * 1000000 + $mm * 10000 + $dd * 100 + $hh );
+  return $result;
+}
+
+
+
+# my $leap = is_leap_year( $year );
+
+sub is_leap_year {
+  my $year = shift;
+  my $result = $year % 4 == 0 && ( $year % 100 != 0 || $year % 400 == 0 );
+  return $result;
+}
+
+
+
+# my $days = days_in_month( $year, $month );
+
+sub days_in_month {
+  my $year  = shift;
+  my $month = shift;
+
+  # 30 days hath September, April, June and November...
+
+  my @days_per_month = ( 31, 28, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31 );
+  my $result = $days_per_month[ $month - 1 ];
+
+  if ( $month == 2 ) {
+
+    if ( is_leap_year( $year ) ) {
+      ++$result;
+    }
+  }
+
+  return $result;
+}
+
+
+
+
+

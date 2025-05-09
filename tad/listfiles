@@ -1,0 +1,89 @@
+#!/bin/csh -f
+# listfiles - List TAD aircraft data files for given variable,
+# starting yyyymmddhh and hours.
+# https://tad.larc.nasa.gov/
+# 2015-02-26 plessel.todd@epa.gov 919-541-5500
+
+set data_directory = '/data/TAD/data'
+set temp = /data/tmp/listfiles.$$
+touch $temp ; \rm $temp
+
+
+@ ok = 0
+@ yyyymmddhh = 0
+@ hours      = 0
+
+if ( $#argv == 3 ) then
+  set variable   = `echo "$1" | tr '[a-z]' '[A-Z]'`
+  @ yyyymmddhh = $2
+  @ hours      = $3
+  @ ok = ($yyyymmddhh >= 1990010100 && $yyyymmddhh <= 2147123123 && $hours >= 1)
+
+  if ( ! $ok ) then
+    echo "$0 Invalid command-line arguments $1 $2 $3"
+  endif
+endif
+
+if ( ! $ok ) then
+  echo
+  echo "$0 - List TAD data files for given variable, starting yyyymmddhh and hours."
+  echo "usage: $0 variable yyyymmddhh hours"
+  echo "example: $0 co 2006042100 48"
+  echo '/data/TAD/data/TAD_CO_20060421.txt'
+  echo '/data/TAD/data/TAD_CO_20060422.txt'
+  echo
+  exit 1
+endif
+
+@ yyyy = `echo  $yyyymmddhh | awk '{ printf "%d", substr( $1, 1, 4 ) }'`
+@ mm   = `echo  $yyyymmddhh | awk '{ printf "%d", substr( $1, 5, 2 ) }'`
+@ dd   = `echo  $yyyymmddhh | awk '{ printf "%d", substr( $1, 7, 2 ) }'`
+@ hh   = `echo  $yyyymmddhh | awk '{ printf "%d", substr( $1, 9, 2 ) }'`
+
+set days_per_month_non_leap = ( 31 28 31 30 31 30 31 31 30 31 30 31 )
+set days_per_month_leap     = ( 31 29 31 30 31 30 31 31 30 31 30 31 )
+@ leap = ( $yyyy % 4 == 0 && ( $yyyy % 100 != 0 || $yyyy % 400 == 0 ) )
+
+if ( $leap ) then
+  set days_per_month = ( $days_per_month_leap )
+else
+  set days_per_month = ( $days_per_month_non_leap )
+endif
+
+@ days = `echo $hours | awk '{ printf "%d", ( $1 - 1 ) / 24 + 1}'`
+@ d = 1
+while ( $d <= $days )
+
+  # List files matching yyyymmdd:
+
+  @ yyyymmdd = `printf "%04d%02d%02d" $yyyy $mm $dd`
+
+  ls $data_directory/TAD*_${variable}_$yyyymmdd.txt |& grep -v 'ls: ' >> $temp
+
+  # Increment day:
+
+  @ dd += 1
+
+  if ( $dd > $days_per_month[$mm] ) then
+    @ dd = 1
+    @ mm += 1
+
+    if ( $mm > 12 ) then
+      @ mm = 1
+      @ yyyy += 1
+      @ leap = ( $yyyy % 4 == 0 && ( $yyyy % 100 != 0 || $yyyy % 400 == 0 ) )
+
+      if ( $leap ) then
+        set days_per_month = ( $days_per_month_leap )
+      else
+        set days_per_month = ( $days_per_month_non_leap )
+      endif
+    endif
+  endif
+
+  @ d += 1
+end
+
+cat $temp | sort | uniq
+\rm $temp
+

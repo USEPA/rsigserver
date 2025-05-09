@@ -1,0 +1,16 @@
+#!/bin/sh
+
+clear
+
+echo
+echo "Compiling read_lonlats utility program..."
+
+gcc -m64 -Wall -D_FILE_OFFSET_BITS=64 -D_LARGEFILE_SOURCE -DNDEBUG -O -o read_lonlats read_lonlats.c -lm -lc
+strip read_lonlats
+ls -l read_lonlats
+file  read_lonlats
+ldd   read_lonlats
+
+ls -Fsalt | head
+echo Done
+

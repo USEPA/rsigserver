@@ -1,0 +1,109 @@
+#!/bin/csh -f
+# listfiles - List GOES data files for given starting YYYYMMDDHH and HOURS.
+# 2015-05-22 plessel.todd@epa.gov 919-541-5500
+
+set data_directory = '/data/GOES/data'
+set temp = /data/tmp/listfiles.$$
+touch $temp ; \rm $temp
+
+
+@ ok = 0
+@ yyyymmddhh = 0
+@ hours      = 0
+set instrument = '' # imager or sounder.
+set variable = '' # insl, ..., parm.
+
+if ( $#argv == 4 ) then
+  set instrument = "$1"
+  set variable   = `echo "$2" | tr '[a-z]' '[A-Z]'` # Capitalize name.
+  @ yyyymmddhh   = "$3"
+  @ hours        = "$4"
+  @ ok = ($yyyymmddhh >= 1990010100 && $yyyymmddhh <= 2147123123 && $hours >= 1)
+  if ( $ok ) then
+    @ ok = ("$instrument" == 'imager' || "$instrument" == 'sounder')
+  endif
+
+  if ( ! $ok ) then
+    echo "$0 Invalid command-line arguments $1 $2 $3 $4"
+  endif
+endif
+
+if ( ! $ok ) then
+  echo
+  echo "$0 - List GOES data files for given starting YYYYMMDDHH and HOURS."
+  echo "usage: $0 imager|sounder variable yyyymmddhh hours"
+  echo "example: $0 imager insl 2013090100 24"
+  echo "$data_directory/2013/gp_20130901/goes_img_INSL_v00_201309011145Z.txt"
+  echo "$data_directory/2013/gp_20130901/goes_img_INSL_v00_201309011245Z.txt"
+  echo "$data_directory/2013/gp_20130901/goes_img_INSL_v00_201309011345Z.txt"
+  echo "$data_directory/2013/gp_20130901/goes_img_INSL_v00_201309011445Z.txt"
+  echo "$data_directory/2013/gp_20130901/goes_img_INSL_v00_201309011545Z.txt"
+  echo "$data_directory/2013/gp_20130901/goes_img_INSL_v00_201309011645Z.txt"
+  echo "$data_directory/2013/gp_20130901/goes_img_INSL_v00_201309011745Z.txt"
+  echo "$data_directory/2013/gp_20130901/goes_img_INSL_v00_201309011845Z.txt"
+  echo "$data_directory/2013/gp_20130901/goes_img_INSL_v00_201309011945Z.txt"
+  echo "$data_directory/2013/gp_20130901/goes_img_INSL_v00_201309012045Z.txt"
+  echo "$data_directory/2013/gp_20130901/goes_img_INSL_v00_201309012145Z.txt"
+  echo "$data_directory/2013/gp_20130901/goes_img_INSL_v00_201309012245Z.txt"
+  echo "$data_directory/2013/gp_20130901/goes_img_INSL_v00_201309012345Z.txt"
+  echo
+  exit 1
+endif
+
+set ins = 'img'
+if ( "$instrument" == 'sounder' ) set ins = 'snd'
+
+@ yyyy =   $yyyymmddhh / 1000000
+@ mm   = ( $yyyymmddhh / 10000 ) % 100
+@ dd   = ( $yyyymmddhh / 100 ) % 100
+@ hh   =   $yyyymmddhh % 100
+set days_per_month = ( 31 28 31 30 31 30 31 31 30 31 30 31 )
+
+@ days_in_month = $days_per_month[$mm]
+
+if ( $mm == 2 ) then
+  @ leap = ( $yyyy % 4 == 0 && ! ( $yyyy % 100 == 0 && ! $yyyy % 400 == 0 ) )
+  @ days_in_month += $leap
+endif
+
+@ h = 1
+
+while ( $h <= $hours )
+
+  # List files matching instrument, variable and timestamp:
+
+  @ yyyymmdd = $yyyymmddhh / 100
+  ls $data_directory/$yyyy/gp_$yyyymmdd/goes_${ins}_${variable}_v00_${yyyymmddhh}??Z.txt* |& grep -v 'ls: ' >> $temp
+
+  @ hh += 1
+
+  if ( $hh > 23 ) then
+    @ hh = 0
+    @ dd += 1
+
+    if ( $dd > $days_in_month ) then
+      @ dd = 1
+      @ mm += 1
+
+      if ( $mm > 12 ) then
+        @ yyyy += 1
+        @ mm = 1
+        @ days_in_month = $days_per_month[$mm]
+      else
+        @ days_in_month = $days_per_month[$mm]
+
+        if ( $mm == 2 ) then
+          @ leap = ( $yyyy % 4 == 0 && ! ( $yyyy % 100 == 0 && ! $yyyy % 400 == 0 ) )
+          @ days_in_month += $leap
+        endif
+      endif
+    endif
+  endif
+
+  @ yyyymmddhh = `echo $yyyy $mm $dd $hh | xargs printf "%d%02d%02d%02d"`
+  @ h += 1
+end
+
+cat $temp | sort | uniq
+\rm $temp
+

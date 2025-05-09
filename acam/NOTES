@@ -1,0 +1,67 @@
+
+2014-11
+
+Attached is a text file containing data from an airborne instrument NASA flew
+during the DISCOVER-AQ field mission.
+The instrument is a spectrometer called ACAM which measures the column density
+for different trace gases.
+The attached file contains the VCD (vertical column density) and a derived
+boundary layer mixing ratio for NO2.
+I have a presentation with OAQPS on November 11th to discuss the DISCOVER-AQ
+mission and would like to see if you can put in a hack to include this data
+so I can show it overlaid with CMAQ surface NO2 and ground NO2 data for the
+Baltimore area.
+We have 12 days of flight data.
+Can you please let me know how hard it is to put this into RSIG3D?
+ 
+jim
+
+$ head July22FlightTrack.txt 
+Time (UTC),Lat,Lon,VCD,Mixing Ratio (ppbv)
+14.12,39.696,-75.868,4.45E+15,-9999
+13.2115,37.0532,-77.048,5.63E+15,-9999
+13.2121,37.0389,-77.0503,5.23E+15,-9999
+13.2127,37.0282,-77.0558,5.66E+15,-9999
+
+Solution:
+1. Convert the files to the format input by SiteSubset:
+
+printf temp_file "%9s,%9.4f,%9.4f,%04d,%03d,%04.1f,%8.1f,%46s\n",
+       $site, $latitude, $longitude,
+       $year, $day_of_year, $hour,
+       $measurement, $city;
+
+SITE,LATITUDE,LONGITUDE,YEAR,JUL_DAY,GMT_HR,ozone,ppb,SITE_NAME
+220870002,  29.9819, -89.9986,2001,238,00.5,    34.0,                                 Not in a city
+
+and save the files in /data/ACAM/data/20140722_no2.txt, vcd.
+
+2. Create acamserver with COVERAGE=no2,vcd and invoke SiteSubset on the files.
+
+-----------------------------------------
+
+2014-12-05
+
+Todd,
+ 
+Can you please replace the ACAM files that you “hacked in” with these updated files.  These ACAM files contain updated concentration calculations.   Also attached is a separate set of files “date_HSRLML_....txt”   These files contain a mixing height derived from lidar aerosol vertical profiles which was flown on the same place as the ACAM instrument.  HSRL is the High Spectral Resolution Lidar.   Could you also hack in these files?
+ 
+The parameter is “mixing height” or ML in magl.  The data set should be under aircraft and be HSRL.  The orginial meeting with OAQPS to show some of this was moved to Dec 11.   Any chance you’ll be able to hack in the HSRL data by then?
+ 
+jim  
+
+-----
+
+Done. Replaced previous NO2 and VCD files, added mixing_ratio(m).
+
+----------------------------------------------------------------
+
+2018-11-17
+
+Reorganized, renamed and reformatted csv input files.
+See newest script, convert_new_files
+Rewrote acamserver and hsrlserver to use new reformatted files and
+output new 'Point' XDR format (instead of 'SITE') format.
+
+
+

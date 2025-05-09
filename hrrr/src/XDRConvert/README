@@ -1,0 +1,51 @@
+
+2025-02-28
+plessel.todd@epa.gov 919-541-5500
+
+This directory contains the C source code for the XDRCOnvert program.
+
+It uses the following external libraries: NetCDF (version 3)
+and Standard C libraries: m c.
+To compile: ./makeit
+
+Files:
+------
+README           - This file.
+Utilities/*.[hc] - C source files for Utilities library.
+Note Utilities/Utilities.c is different from ./Utilities.c
+*.[hc]           - C source files for XDRConvert program.
+makeit           - C Shell script to compile the programs.
+
+
+Running and Program Usage Documentation:
+----------------------------------------
+For XDRConvert program usage documentation simply execute 
+XDRConvert |& more
+to see what command-line options are required/available and
+the format of the resulting output files.
+
+Notes:
+------
+1. Use the ncdump utility (from NetCDF library) to examine output .nc files:
+
+ncdump example.nc | more
+
+2. Use 'more' to examine the headers of the binary .xdr output files:
+
+more example.xdr
+Swath 2.0
+http://tempo.si.edu/,TEMPOSubset
+2023-10-17T00:00:00-0000
+# Dimensions: variables timesteps scans:
+11 24 1
+# Variable names:
+Longitude Latitude no2_vertical_column_total Longitude_SW Longitude_SE Longitude_NW Longitude_NE Latitude_SW Latitude_SE Latitude_NW Latitude_NE
+# Variable units:
+deg deg molecules/cm2 deg deg deg deg deg deg deg deg
+# Domain: <min_lon> <min_lat> <max_lon> <max_lat>
+-180 40 -20 50
+# MSB 64-bit integers (yyyydddhhmm) timestamps[scans] and
+# MSB 64-bit integers points[scans] and
+# IEEE-754 64-bit reals data_1[variables][points_1] ... data_S[variables][points_S]:
+... binary data follows last ASCII header line ending in colon ...
+

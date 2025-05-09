@@ -1,0 +1,36 @@
+# Compile this library and its test program on MINGW64 Windows platform.
+# First copy this directory to C:/tmp/ so it has no spaces in its path!
+# From a DOS window, launch the MinGW shell with the following command:
+# C:\Users\tplessel\MinGW/msys/1.0/bin/sh ./makeit.mingw
+# The above executes the rest of the lines of this file.
+
+# Set PATH so MINGW version of g++ must be used (not Cygwin version!):
+# Note: path has '/1' instead of '\\1' since the latter breaks sed!
+# Copy mingw64 to home directory without problematic spaces and parentheses!
+# Also, edit C:\MinGW\msys\1.0\etc\profile to put the home path first as shown below.
+#PATH=/c/Users/tplessel/mingw64/bin:/c/MinGW/msys/1.0/bin:/c/MinGW/bin:/c/WINDOWS/System32:/c/WINDOWS
+PATH="/c/Users/tplessel/mingw-w64/x86_64-8.1.0-posix-seh-rt_v6-rev0/mingw64/bin:/c/Users/tplessel/MinGW/msys/1.0/bin:/c/Users/tplessel/MinGW/bin:/c/WINDOWS/System32:/c/WINDOWS"
+
+echo "PATH = $PATH"
+
+# Verify MinGW versions of the following commands are used:
+
+which autoconf make ar gcc g++
+
+gcc -m64 -v
+
+# In the directory run the following commands:
+
+#echo "Running autoconf"
+#autoconf
+echo "Running configure"
+CFLAGS="-m64"
+CXXFLAGS="-m64"
+./configure --disable-shared
+make clean
+echo "Running make"
+make
+
+cp -p libPNG.a ../../../../lib/Win64/libPNG.a
+cp -p png.h pngconf.h pnglibconf.h ../../../../include/
+

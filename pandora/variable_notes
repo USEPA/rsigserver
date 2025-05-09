@@ -1,0 +1,15 @@
+
+First please check the following and edit the proposed filter ranges:
+1_ atmospheric_variability (%) actual range = (-36859.93, 999) filter range = [-100, 100]
+2_ residual_stray_light_level (%) actual = (-415.44, 1152.66) filter range = [0, 100]
+3_ maximum_horizontal_distance (km) actual = (-2860.5, 10875.44) filter range = [0, 1e8] (m)
+4_ maximum_vertical_distance (km) actual = (-744.47, 2914.07) filter range = [0, 1e8] (m)
+5 top_layer_height (km) actual = (-1378.28, 4.98) filter range = [0, 1e5] (m) 
+*rms* units ? filter range = [0, 1000]
+_L2Trop_rnvh1p1-7.txt:
+columns 10, 11: "Water vapor tropospheric amount [Centimeter] actual = (-4.3453e+99, 7.0659e+98) filter range = [0, 1e9]
+
+Second review the attached variable list and return any edits
+(e.g., preferred variable renaming, units conversions, filter ranges)
+
+

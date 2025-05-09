@@ -1,0 +1,2138 @@
+#!/usr/bin/perl -wT
+
+##############################################################################
+# PURPOSE: wqpserver - Serve a USGS/EPA wqp station data, subsetted by
+#          longitude-latitude box, in ASCII format for use by
+#          EstuaryDataMapper (via curl).
+#
+# NOTES:   Server is WCS-compliant:
+#          https://www.opengeospatial.org/standards/wcs
+#          https://datafed.net/xs/OpenGIS/wcs/1.0.0/
+#          and modeled after a similar webserver application:
+#          https://webapps.datafed.net/ogc_EPA.wsfl
+#
+#          Connects to external web service Water Quality Portal:
+#          https://www.waterqualitydata.us/wqx3/Result/search?
+#          https://www.waterqualitydata.us/wqx3/Station/search?
+#          Contact: Lee Stanish, lstanish@usgs.gov
+#
+#          Example usage:
+#
+#          curl -k --silent --max-time 3600 --retry 0 -L --tcp-nodelay \
+#            https://ofmpub.epa.gov/rsig/wqpserver?\
+#            SERVICE=wcs&\
+#            VERSION=1.0.0&\
+#            REQUEST=GetCoverage&\
+#            COVERAGE=salinity_psu&\
+#            TIME=2006-07-18T00:00:00Z/2006-07-22T23:59:59Z&\
+#            BBOX=-76,39,-75,40&\
+#            FORMAT=ascii'
+#
+# HISTORY: 2012-06-28 plessel.todd@epa.gov 1-919-541-5500
+#
+# STATUS:  unreviewed tested.
+##############################################################################
+
+
+use strict;
+package main;
+$| = 1; # Turn off output buffering so messages appear in correct order.
+alarm( 3600 ); # Kill process after 1 hour. Legitimate usage could be an hour!
+# Restrict PATH and ENV.
+delete @ENV{ 'PATH', 'IFS', 'CDPATH', 'ENV', 'BASH_ENV' };
+
+
+############################## TUNABLE CONSTANTS #############################
+
+
+my $debugging = 0; # 1 = print debug messages to STDERR logs/error_log.
+
+# Server where this program is installed:
+
+my $server_path = 'https://YOUR_WEBSERVER_HOST/cgi-bin';
+
+my $bindir = '/rsig/current/code/bin/Linux.x86_64';
+my $curl = '/usr/bin/curl -k --silent --max-time 3600 --retry 0 -L --tcp-nodelay';
+
+my $curl_command = "$curl " . "'" .
+  'https://www.waterqualitydata.us/wqx3/Result/search?mimeType=csv' .
+  '&dataProfile=fullPhysChem';
+
+# Data columns to parse:
+
+my $YYYY_MM_DD    = 0; my $YYYY_MM_DD_STRING    = 'Activity_StartDate';
+my $HH_MM_SS      = 1; my $HH_MM_SS_STRING      = 'Activity_StartTime';
+my $TIME_ZONE     = 2; my $TIME_ZONE_STRING     = 'Activity_StartTimeZone';
+my $LONGITUDE     = 3; my $LONGITUDE_STRING     = 'Location_Longitude';
+my $LATITUDE      = 4; my $LATITUDE_STRING      = 'Location_Latitude';
+my $DEPTH         = 5; my $DEPTH_STRING         = 'Activity_DepthHeightMeasure';
+my $DEPTH_UNITS   = 6; my $DEPTH_UNITS_STRING='Activity_DepthHeightMeasureUnit';
+my $SID           = 7; my $SID_STRING            = 'Location_Identifier';
+my $MEASURE_NAME  = 8; my $MEASURE_NAME_STRING   = 'Result_Characteristic';
+my $MEASURE_VALUE = 9; my $MEASURE_STRING        = 'Result_Measure';
+                       my $MEASURE_VALUE_STRING  = 'Result_MeasureValue';
+my $MEASURE_UNITS = 10; my $MEASURE_UNITS_STRING = 'Result_MeasureUnit';
+my $METHOD        = 11; my $METHOD_STRING = 'ResultAnalyticalMethod_Identifier';
+
+# Station columns to parse:
+
+my $STATION_LONGITUDE = 0; my $STATION_LONGITUDE_STRING = 'Location_Longitude';
+my $STATION_LATITUDE  = 1; my $STATION_LATITUDE_STRING  = 'Location_Latitude';
+my $STATION_SID       = 2; my $STATION_SID_STRING       = 'Location_Identifier';
+
+# Query string parsing routine dispatch table:
+
+my %parsers = (
+  'service'  => \&parse_service_option,
+  'version'  => \&parse_version_option,
+  'request'  => \&parse_request_option,
+  'coverage' => \&parse_coverage_option,
+  'time'     => \&parse_time_option,
+  'bbox'     => \&parse_bbox_option,
+  'format'   => \&parse_format_option
+);
+
+# Webserver content types for each output format:
+
+my %content_types = (
+  'ascii'         => 'text/plain',
+  'bin'           => 'application/octet-stream',
+  'xdr'           => 'application/octet-stream',
+  'netcdf-coards' => 'application/netcdf',
+  'netcdf-ioapi'  => 'application/netcdf'
+);
+
+# Full URL path to this program:
+
+my @pathed_program_parts = split( /\//, $0 );
+my $program_name = $pathed_program_parts[ @pathed_program_parts - 1 ];
+my $program = "$server_path/$program_name";
+
+# Metadata:
+# name - this is the COVERAGE= name used by this script.
+# units - units for the parameter, e.g., mg/L.
+# description - Parameter description.
+# parameters - Comma-separated list of parameter names or numbers used by the
+# called remote web service:
+# https://www.waterqualitydata.us/webservices_documentation
+# https://www.waterqualitydata.us/Result/search?
+# https://qwwebservices.usgs.gov/public_srsnames.html
+# https://nwis.waterdata.usgs.gov/usa/nwis/pmcodes
+# https://help.waterdata.usgs.gov/code/parameter_cd_query?fmt=rdb&group_cd=MBI&inline=true
+
+my @metadata = (
+  {
+    'name' => 'station',
+    'units' => '-',
+    'description' => 'Station-ID.',
+    'parameters' => ''
+  },
+  {
+    'name' => 'discharge',
+    'units' => 'm3/s',
+    'description' => 'Stream flow.',
+    'parameters' => 'Stream flow, mean. daily;' .
+                    'Stream flow, instantaneous'
+  },
+  {
+    'name' => 'chlorophyll_a',
+    'units' => 'ug/L',
+    'description' => 'Chlorophyll-a concentration measured.',
+    'parameters' => 'Chlorophyll;' .
+                    'Chlorophyll a;' .
+                    'Chlorophyll a (probe relative fluorescence);' .
+                    'Chlorophyll a (probe);' .
+                    'Chlorophyll a, uncorrected for pheophytin'
+  },
+  {
+    'name' => 'chlorophyll_a_fluorescence',
+    'units' => 'RFU',
+    'description' => 'Chlorophyll-a concentration measured.',
+    'parameters' => 'Chlorophyll;' .
+                    'Chlorophyll a;' .
+                    'Chlorophyll a (probe relative fluorescence);' .
+                    'Chlorophyll a (probe);' .
+                    'Chlorophyll a, uncorrected for pheophytin'
+  },
+  {
+    'name' => 'chlorophyll_a_non_pheophytin',
+    'units' => 'ug/L',
+    'description' => 'Chlorophyll-a non-pheophytin.',
+    'parameters' => 'Chlorophyll a, corrected for pheophytin;' .
+                    'Chlorophyll a, free of pheophytin'
+  },
+  {
+    'name' => 'chlorophyll_a_non_pheophytin_fluorescence',
+    'units' => 'RFU',
+    'description' => 'Chlorophyll-a non-pheophytin.',
+    'parameters' => 'Chlorophyll a, corrected for pheophytin;' .
+                    'Chlorophyll a, free of pheophytin'
+  },
+  {
+    'name' => 'chlorophyll_b',
+    'units' => 'ug/L',
+    'description' => 'Chlorophyll-b concentration measured.',
+    'parameters' => 'Chlorophyll b;' .
+                    'Chlorophyll-b'
+  },
+  {
+    'name' => 'chlorophyll_b_fluorescence',
+    'units' => 'RFU',
+    'description' => 'Chlorophyll-b concentration measured.',
+    'parameters' => 'Chlorophyll b;' .
+                    'Chlorophyll-b'
+  },
+  {
+    'name' => 'chlorophyll_c',
+    'units' => 'ug/L',
+    'description' => 'Chlorophyll-c concentration measured.',
+    'parameters' => 'Chlorophyll c;' .
+                    'Chlorophyll-c'
+  },
+  {
+    'name' => 'chlorophyll_c_fluorescence',
+    'units' => 'RFU',
+    'description' => 'Chlorophyll-c concentration measured.',
+    'parameters' => 'Chlorophyll c;' .
+                    'Chlorophyll-c'
+  },
+  {
+    'name' => 'color_apparent',
+    'units' => 'PCU',
+    'description' => 'Apparent water color.',
+    'parameters' => 'Color, Apparent'
+  },
+  {
+    'name' => 'color_true',
+    'units' => 'PCU',
+    'description' => 'True water color.',
+    'parameters' => 'Color, True'
+  },
+  {
+    'name' => 'cdom',
+    'units' => '/m',
+    'description' => 'Colored dissolved organic matter.',
+    'parameters' => 'Colored dissolved organic matter (CDOM)'
+  },
+  {
+    'name' => 'conductivity',
+    'units' => 'uS/cm',
+    'description' => 'Conductivity.',
+    'parameters' => 'Conductivity;Specific conductance'
+  },
+  {
+    'name' => 'ph',
+    'units' => 'pH',
+    'description' => 'Alkalinity.',
+    'parameters' => 'pH'
+  },
+  {
+    'name' => 'salinity_psu',
+    'units' => 'PSU',
+    'description' => 'Salinity in practical salinity scale units.',
+    'parameters' => 'Salinity'
+  },
+  {
+    'name' => 'salinity_ppm',
+    'units' => 'ppm',
+    'description' => 'Salinity in parts-per-million units.',
+    'parameters' => 'Salinity'
+  },
+  {
+    'name' => 'dissolved_fluoride',
+    'units' => 'mg/L',
+    'description' => 'Dissolved fluoride.',
+####'parameters' => 'Fluoride&sampleFractionText=Dissolved' # UGLY.
+####'parameters' => 'pCode=00950&command.avoid=STORET' # UGLY.
+    'parameters' => 'pCode=00950' # UGLY.
+  },
+  {
+    'name' => 'dissolved_iron',
+    'units' => 'mg/L',
+    'description' => 'Dissolved iron.',
+####'parameters' => 'Iron&sampleFractionText=Dissolved' # UGLY.
+####'parameters' => 'pCode=01046&command.avoid=STORET' # UGLY.
+    'parameters' => 'pCode=01046' # UGLY.
+  },
+  {
+    'name' => 'dissolved_nitrogen',
+    'units' => 'mg/L',
+    'description' => 'Dissolved nitrogen.',
+    'parameters' =>
+      'Nitrogen, mixed forms (NH3), (NH4), organic, (NO2) and (NO3)'
+  },
+  {
+    'name' => 'dissolved_oxygen_concentration',
+    'units' => 'mg/L',
+    'description' => 'Dissolved oxygen concentration.',
+    'parameters' => 'Dissolved oxygen (DO)'
+  },
+  {
+    'name' => 'dissolved_oxygen_saturation',
+    'units' => '%',
+    'description' => 'Dissolved oxygen saturation.',
+    'parameters' => 'Dissolved oxygen saturation'
+  },
+  {
+    'name' => 'escherichia_coli',
+    'units' => 'cfu/100ml',
+    'description' => 'Escherichia coli, m-TEC MF method, water.',
+    'parameters' => 'Escherichia coli'
+    #'parameters' => 'pCode=31633;31648;31685;31686;31689;31691;31750;31756;50278;50466;50467;50468;51762;51763;61215;84383;84385;90901;90902;90908' # UGLY.
+    #'parameters' => 'Escherichia coli' .
+    #'&ResultAnalyticalMethod.MethodIdentifier=150;507;509;779;3008;3009;3010;' .
+    #'3011;3014;3015;3035;3037;3057;3058;3081;3082;3083;3084;3152;3185;3189;' .
+    #'3191;4660;4662;5165;5166;5167;5256;5300;5677;606210;743234;770793;810609'
+    #'' # 2024-05-20 AnalyticalMethod is unsupported.
+  },
+  {
+    'name' => 'enterococci',
+    'units' => 'cfu/100ml',
+    'description' => 'Enterococci, m-E MF method, water.',
+    'parameters' => 'Enterococcus'
+    #'parameters' => 'pCode=31649;31716;31719;31747;31844;84139;90909;99601' # UGLY.
+    #'parameters' => 'Enterococcus' .
+    #'&ResultAnalyticalMethod.MethodIdentifier=150;507;509;779;3008;3009;3010;' .
+    #'3011;3014;3015;3035;3037;3057;3058;3081;3082;3083;3084;3152;3185;3189;' .
+    #'3191;4660;4662;5165;5166;5167;5256;5300;5677;606210;743234;770793;810609'
+    #'' # 2024-05-20 AnalyticalMethod is unsupported.
+  },
+  {
+    'name' => 'escherichia_coli_enterococci',
+    'units' => 'cfu/100ml',
+    'description' => 'Escherichia coli + Enterococci, m-TEC and m-E MF method, water.',
+    'parameters' => 'Escherichia coli;Enterococcus'
+    #'parameters' => 'pCode=31633;31648;31685;31686;31689;31691;31750;31756;50278;50466;50467;50468;51762;51763;61215;84383;84385;90901;90902;90908;31649;31716;31719;31747;31844;84139;90909;99601' # UGLY.
+    #parameters' => 'Escherichia coli;Enterococcus' .
+    #'&ResultAnalyticalMethod.MethodIdentifier=150;507;509;779;3008;3009;3010;' .
+    #'3011;3014;3015;3035;3037;3057;3058;3081;3082;3083;3084;3152;3185;3189;' .
+    #'3191;4660;4662;5165;5166;5167;5256;5300;5677;606210;743234;770793;810609'
+    #'' # 2024-05-20 AnalyticalMethod is unsupported.
+},
+  {
+    'name' => 'nh3_nh4',
+    'units' => 'mg/L',
+    'description' => 'Ammonia/ammonium.',
+    'parameters' => 'Nitrogen, Ammonium (NH4) as N;' .
+                    'Nitrogen, ammonia (NH3) as NH4;' .
+                    'Nitrogen, ammonium (NH4) as NH4'
+  },
+  {
+    'name' => 'nitrite',
+    'units' => 'mg/L',
+    'description' => 'Nitrite as N/NO2.',
+    'parameters' => 'Nitrite as N;' .
+                    'Nitrogen, Nitrite (NO2) as NO2'
+  },
+  {
+    'name' => 'nitrate',
+    'units' => 'mg/L',
+    'description' => 'Nitrate as N/NO3.',
+    'parameters' => 'Nitrate;' .
+                    'Nitrate as N;' .
+                    'Nitrate as NO3;' .
+                    'Nitrogen, Nitrate (NO3) as NO3'
+  },
+  {
+    'name' => 'no2_no3',
+    'units' => 'mg/L',
+    'description' => 'Inorganic nitrogen.',
+    'parameters' => 'Inorganic nitrogen (nitrate and nitrite);' .
+                    'Inorganic nitrogen (nitrate and nitrite) as N'
+  },
+  {
+    'name' => 'organic_carbon',
+    'units' => 'mg/L',
+    'description' => 'Organic carbon.',
+    'parameters' => 'Carbon Fraction, Particulate Organic Material;' .
+                    'Carbon, Total Organic (Toc);' .
+                    'Organic carbon'
+  },
+  {
+    'name' => 'organic_nitrogen',
+    'units' => 'mg/L',
+    'description' => 'Organic nitrogen.',
+    'parameters' => 'Organic Nitrogen;' .
+                    'Organic nitrogen'
+  },
+  {
+    'name' => 'organic_phosphorus',
+    'units' => 'mg/L',
+    'description' => 'Organic phosphorus.',
+    'parameters' => 'Organic phosphorus;' .
+                    'Organic phosphorus as P;' .
+                    'Phosphorus, Particulate Organic'
+  },
+  {
+    'name' => 'pheophytin',
+    'units' => 'ug/L',
+    'description' => 'Pheophytin.',
+    'parameters' => 'Pheophytin a;' .
+                    'Pheophytin-a'
+  },
+  {
+    'name' => 'phosphate',
+    'units' => 'mg/L',
+    'description' => 'Phosphate.',
+    'parameters' => 'Orthophosphate;' .
+                    'Orthophosphate as P;' .
+                    'Orthophosphate as PO4;' .
+                    'Phosphate-phosphorus  as P;' .
+                    'Phosphate-phosphorus  as PO4;' .
+                    'Phosphate-phosphorus as P;' .
+                    'Phosphate-phosphorus as PO4;' .
+                    'Phosphorus, phosphate (PO4) as orthophosphate;' .
+                    'Soluble Reactive Phosphorus (SRP)'
+  },
+  {
+    'name' => 'silicate',
+    'units' => 'mg/L',
+    'description' => 'Silicate.',
+    'parameters' => 'Silicate'
+  },
+  {
+    'name' => 'temperature',
+    'units' => 'C',
+    'description' => 'Water temperature.',
+    'parameters' => 'Temperature, water'
+  },
+  {
+    'name' => 'total_nitrogen',
+    'units' => 'mg/L',
+    'description' => 'Total nitrogen.',
+    'parameters' => 'Kjeldahl nitrogen;' .
+                    'Kjeldahl nitrogen as N;' .
+                    'Nitrogen as N'
+  },
+  {
+    'name' => 'total_phosphorus',
+    'units' => 'mg/L',
+    'description' => 'Total phosphorus.',
+    'parameters' => 'Phosphorus as P'
+  },
+  {
+    'name' => 'secchi_disk_depth',
+    'units' => 'm',
+    'description' => 'Depth that a Secchi disk becomes invisible.',
+    'parameters' => 'Depth, Secchi disk depth'
+  },
+  {
+    'name' => 'par',
+    'units' => 'uE/m2/s',
+    'description' => 'Photosynthetic active radiation at depth.',
+    'parameters' => 'Light Photosynthetic Active Radiation At Depth (PAR)'
+  },
+  {
+    'name' => 'par_depth_surface_ratio',
+    'units' => '%',
+    'description' => 'PAR at Depth/PAR at Surface) x 100.',
+    'parameters' => 'Light (PAR at Depth/PAR at Surface) x 100;' .
+                    'Light, (PAR at depth/PAR at surface) x 100'
+  },
+  {
+    'name' => 'light_transmissivity',
+    'units' => '%',
+    'description' => 'Light Transmissivity.',
+    'parameters' => 'Light Transmissivity'
+  },
+  {
+    'name' => 'light_extinction_coefficient',
+    'units' => '-',
+    'description' => 'Light extinction coefficient.',
+    'parameters' => 'Light Underwater Extinction Coefficient (K);' .
+                    'Light, underwater extinction coefficient (K);' .
+                    'Light attenuation coefficent;' .
+                    'Light attenuation coefficient'
+  },
+  {
+    'name' => 'light_attenuation_depth_at_10_percent',
+    'units' => 'm',
+    'description' => 'Depth where light intensity is 10% less ' .
+                     'than at the surface.',
+    'parameters' => 'Light attenuation, depth at 10%'
+  },
+  {
+    'name' => 'light_attenuation_depth_at_50_percent',
+    'units' => 'm',
+    'description' => 'Depth where light intensity is 50% less ' .
+                     'than at the surface.',
+    'parameters' => 'Light attenuation, depth at 50%'
+  },
+  {
+    'name' => 'light_attenuation_depth_at_99_percent',
+    'units' => 'm',
+    'description' => 'Depth where light intensity is 99% less ' .
+                     'than at the surface.',
+    'parameters' => 'Light attenuation, depth at 99%'
+  },
+  {
+    'name' => 'transparency_tube_disk',
+    'units' => 'm',
+    'description' => 'Depth of water sample in transparent tube obscurs disk.',
+    'parameters' => 'Transparency, tube with disk'
+  },
+  {
+    'name' => 'turbidity',
+    'units' => 'NTU',
+    'description' => 'Clarity of water as measured by a meter in ' .
+                     'nephelometric turbidity units.',
+    'parameters' => 'Turbidity'
+  },
+  {
+    'name' => 'turbidity_ratio',
+    'units' => 'NTRU',
+    'description' => 'Clarity of water as measured by a meter in ' .
+                     'nephelometric turbidity ratio units.',
+    'parameters' => 'Turbidity'
+  },
+  {
+    'name' => 'suspended_sediment',
+    'units' => 'mg/L',
+    'description' => 'Suspended sediment concentration.',
+    'parameters' => 'Suspended sediment concentration (SSC)'
+  },
+  {
+    'name' => 'dissolved_solids',
+    'units' => 'mg/L',
+    'description' => 'Dissolved solids concentration.',
+    'parameters' => 'Total dissolved solids'
+      #'pCode=00515&pCode=00520&pCode=00525&pCode=70300&pCode=70301&pCode=99433'
+  },
+  {
+    'name' => 'suspended_solids',
+    'units' => 'mg/L',
+    'description' => 'Suspended solids concentration.',
+    'parameters' => 'Solids, Total Suspended (TSS);' .
+                    'Solids, Volatile;' .
+                    'Total suspended solids;' .
+                    'Total volatile solids'
+  },
+  {
+    'name' => 'substrate_gravel',
+    'units' => '%',
+    'description' => 'Substrate % gravel.',
+    'parameters' => 'Substrate - gravel&sampleMedia=Sediment'
+  },
+  {
+    'name' => 'substrate_sand',
+    'units' => '%',
+    'description' => 'Substrate % sand.',
+    'parameters' => 'Substrate - sand&sampleMedia=Sediment'
+  },
+  {
+    'name' => 'substrate_silt_clay_mix',
+    'units' => '%',
+    'description' => 'Substrate % silt/clay mix.',
+    'parameters' => 'Substrate - silt/clay mix&sampleMedia=Sediment'
+  },
+  {
+    'name' => 'substrate_silt',
+    'units' => '%',
+    'description' => 'Substrate % silt.',
+    'parameters' => 'Substrate - silt&sampleMedia=Sediment'
+  },
+  {
+    'name' => 'substrate_clay',
+    'units' => '%',
+    'description' => 'Substrate % clay.',
+    'parameters' => 'Substrate - clay&sampleMedia=Sediment'
+  },
+  {
+    'name' => 'substrate_organic_carbon',
+    'units' => '%',
+    'description' => 'Substrate % organic carbon.',
+    'parameters' => 'Organic carbon&sampleMedia=Sediment'
+  },
+);
+
+
+################################## VARIABLES #################################
+
+
+# Parsed from the URL query string:
+
+my $service  = ''; # wcs.
+my $version  = ''; # 1.0.0.
+my $request  = ''; # getcapabilities or describecoverage or getcoverage.
+my $coverage = ''; # Saved until time has been parsed.
+my $variable = ''; # o3, ...
+my $format   = ''; # ascii.
+my $time     = ''; # E.g., 2001-08-29t00:00:00z/2001-08-31t23:59:59z.
+my $bbox     = ''; # E.g., -90,28,-80,32,1,1. Where 1,1 means layer 1 only.
+
+# Derived from the above parsed values:
+
+my @bounds = split( /,/, '-180,-90,180,90' );
+my $starting_timestamp = 0;  # yyyymmddhh, e.g., 2005082600.
+my $ending_timestamp   = 0;  # yyyymmddhh, e.g., 2005082600.
+my $hours              = 0;  # E.g., 5 days = 5 x 24 = 120.
+my $days               = 0;  # E.g., 5.
+my $ending_yyyymmdd    = 0;  # yyyymmdd, e.g., 20050826.
+my @stations_info = ();
+my $coverage_units = '';
+my $remote_queries = 0; # Number of calls to remote web service.
+
+################################## ROUTINES ##################################
+
+
+main();
+
+
+sub main {
+  my $result = 0;
+
+  if ( ! parse_url() ) {
+    print "Content-type: text/plain; charset=iso-8859-1\n\n"; # For webserver
+  } elsif ( $request eq 'getcapabilities' ) {
+    print "Content-type: text/xml; charset=iso-8859-1\n\n"; # For webserver
+    print_capabilities();
+    $result = 1;
+  } elsif ( $request eq 'describecoverage' ) {
+    print "Content-type: text/xml; charset=iso-8859-1\n\n"; # For webserver
+    print_coverage_description();
+    $result = 1;
+  } elsif ( $request eq 'getcoverage' ) {
+    compute_time_range();
+    print "Content-type: $content_types{ $format }; charset=iso-8859-1\n\n";
+    my @output = do_queries(); # Query remote web service many times...
+    my $count = @output;
+    debug( "$remote_queries calls to remote webservice yielded $count values.");
+
+    print "$count\n"; # Print number of data lines to follow.
+
+    if ( $count > 0 ) {
+      $result = 1;
+
+      # Print header line:
+
+      if ( $coverage eq 'station' ) {
+        print "start(yyyymmdd)\tlongitude(deg)\tlatitude(deg)" .
+              "\tstation_id(-)\tstation_name(-)\n";
+      } else {
+        print "timestamp(UTC)\tlongitude(deg)\tlatitude(deg)" .
+              "\tdepth(m)\tstation_id(-)\t$coverage($coverage_units)" .
+              "\tstation_name(-)\n";
+      }
+
+      # Print data lines:
+
+      for ( my $i = 0; $i < $count; ++$i ) {
+        print "$output[ $i ]\n";
+      }
+    }
+  }
+
+  $result = 1 - $result; # UNIX: zero is success, non-zero is failure.
+  debug( "exit result = $result" );
+  exit $result;
+}
+
+
+
+# Print web server capabilities metadata.
+
+sub print_capabilities {
+  print '<?xml version="1.0" encoding="UTF-8" ?>' . "\n";
+  print '<WCS_Capabilities version="1.0.0" ';
+  print 'xmlns="https://www.opengeospatial.org/standards/wcs" ';
+  print 'xmlns:gml="https://www.opengis.net//gml" ';
+  print 'xmlns:xlink="https://www.w3.org/1999/xlink">';
+  print '
+    <Service>
+        <metadataLink xlink:type="simple" xlink:href=" https://www.epa.gov/rsig" metadataType="other" />
+        <description>EPA WQP Web Server 1.0.0</description>
+        <name>EPA_WQP_OGC_WCS_1.0.0</name>
+        <label>EPA WQP Web Server 1.0.0</label>
+        <keywords>
+            <keyword>EPA</keyword>
+            <keyword>WQP</keyword>
+            <keyword>interoperability</keyword>
+        </keywords>
+        <responsibleParty>
+            <individualName>Todd Plessel</individualName>
+            <organisationName>EPA Vislab</organisationName>
+            <contactInfo>
+                <onlineResource xlink:type="simple" xlink:href="mailto:plessel.todd@epa.gov" />
+            </contactInfo>
+        </responsibleParty>
+        <fees>NONE</fees>
+        <accessConstraints>NONE</accessConstraints>
+    </Service>
+    <Capability>
+        <Request>
+            <GetCapabilities>
+                <DCPType>
+                    <HTTP>
+                        <Get>
+                            <OnlineResource xlink:type="simple" xlink:href="https://ofmpub.epa.gov/rsig/wqpserver?" />
+                        </Get>
+                        <Post>
+                            <OnlineResource xlink:type="simple" xlink:href="https://ofmpub.epa.gov/rsig/wqpserver" />
+                        </Post>
+                    </HTTP>
+                </DCPType>
+            </GetCapabilities>
+            <DescribeCoverage>
+                <DCPType>
+                    <HTTP>
+                        <Get>
+                            <OnlineResource xlink:type="simple" xlink:href="https://ofmpub.epa.gov/rsig/wqpserver?" />
+                        </Get>
+                        <Post>
+                            <OnlineResource xlink:type="simple" xlink:href="https://ofmpub.epa.gov/rsig/wqpserver" />
+                        </Post>
+                    </HTTP>
+                </DCPType>
+            </DescribeCoverage>
+            <GetCoverage>
+                <DCPType>
+                    <HTTP>
+                        <Get>
+                            <OnlineResource xlink:type="simple" xlink:href="https://ofmpub.epa.gov/rsig/wqpserver?" />
+                        </Get>
+                        <Post>
+                            <OnlineResource xlink:type="simple" xlink:href="https://ofmpub.epa.gov/rsig/wqpserver" />
+                        </Post>
+                    </HTTP>
+                </DCPType>
+            </GetCoverage>
+        </Request>
+        <Exception>
+            <Format>text/xml; charset="utf-8"</Format>
+        </Exception>
+    </Capability>
+    <ContentMetadata version="1.0.0">';
+  print "\n";
+
+  my $variable_count = @metadata;
+
+  for ( my $variable = 0; $variable < $variable_count; ++$variable ) {
+    my $name = $metadata[ $variable ]->{ name };
+
+    if ( $name ne '?' ) {
+      my $units = $metadata[ $variable ]->{ units };
+      my $description = $metadata[ $variable ]->{ description };
+      print "        <CoverageOfferingBrief>\n";
+      print "            <name>$name</name>\n";
+      print "            <label>$name($units)</label>\n";
+      print "            <description>$description</description>\n";
+      print '            <lonLatEnvelope srsName="WGS84(DD)">';
+      print "\n";
+      print "                <gml:pos>-126 22</gml:pos>\n";
+      print "                <gml:pos>-65 50</gml:pos>\n";
+      print "            </lonLatEnvelope>\n";
+      print "        </CoverageOfferingBrief>\n";
+    }
+  }
+
+  print "    </ContentMetadata>\n";
+  print "</WCS_Capabilities>\n";
+}
+
+
+
+# Print web server coverage description metadata.
+
+sub print_coverage_description {
+  print '<?xml version="1.0" encoding="UTF-8" ?>';
+  print '<CoverageDescription version="1.0.0" ';
+  print 'xmlns="https://www.opengeospatial.org/standards/wcs" ';
+  print 'xmlns:gml="https://www.opengis.net/gml" ';
+  print 'xmlns:xlink="https://www.w3.org/1999/xlink">';
+  print "\n";
+
+  my $variable_count = @metadata;
+
+  for ( my $variable = 0; $variable < $variable_count; ++$variable ) {
+    my $name = $metadata[ $variable ]->{ name };
+
+    if ( $name ne '?' ) {
+      my $units = $metadata[ $variable ]->{ units };
+      my $description = $metadata[ $variable ]->{ description };
+
+      if ( $coverage eq '' || $coverage eq $name ) {
+        print "    <CoverageOffering>\n";
+        print "        <name>$name</name>\n";
+        print "        <label>$name($units)</label>\n";
+        print "        <description>$description</description>\n";
+        print "        <domainSet>\n";
+        print "            <spatialDomain>\n";
+        print '                <gml:Envelope srsName="WGS84(DD)">';
+        print "\n";
+        print "                    <gml:pos>-126 22</gml:pos>\n";
+        print "                    <gml:pos>-65 50</gml:pos>\n";
+        print "                </gml:Envelope>\n";
+        print "            </spatialDomain>\n";
+        print "            <temporalDomain>\n";
+        print "                <timePeriod>\n";
+        print "                    <beginPosition>19940501";
+        print "T00:00:00Z</beginPosition>\n";
+        print "                    <timeResolution>PT1Y</timeResolution>\n";
+        print "                </timePeriod>\n";
+        print "            </temporalDomain>\n";
+        print "        </domainSet>\n";
+        print "        <rangeSet>\n";
+        print "            <RangeSet>\n";
+        print "                <name>$name</name>\n";
+        print "                <label>$name($units)</label>\n";
+        print "                <description>$description</description>";
+        print '
+                <nullValues>
+                    <singleValue>-99</singleValue>
+                </nullValues>
+            </RangeSet>
+        </rangeSet>
+        <supportedCRSs>
+            <requestResponseCRSs>CRS:84</requestResponseCRSs>
+            <nativeCRSs>CRS:84</nativeCRSs>
+        </supportedCRSs>
+        <supportedFormats>
+            <formats>ASCII</formats>
+        </supportedFormats>
+        <supportedInterpolations>
+            <interpolationMethod>mean mode</interpolationMethod>
+        </supportedInterpolations>
+    </CoverageOffering>
+';
+
+      }
+    }
+  }
+
+  print "</CoverageDescription>\n";
+}
+
+
+
+# Parse URL parameters into variables.
+
+sub parse_url {
+  use CGI qw/ untaint /;     # Load Safe untainting CGI routines.
+  $CGI::DISABLE_UPLOADS = 1; # Disable uploads.
+  $CGI::POST_MAX = 1024;     # Limit posts to 1024 bytes.
+  my $query = new CGI;       # Parse QUERY_STRING.
+  %ENV = ();                 # Unset all environment variables.
+  my @names = $query->param; # Extract names of parameters.
+  my $count = @names;
+  my $result = 0;
+  debug( "$program_name @names ($count)" );
+
+  for ( my $parameter = 0; $parameter < $count; ++$parameter) {
+    $_ = $names[ $parameter ];                # $_ is tainted.
+    s/[^A-Za-z]/_/go;                         # Untaint $_.
+    my $option = $_;                          # $option is untainted.
+    $_ = $query->param( $option );            # $_ is tainted.
+    s/[^\w\-.,:\/]/_/go;                      # Untaint $_.
+    my $value = $_;                           # $value is untainted.
+    my $lowercase_option = lc( $option );
+    my $lowercase_value  = lc( $value );
+    debug( "$lowercase_option $lowercase_value" );
+
+    if ( $parsers{ $lowercase_option } ) {
+      $result = $parsers{ $lowercase_option }->( $lowercase_value );
+    } else {
+      print STDERR "\nInvalid option: '$option'\n";
+      $result = 0;
+    }
+
+    if ( ! $result ) {
+      $parameter = $count; # Finish looping.
+    }
+  }
+
+  $result = $result && required_options_specified();
+  return $result;
+}
+
+
+
+# Parse service option.
+
+sub parse_service_option {
+  my $value = shift;
+  my $result = parse_option( $service, $value, 'SERVICE', 'wcs' );
+  return $result;
+}
+
+
+
+# Parse version option.
+
+sub parse_version_option {
+  my $value = shift;
+  my $result = parse_option( $version, $value, 'VERSION', '1.0.0' );
+  return $result;
+}
+
+
+
+# Parse request option.
+
+sub parse_request_option {
+  my $value = shift;
+  my $result = parse_option( $request, $value, 'REQUEST',
+                             'getcoverage getcapabilities describecoverage' );
+  return $result;
+}
+
+
+
+# Parse format option:
+
+sub parse_format_option {
+  my $value = shift;
+  my $result =
+    parse_option( $format, $value, 'FORMAT', 'ascii' );
+  return $result;
+}
+
+
+
+# Parse coverage option.
+
+sub parse_coverage_option {
+  my $value = shift;
+  my $result = 0;
+
+  if ( $coverage ne '' ) {
+    print STDERR "\nRedundant COVERAGE option: '$value'\n";
+  } else {
+    my $variable_count = @metadata;
+
+    for ( my $variable = 0; $coverage eq '' && $variable < $variable_count;
+          ++$variable ) {
+      my $name = $metadata[ $variable ]->{ name };
+
+      if ( $name ne '?' ) {
+
+        if ( $name eq $value ) {
+          $coverage = $name;
+          $coverage_units = $metadata[ $variable ]->{ units };
+          $result = 1;
+        }
+      }
+    }
+
+    if ( ! $result ) {
+      print STDERR "\nInvalid COVERAGE option: '$value'\n";
+    }
+  }
+
+  return $result;
+}
+
+
+
+# Parse time option.
+
+sub parse_time_option {
+  my $value = shift;
+  my $result = 0;
+
+  if ( $time ne '' ) {
+    print STDERR "\nRedundant TIME option: '$value'\n";
+  } else {
+    $time = $value;
+    my $is_valid = is_valid_time( $time );
+
+    if ( ! $is_valid ) {
+      print STDERR "\nInvalid TIME option: '$value'\n";
+    } else {
+      $result = 1;
+    }
+  }
+
+  return $result;
+}
+
+
+
+# Parse bbox option.
+
+sub parse_bbox_option {
+  my $value = shift;
+  my $result = 0;
+
+  if ( $bbox ne '' ) {
+    print STDERR "\nRedundant BBOX option: '$value'\n";
+  } else {
+    $bbox = $value;
+    @bounds = split( /,/, $bbox );
+    my $bounds_count = @bounds;
+
+    if ( $bounds_count != 4 && $bounds_count != 6 ) {
+      print STDERR "\nInvalid bbox option: '$value'\n";
+    } elsif ( ! in_range( $bounds[ 0 ], -180.0, 180.0 ) ) {
+      print STDERR "\nInvalid bbox option: '$bounds[ 0 ]'\n";
+    } elsif ( ! in_range( $bounds[ 1 ], -90.0, 90.0 ) ) {
+      print STDERR "\nInvalid bbox option: '$bounds[ 1 ]'\n";
+    } elsif ( ! in_range( $bounds[ 2 ], $bounds[ 0 ], 180.0 ) ) {
+      print STDERR "\nInvalid bbox option: '$bounds[ 2 ]'\n";
+    } elsif ( ! in_range( $bounds[ 3 ], $bounds[ 1 ], 90.0 ) ) {
+      print STDERR "\nInvalid bbox option: '$bounds[ 3 ]'\n";
+    } else {
+      $result = 1;
+    }
+  }
+
+  return $result;
+}
+
+
+# Check that all required 'options' have been specified:
+
+sub required_options_specified {
+  my $result = 0;
+
+  if ( $service eq '' ) {
+    print STDERR "\nMissing option: 'SERVICE'\n";
+  } elsif ( $version eq '' ) {
+    print STDERR "\nMissing option: 'VERSION'\n";
+  } elsif ( $request eq '' ) {
+    print STDERR "\nMissing option: 'REQUEST'\n";
+  } elsif ( $request eq 'getcoverage' ) {
+
+    if ( $format eq '' ) {
+      print STDERR "\nMissing option: 'FORMAT'\n";
+    } elsif ( $time eq '' ) {
+      print STDERR "\nMissing option: 'TIME'\n";
+    } elsif ( $bbox eq '' ) {
+      print STDERR "\nMissing option: 'BBOX'\n";
+    } elsif ( $coverage eq '' ) {
+      print STDERR "\nMissing option: 'COVERAGE'\n";
+    } else {
+      $result = 1;
+    }
+  } else {
+    $result = 1;
+  }
+
+  return $result;
+}
+
+
+
+# Compute starting_timestamp and hours.
+# inputs:  $time = '2001-08-26t00:00:00z/2001-08-31t23:59:59z'
+# outputs: $starting_timestamp = 2005082600
+#          $hours = 120
+#          $days = 5
+
+sub compute_time_range {
+  my $yyyy1 = substr( $time, 0, 4 );
+  my $mm1   = substr( $time, 5, 2 );
+  my $dd1   = substr( $time, 8, 2 );
+  my $hh1   = substr( $time, 11, 2 );
+  my $i     = index( $time, '/' );
+
+  $starting_timestamp = integer_timestamp( $yyyy1, $mm1, $dd1, $hh1 );
+  $ending_yyyymmdd = $starting_timestamp / 100;
+  $hours = 1;
+  $days = 1;
+
+  if ( $i != -1 ) {
+    ++$i;
+    my $yyyy2 = substr( $time, $i + 0, 4 );
+    my $mm2   = substr( $time, $i + 5, 2 );
+    my $dd2   = substr( $time, $i + 8, 2 );
+    my $hh2   = substr( $time, $i + 11, 2 );
+    my $yyyy  = $yyyy1;
+    my $mm    = $mm1;
+    my $dd    = $dd1;
+    my $hh    = $hh1;
+    my $previous_dd = $dd1;
+
+    while ( integer_timestamp( $yyyy, $mm, $dd, $hh ) !=
+            integer_timestamp( $yyyy2, $mm2, $dd2, $hh2 ) ) {
+      increment_timestamp( $yyyy, $mm, $dd, $hh );
+
+      if ( $dd ne $previous_dd ) {
+        ++$days;
+        $previous_dd = $dd;
+        $ending_yyyymmdd = $yyyy * 10000 + $mm * 100 + $dd;
+      }
+
+      ++$hours;
+    }
+  }
+}
+
+
+
+# Get query parameters and units that correspond to $coverage:
+
+sub get_parameters_units {
+  my @result = ();
+  my $variable_count = @metadata;
+
+  for ( my $variable = 0; $variable < $variable_count; ++$variable ) {
+    my $name = $metadata[ $variable ]->{ name };
+
+    if ( $coverage eq $name ) {
+      @result = ( $metadata[ $variable ]->{ parameters },
+                  $metadata[ $variable ]->{ units } );
+      $variable = $variable_count; # Stop looping.
+    }
+  }
+
+  return @result;
+}
+
+
+
+# Execute many queries to remote web service to obtain sorted array of
+# timestamp longitude latitude station value
+# for all stations in bbox reporting value within time-range.
+# my @result = do_queries();
+
+sub do_queries {
+  my $yyyymmdd1 = substr( $starting_timestamp, 0, 8 );
+  my $yyyymmdd2 = $ending_yyyymmdd;
+  my @result = ();
+
+  if ( $coverage eq 'station' ) {
+    @result = query_stations();
+    my $count = @result;
+    debug( "$count station points parsed." );
+  } else {
+    my ( $parameter, $units ) = get_parameters_units();
+    @result = query_data( $yyyymmdd1, $yyyymmdd2, $parameter, $units, @bounds );
+    my $count = @result;
+    debug( "$count data points parsed." );
+  }
+
+  return @result;
+}
+
+
+
+# query external web service for prameter data.
+# my @data = query_data( $yyyymmdd1, $yyyymmdd2, $parameter, @bounds );
+
+sub query_data {
+  my ( $yyyymmdd1, $yyyymmdd2, $parameter, $units, @bounds ) = @_;
+  my $yyyy1 = substr( $yyyymmdd1, 0, 4 );
+  my $mm1   = substr( $yyyymmdd1, 4, 2 );
+  my $dd1   = substr( $yyyymmdd1, 6, 2 );
+  my $yyyy2 = substr( $yyyymmdd2, 0, 4 );
+  my $mm2   = substr( $yyyymmdd2, 4, 2 );
+  my $dd2   = substr( $yyyymmdd2, 6, 2 );
+
+  # Since the WQP uses local time instead of UTC, extend query time range:
+
+  decrement_date( $yyyy1, $mm1, $dd1 );
+  increment_date( $yyyy2, $mm2, $dd2 );
+
+  my $date_start = sprintf( "%02d-%02d-%04d", $mm1, $dd1, $yyyy1 );
+  my $date_end   = sprintf( "%02d-%02d-%04d", $mm2, $dd2, $yyyy2 );
+
+  my $is_pcode = index( $parameter, "pCode=" ) != -1;
+  my $encoded_parameter = $parameter;
+
+  if ( $is_pcode ) {
+    $encoded_parameter = '&' . $encoded_parameter;
+  } else {
+
+    # The new webservice does not handle multiple semi-colon-delimited values
+    # of characteristicName=. Instead change each of these semi-colons to
+    # an additional &characteristicName=
+    # but copy any remaining part of the parameter that might contain
+    # semi-colons such as &ResultAnalyticalMethod.MethodIdentifier=150;507;...
+    # UGLY.
+
+    my $amp = index( $parameter, '&' );
+
+    if ( $amp == -1 ) {
+      $encoded_parameter =~ s/;/&characteristicName=/g;
+    } else {
+      $encoded_parameter = substr( $parameter, 0, $amp );
+      $encoded_parameter =~ s/;/&characteristicName=/g;
+      $encoded_parameter .= substr( $parameter, $amp );
+    }
+
+    $encoded_parameter = '&characteristicName=' . $encoded_parameter;
+  }
+
+  $encoded_parameter =~ s/%/%25/g; # HTML-encode %.
+  $encoded_parameter =~ s/ /%20/g; # HTML-encode spaces.
+
+  my $command =
+    $curl_command . $encoded_parameter .
+    "&startDateLo=$date_start&startDateHi=$date_end" .
+    "&bBox=$bounds[0],$bounds[1],$bounds[2],$bounds[3]'";
+
+  my $result = '';
+  my $the_pipe = 0;
+
+  # Untaint command (match expression is arbitrary as far as -T is concerned):
+
+  if ( $command =~ m#^(/[\w-]+/[\w -/.,':?=&;\(\) %]+)$# ) {
+    $command = $1; # Re-assign first match, which is enough to satisfy -T.
+    debug( "$0 executing command = $command" );
+    %ENV = (); # Unset all environment variables prior to popen.
+    # Complicated, supposedly safer way to open a readable pipe to command:
+    my $pid = open( the_pipe, "-|" );
+
+    if ( ! defined( $pid ) ) {
+      die "Couldn't open pipe to subprocess";
+    } elsif ( $pid ) { # Parent process.
+      ++$remote_queries;
+      debug( "reading result rows..." );
+      my $line = <the_pipe>; # Read and skip header line.
+
+      if ( defined( $line ) ) { # If remote web service returned a line.
+        debug( "header line = $line\n" );
+        my @column_indices = parse_data_header_line( $line );
+        debug( "data column indices: @column_indices\n" );
+
+        while ( $line = <the_pipe> ) { # Read and process data lines.
+          my @data_row =
+            parse_data_line( $line, $yyyymmdd1, $yyyymmdd2,
+                             $parameter, $units, @column_indices );
+          my $count = @data_row;
+
+          if ( $count == 7 ) {
+            my $timestamp = $data_row[ 0 ];
+            my $longitude = $data_row[ 1 ];
+            my $latitude  = $data_row[ 2 ];
+            my $z         = $data_row[ 3 ];
+            my $id        = $data_row[ 4 ];
+            my $value     = $data_row[ 5 ];
+            my $sid       = $data_row[ 6 ];
+            $result .=
+              "$timestamp\t$longitude\t$latitude\t$z\t$id\t$value\t$sid\n";
+          }
+        }
+      }
+
+      close( the_pipe ); # or die $!;
+    } else { # Child process.
+      exec( $command ) or die "can't exec program: $!";
+    }
+  } else {
+    print STDERR "\n$0: command contains invalid characters.\n";
+  }
+
+  my @sorted_result = sort split( /\n/, $result );
+  return @sorted_result;
+}
+
+
+
+# query external web service for station lon-lats matching bounds
+# my @result = query_stations();
+
+sub query_stations {
+  my $yyyymmdd = substr( $starting_timestamp, 0, 8 );
+  my $command = $curl_command;
+  $command =~ s/Result/Station/; # Query station web service instead of data.
+  $command =~ s/&dataProfile=fullPhysChem//;
+  $command .= "&bBox=$bounds[0],$bounds[1],$bounds[2],$bounds[3]";
+  $command .= "'";
+
+  my $station_result = '';
+  my $the_pipe = 0;
+
+  # Untaint command (match expression is arbitrary as far as -T is concerned):
+
+  if ( $command =~ m#^(/[\w-]+/[\w -/.,':?=&;\(\) %]+)$# ) {
+    $command = $1; # Re-assign first match, which is enough to satisfy -T.
+    debug( "$0 executing command = $command" );
+    %ENV = (); # Unset all environment variables prior to popen.
+    # Complicated, supposedly safer way to open a readable pipe to command:
+    my $pid = open( the_pipe, "-|" );
+
+    if ( ! defined( $pid ) ) {
+      die "Couldn't open pipe to subprocess";
+    } elsif ( $pid ) { # Parent process.
+      ++$remote_queries;
+      debug( "reading station rows..." );
+      my $line = <the_pipe>; # Read and skip header line.
+
+      if ( defined( $line ) ) { # If remote web service returned a line.
+        debug( "header line = $line\n" );
+        my @column_indices = parse_station_header_line( $line );
+        debug( "station column indices: @column_indices\n" );
+
+        while ( $line = <the_pipe> ) { # Read and process station lines.
+          my @row = parse_station_line( $line, @column_indices );
+          my $count = @row;
+
+          if ( $count == 4 ) {
+            my $id        = $row[ 0 ];
+            my $longitude = $row[ 1 ];
+            my $latitude  = $row[ 2 ];
+            my $sid       = $row[ 3 ];
+            $station_result .= "$yyyymmdd\t$longitude\t$latitude\t$id\t$sid\n";
+          }
+        }
+      }
+
+      close( the_pipe ) or die $!;
+    } else { # Child process.
+      exec( $command ) or die "can't exec program: $!";
+    }
+  } else {
+    print STDERR "\n$0: command contains invalid characters.\n";
+  }
+
+  my @sorted_station_result = sort split( /\n/, $station_result );
+  my @sorted_result = @sorted_station_result;
+  return @sorted_result;
+}
+
+
+
+# Set longitude and latitude of entries with matching station_name.
+# @result = filter_stations( @data_result, @station_result )
+
+sub filter_stations {
+  my ( $data_result, $station_result ) = @_;
+  my $data_count = @$data_result;
+  my $station_count = @$station_result;
+  my $previous_sid = '';
+  my $longitude = -9999;
+  my $latitude  = -9999;
+  my @result = ();
+
+  for ( my $d = 0; $d < $data_count; ++$d ) {
+    my @data_parts = split( /\t/, $data_result->[ $d ] );
+    my $timestamp = $data_parts[ 0 ];
+    my $z         = $data_parts[ 3 ];
+    my $id        = $data_parts[ 4 ];
+    my $value     = $data_parts[ 5 ];
+    my $sid       = $data_parts[ 6 ];
+
+    if ( $sid ne $previous_sid ) {
+      ( $longitude, $latitude ) = find_station( $sid, $station_result );
+      $previous_sid = $sid;
+    }
+
+    if ( $longitude != -9999 ) {
+      push( @result,
+            "$timestamp\t$longitude\t$latitude\t$z\t$id\t$value\t$sid" );
+    }
+  }
+
+  return @result;
+}
+
+
+
+# Find station matching sid and return its longitude, latitude:
+# my ( $longitude, $latitude ) = find_station( $sid, @station_results );
+
+sub find_station {
+  my ( $sid, $station_result ) = @_;
+  my $station_count = @$station_result;
+  my $longitude = -9999;
+  my $latitude  = -9999;
+
+  # Remove any added ';' ending of data sid before comparing to station sid
+  my $semi_colon = index( $sid, ';' );
+
+  if ( $semi_colon > 1 ) {
+    $sid = substr( $sid, 0, $semi_colon );
+  }
+
+  for ( my $s = 0; $s < $station_count; ++$s ) {
+    my @station_parts = split( /\t/, $station_result->[ $s ] );
+    my $station_sid = $station_parts[ 4 ];
+    #debug( "data sid = '$sid', station sid = '$station_sid'" );
+
+    if ( $station_sid eq $sid ) {
+      $longitude = $station_parts[ 1 ];
+      $latitude  = $station_parts[ 2 ];
+      $s = $station_count; # Stop looping on stations.
+    }
+  }
+
+  return ( $longitude, $latitude );
+}
+
+
+
+# Parse data header_line from remote web service.
+# my @column_indices = parse_header_line($line);
+
+sub parse_data_header_line {
+  my $line = shift;
+  my @parts = split( /,/, $line );
+  my $parts_count = @parts;
+  my @result = ( -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1 );
+  my $found = 0;
+
+  if ( $parts_count >= 12 ) {
+
+    for ( my $index = 0; $index < $parts_count; ++$index ) {
+      my $column_name = $parts[ $index ];
+
+      if ( $column_name eq $YYYY_MM_DD_STRING ) {
+        $result[ $YYYY_MM_DD ] = $index;
+        $found += 1;
+      } elsif ( $column_name eq $HH_MM_SS_STRING ) {
+        $result[ $HH_MM_SS ] = $index;
+        $found += 1;
+      } elsif ( $column_name eq $TIME_ZONE_STRING ) {
+        $result[ $TIME_ZONE ] = $index;
+        $found += 1;
+      } elsif ( $column_name eq $LONGITUDE_STRING ) {
+        $result[ $LONGITUDE ] = $index;
+        $found += 1;
+      } elsif ( $column_name eq $LATITUDE_STRING ) {
+        $result[ $LATITUDE ] = $index;
+        $found += 1;
+      } elsif ( $column_name eq $DEPTH_STRING ) {
+        $result[ $DEPTH ] = $index;
+        $found += 1;
+      } elsif ( $column_name eq $DEPTH_UNITS_STRING ) {
+        $result[ $DEPTH_UNITS ] = $index;
+        $found += 1;
+      } elsif ( $column_name eq $SID_STRING ) {
+        $result[ $SID ] = $index;
+        $found += 1;
+      } elsif ( $column_name eq $MEASURE_NAME_STRING ) {
+        $result[ $MEASURE_NAME ] = $index;
+        $found += 1;
+      } elsif ( $column_name eq $MEASURE_STRING ) {
+        $result[ $MEASURE_VALUE ] = $index;
+        $found += 1;
+      } elsif ( $column_name eq $MEASURE_VALUE_STRING ) {
+        $result[ $MEASURE_VALUE ] = $index;
+        $found += 1;
+      } elsif ( $column_name eq $MEASURE_UNITS_STRING ) {
+        $result[ $MEASURE_UNITS ] = $index;
+        $found += 1;
+      } elsif ( $column_name eq $METHOD_STRING ) {
+        $result[ $METHOD ] = $index;
+        $found += 1;
+      }
+    }
+  }
+
+  my $result_count = @result;
+
+  if ( $found != $result_count ) {
+    die "Unmatched data header column names: @result\n";
+  }
+
+  return @result;
+}
+
+
+# Parse station header_line from remote web service.
+# my @column_indices = parse_station_header_line($line);
+
+sub parse_station_header_line {
+  my $line =shift;
+  my @parts = split( /,/, $line );
+  my $parts_count = @parts;
+  my @result = ( -1, -1, -1 );
+  my $found = 0;
+
+  if ( $parts_count >= 3 ) {
+
+    for ( my $index = 0; $index < $parts_count; ++$index ) {
+      my $column_name = $parts[ $index ];
+
+      if ( $column_name eq $STATION_LONGITUDE_STRING ) {
+        $result[ $STATION_LONGITUDE ] = $index;
+        $found += 1;
+      } elsif ( $column_name eq $STATION_LATITUDE_STRING ) {
+        $result[ $STATION_LATITUDE ] = $index;
+        $found += 1;
+      } elsif ( $column_name eq $STATION_SID_STRING ) {
+        $result[ $STATION_SID ] = $index;
+        $found += 1;
+      }
+    }
+  }
+
+  my $result_count = @result;
+
+  if ( $found != $result_count ) {
+    die "Unmatched station header column names: @result\n";
+  }
+
+  return @result;
+}
+
+
+
+# Parse a line of data from remote web service.
+# my @row = parse_data_line( $line, $yyyymmdd1, $yyyymmdd2, $parameter, $units,
+#                            @column_indices );
+
+sub parse_data_line {  
+  my $line = shift;
+  my $yyyymmdd1 = shift;
+  my $yyyymmdd2 = shift;
+  my $parameter = shift;
+  my $units = shift;
+  my @column_indices = @_;
+  my $edited_line = $line;
+  # Erase "[" and "]" from problematic columns like ,"[""AL_PBCI""]",
+  $edited_line =~ s/"\["//g;
+  $edited_line =~ s/"\]"//g;
+  $edited_line = erase_double_quoted_commas_and_quotes( $edited_line );
+  my @parts = split( /,/, $edited_line );
+  my $parts_count = @parts;
+  my @result = ();
+  my $max = -1;
+  debug( "parse_data_line():\n" );
+  debug( "  line: $line\n" );
+  debug( "  yyyymmdd1: $yyyymmdd1\n" );
+  debug( "  yyyymmdd2: $yyyymmdd2\n" );
+  debug( "  parameter: $parameter\n" );
+  debug( "  units: $units\n" );
+  debug( "  column_indices: @column_indices\n" );
+  debug( "  edited_line: $edited_line\n" );
+  debug( "  parts_count = $parts_count\n" );
+
+  for ( @column_indices ) {
+    $max = $_ if $_ > $max;
+  }
+
+  my $column_count = @column_indices;
+
+  debug( "column_count = $column_count, max = $max\n" );
+
+  if ( $column_count == 12 && $parts_count > $max ) {
+    my $measure_name = $parts[ $column_indices[ $MEASURE_NAME ] ];
+    $measure_name =~ s/"//g; #"
+    my $edited_parameter = $parameter;
+    $edited_parameter =~ s/,/ /g; # Erase commas to match edited line.
+    debug( "index( '$edited_parameter', '$measure_name' )" );
+
+    if ( index( $parameter, 'pCode=' ) != -1 ||
+         index( $edited_parameter, $measure_name ) != -1 ) { # Matches?
+
+      debug( "parameter name matches" );
+
+      # Extract other relevant fields:
+
+      my $yyyy_mm_dd    = $parts[ $column_indices[ $YYYY_MM_DD ] ];
+      my $hh_mm_ss      = $parts[ $column_indices[ $HH_MM_SS ] ];
+      my $time_zone     = $parts[ $column_indices[ $TIME_ZONE ] ];
+      my $longitude     = $parts[ $column_indices[ $LONGITUDE ] ];
+      my $latitude      = $parts[ $column_indices[ $LATITUDE ] ];
+      my $depth         = $parts[ $column_indices[ $DEPTH ] ];
+      my $depth_units   = $parts[ $column_indices[ $DEPTH_UNITS ] ];
+      my $sid           = $parts[ $column_indices[ $SID ] ];
+      my $measure_name  = $parts[ $column_indices[ $MEASURE_NAME ] ];
+      my $measure       = $parts[ $column_indices[ $MEASURE_VALUE ] ];
+      my $measure_units = $parts[ $column_indices[ $MEASURE_UNITS ] ];
+      my $method        = $parts[ $column_indices[ $METHOD ] ];
+
+      $method =~ s/\s+/_/g; # Collapse consecutive spaces to _.
+      $sid =~ s/\s+/_/g; # Collapse consecutive spaces to _.
+      $measure_units =~ s/\s+//g; # Remove any spaces from units.
+
+      debug( "yyyy_mm_dd = '$yyyy_mm_dd'" );
+      debug( "hh_mm_ss = '$hh_mm_ss'" );
+      debug( "time_zone = '$time_zone'" );
+      debug( "longitude = '$longitude'" );
+      debug( "latitude = '$latitude'" );
+      debug( "depth = '$depth'" );
+      debug( "depth_units = '$depth_units'" );
+      debug( "measure = '$measure'" );
+      debug( "measure_units = '$measure_units'" );
+      debug( "method = '$method'" );
+      debug( "sid = '$sid'" );
+
+      if ( $measure ne '' && $measure ne '999999.0' && $measure ne '.' ) {
+
+        # Remove any remaining double-quotes:
+
+        $yyyy_mm_dd =~ s/"//g; #"
+        $hh_mm_ss =~ s/"//g; #"
+        $time_zone =~ s/"//g; #"
+        $depth =~ s/"//g; #"
+        $depth_units =~ s/"//g; #"
+        $sid =~ s/"//g; #"
+        $measure =~ s/"//g; #"
+        $measure =~ s/<1/0/g; # HACK change <1 to 0.
+        $measure =~ s/<//g; # HACK change <5 to 5.
+        $measure =~ s/>//g; # HACK change >1234 to 1234.
+        $measure =~ s/ //g; # HACK change "1,400" -> "1 400" to 1400.
+
+        # Filter-out non-numeric values such as Nan or Not reported:
+
+        my $c1 = lc( substr( $measure, 0, 1 ) );
+
+        if ( $c1 lt '0' || $c1 gt '9' ) {
+          $measure = -9999;
+        }
+
+        $c1 = lc( substr( $depth, 0, 1 ) );
+
+        if ( $c1 ne '-' && ( $c1 lt '0' || $c1 gt '9') ) {
+          $depth = 0;
+        }
+
+        $measure_units =~ s/"//g; #"
+        $depth_units =~ s/"//g; #"
+
+        if ( length( $yyyy_mm_dd ) == 10 && length( $hh_mm_ss ) >= 2 &&
+             length( $time_zone ) >= 3 ) {
+
+          # Compute UTC timestamp:
+
+          my $timestamp = UTC_timestamp( $yyyy_mm_dd, $hh_mm_ss, $time_zone );
+          debug( "UTC timestamp = $timestamp" );
+
+          if ( within_time_range( $timestamp, $time ) ) {
+            my $converted_depth = matches_units( $depth_units, 'm', $depth );
+            $depth = ( $converted_depth == -9999 ? 0.0 : $converted_depth );
+            my $converted_measure =
+              matches_units( $measure_units, $units, $measure );
+              debug( "$converted_measure = " .
+                     "matches_units( $measure_units, $units, $measure )" );
+
+            if ( $converted_measure != -9999 ) {
+              my $id = sid_to_id( $sid );
+
+              if ( $coverage eq 'escherichia_coli_enterococci' ) {
+                $sid .= ";species:$measure_name";
+              }
+
+              if ( $method ne '' ) {
+                $sid .= ";method:$method";
+              }
+
+              $timestamp =~ s/z/-0000/;
+              $timestamp =~ tr/t/T/;
+              @result =
+                ( $timestamp, $longitude, $latitude, $depth, $id,
+                  $converted_measure, $sid );
+            }
+          }
+        }
+      }
+    }
+  }
+
+  return @result;
+}
+
+
+
+# Parse a line of station info from remote web service.
+# parse_station_line( $line, \@column_indices );
+# Lines can look like this:
+# 21ALBCH,Alabama Department of Environmental Management,"[""EPABEACH"",""AL824748""]","[""EPABEACH"",""FAIRHOPE PUBLIC BEACH""]",,,,,21ALBCH-F_HOPE,FAIRHOPE PUBLIC BEACH,BEACH Program Site-Estuary,,Alabama,United States,Baldwin,US,AL,003,,,N,,30.5281000000,-87.9096000000,NAD83,30.5281,-87.9096,NAD83,0,21ALBCH-F_HOPE-22-488,,Sample-Routine,Water,,,,,,,30.5281000000,-87.9096000000,,,,,,,,,,2022-07-27,,,,,,,,,,,,,,ALBCH,21ALBCH,GRAB,,,Water Bottle,,,,,,,,,,,,,,,,,,,,Enterococcus,,,,,,,,,,,,,,,,,,,,,,,STORET-964604579,2,cfu/100mL,U,Final,,,Estimated,,,,,,,,,,Value Reported by Alabama Department of Public Health = < 2 CFU/100ml,Method Detection Level,2,cfu/100mL,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,STORET,,Microbiological,State/US Government,Mon Jan 23 11:42:56 GMT 2023,
+
+sub parse_station_line {
+  my $line = shift;
+  my @column_indices = @_;
+  my $edited_line = $line;
+  #$edited_line =~ s/"\["//g;
+  #$edited_line =~ s/"\]"//g;
+  $edited_line =~ s/""//g;
+  $edited_line =~ s/\[//g;
+  $edited_line =~ s/\]//g;
+  $edited_line = erase_double_quoted_commas_and_quotes( $edited_line );
+  my @parts = split( /,/, $edited_line );
+  my $parts_count = @parts;
+  my @result = ();
+  my $max = -1;
+
+  for ( @column_indices ) {
+    $max = $_ if $_ > $max;
+  }
+
+  my $column_count = @column_indices;
+
+  if ( $column_count == 3 && $parts_count > $max ) {
+    my $sid       = $parts[ $column_indices[ $STATION_SID ] ];
+    my $longitude = $parts[ $column_indices[ $STATION_LONGITUDE ] ];
+    my $latitude  = $parts[ $column_indices[ $STATION_LATITUDE ] ];
+    $sid =~ s/\s+/_/g; # Change spaces to _.
+
+    # Remove any remaining double-quotes:
+
+    $sid =~ s/"//g; #"
+    $latitude =~ s/"//g; #"
+    $longitude =~ s/"//g; #"
+
+    my $id = sid_to_id( $sid );
+
+    if ( $id > 0 && $sid ne '' && $longitude ne '' && $latitude ne '' ) {
+      @result = ( $id, $longitude, $latitude, $sid );
+    }
+  }
+
+  return @result;
+}
+
+
+
+# Convert string station name to an integer id < LONGLONG_MAX.
+# my $id = sid_to_id( $sid );
+
+sub sid_to_id {
+  my $sid = shift;
+  $sid =~ s/[-_@().]//;  # Delete insignificant characters.
+  $sid =~ s/^USGS//;     # Delete USGS prefix to yield 15-digit integer.
+  my $length = length( $sid );
+  my $result = '';
+
+  for ( my $i = 0; $i < $length; ++$i ) {
+    my $c = substr( $sid, $i, 1 );
+
+    if ( $c =~ /[0-9]/ ) { # Is digit:
+      $result .= $c;
+    } elsif ( $c =~ /[a-z,A-Z]/ ) { # If alpha-numeric:
+      $c =~ tr/[a-z]/[A-Z]/; # Capitalize all letters.
+      my $value = ord( $c ) - ord( 'A' ) + 1;
+      $result .= $value;
+    }
+  }
+
+  $length = length( $result );
+
+  if ( $length > 19 ) { # If too long, truncate but end with last 4 digits:
+    $result = substr( $result, 0, 15 ) . substr( $result, $length - 4, 4 );
+  }
+
+  if ( $result gt '9223372036854775807' ) { # Ensure it is a long long.
+    $result = '8' . substr( $result, 1, 18 ); # Change 1st digit.
+  }
+
+  return $result;
+}
+
+
+
+# Match or convert units and measure.
+# my $converted_measure = matches_units( $from_units, $to_units, $measure );
+
+sub matches_units {
+  my ( $from_units, $to_units, $measure ) = @_;
+  my $result = -9999; # Missing/invalid value.
+
+  # Various conversion scale factors:
+
+  my $feet_to_meters = 0.3048;
+  my $to_micro = 1e6;
+  my $milli_to_micro = 1e3;
+  my $micro_to_milli = 1e-3;
+
+  if ( $from_units eq $to_units ) {
+    $result = $measure;
+  } elsif ( lc( $from_units ) eq lc( $to_units ) ) {
+    $result = $measure;
+  } elsif ( lc($to_units) eq 'cfu/100ml' ) {
+    my $lower_from_units = lc( $from_units );
+
+    if ( $lower_from_units eq "cfu/100ml" ||
+         $lower_from_units eq "mpn/100ml" ||
+         $lower_from_units eq "#/100ml" ||
+         $lower_from_units eq "mpn" ||
+         $lower_from_units eq "cfu" ) {
+      $result = $measure;
+    }
+  } elsif ( $to_units eq '%' && index( $from_units, '%' ) == 0 ) {
+    $result = $measure;
+  } elsif ( ( $from_units eq 'degF' || $from_units eq 'F' )
+            && $to_units eq 'C' ) {
+    $result = ( $measure - 32.0 ) * ( 5.0 / 9.0 );
+  } elsif ( $from_units eq 'degC' && $to_units eq 'C' ) {
+    $result = $measure;
+  } elsif ( $from_units eq 'perm' && $to_units eq '/m' ) {
+    $result = $measure;
+  } elsif ( $from_units eq 'ft' && $to_units eq 'm' ) {
+    $result = $measure * $feet_to_meters;
+  } elsif ( ( $from_units eq 'cfs' || $from_units eq 'ft3/s' )
+            && $to_units eq 'm3/s' ) {
+    $result = $measure * $feet_to_meters * $feet_to_meters * $feet_to_meters;
+  } elsif ( $from_units eq 'mg/m3' ) {
+
+    # 1 cubic meter = 1000 liters.
+
+    if ( $to_units eq 'ug/L'  ) {
+      $result = $measure;
+    } elsif ( $to_units eq 'mg/L' ) {
+      $result = $measure * 1e-3;
+    }
+  } elsif ( $from_units eq 'mg/lasN' && $to_units eq 'mg/L' ) {
+    $result = $measure;
+  } elsif ( $from_units eq 'ug/l' && $to_units eq 'mg/L' ) {
+    $result = $measure * $micro_to_milli;
+  } elsif ( $from_units eq 'mg/l' && $to_units eq 'ug/L' ) {
+    $result = $measure * $milli_to_micro;
+  } elsif ( $from_units eq 'mho/cm' && $to_units eq 'uS/cm' ) {
+    $result = $measure * $to_micro;
+  } elsif ( $from_units eq 'umho/cm' && $to_units eq 'uS/cm' ) {
+    $result = $measure;
+  } elsif ( $from_units eq 'mS/cm' && $to_units eq 'uS/cm' ) {
+    $result = $measure * $milli_to_micro;
+  } elsif ( $from_units eq 'PSS' && $to_units eq 'PSU' ) {
+    $result = $measure;
+  } elsif ( $from_units eq 'ppt' && $to_units eq 'ppm' ) {
+    $result = $measure * 1e3;
+  } elsif ( $from_units eq 'ppth' && $to_units eq 'ppm' ) {
+    $result = $measure * 1e3;
+  } elsif ( $from_units eq 'uE/m2/sec' && $to_units eq 'uE/m2/s' ) {
+    $result = $measure;
+  } elsif ( $to_units eq 'NTU' ) {
+
+    # According to: https://blog.hannainst.com/turbidity-guide
+    # These are equivalent units of measure:
+
+    if ( $from_units eq 'FTU' || $from_units eq 'FNU'  ) {
+      $result = $measure;
+    }
+  } elsif ( $to_units eq 'pH' ) {
+    $result = $measure;
+  } elsif ( $to_units eq '-' ) {
+    $result = $measure;
+  }
+
+  if ( $result != -9999 && $to_units eq 'm' ) {
+
+    if ( $result > 0.0 ) {
+      $result = -$result; # Express depth as negative meters.
+    }
+  }
+
+  return $result;
+}
+
+  
+  
+
+############################### HELPER ROUTINES ##############################
+
+
+
+# debug( message );
+
+sub debug {
+  my $message = shift;
+
+  if ( $debugging ) {
+    print STDERR "\n$message\n";
+####print STDOUT "\n$message\n";
+  }
+}
+
+
+
+# my $result = parse_option( $option, $value, $option_name, $valid_values );
+# my $result = parse_option( $variable, $value, 'COVERAGE', 'ozone pm25' );
+
+sub parse_option {
+  my ( $option, $value, $option_name, $valid_values ) = @_;
+  my $result = 0;
+
+  if ( $option ne '' ) {
+    print STDERR "\nRedundant $option_name option: '$value'\n";
+  } else {
+    $result = index( " $valid_values ", " $value " ) != -1;
+
+    if ( $result ) {
+      $_[ 0 ] = $value;
+    } else {
+      print STDERR "\nInvalid $option_name option: '$value'\n";
+    }
+  }
+
+  return $result;
+}
+
+
+
+# Change commas to spaces in double-quoted portions of a string and
+# remove double quotes:
+# my $result = erase_double_quoted_commas_and_quotes( $string );
+
+sub erase_double_quoted_commas_and_quotes {
+  my $string = shift;
+  my $count = length( $string );
+  my $quoted = 0;
+  my $result = '';
+
+  for ( my $i = 0; $i < $count; ++$i ) {
+    my $c = substr( $string, $i, 1 );
+
+    if ( $c eq '"' ) {
+      $quoted = ! $quoted;
+    } elsif ( $c eq ',' ) {
+
+      if ( $quoted ) {
+        $result .= ' ';
+      } else {
+        $result .= ',';
+      }
+    } elsif ( $c ne "\r" ) {
+      $result .= $c;
+    }
+  }
+
+  return $result;
+}
+
+
+
+# my $ok = in_range( $value, $minimum, $maximum );
+
+sub in_range {
+  my ( $value, $minimum, $maximum ) = @_;
+  my $result = $value >= $minimum && $value <= $maximum;
+  return $result;
+}
+
+
+
+# my $is_valid = is_valid_time( '2001-08-26t20:00:00z/2001-08-27t23:59:59z' );
+
+sub is_valid_time {
+  my $time = shift;
+  my $result = 0;
+  my $length = length( $time );
+
+  if ( $length == 41 ) {
+    $result = is_valid_time( substr( $time, 0, 20 ) );
+    $result = $result && substr( $time, 20, 1 ) eq '/';
+    $result = $result && is_valid_time( substr( $time, 21, 20 ) );
+    $result = $result && substr( $time, 0, 20 ) le substr( $time, 21, 20 );
+  } elsif ( $length == 20 ) {
+    my $year   = substr( $time, 0, 4 );
+    my $month  = substr( $time, 5, 2 );
+    my $day    = substr( $time, 8, 2 );
+    my $hour   = substr( $time, 11, 2 );
+    my $minute = substr( $time, 14, 2 );
+    my $second = substr( $time, 17, 2 );
+    $result = in_range( $year, 1900, 3000 );
+    $result = $result && in_range( $month, 1, 12 );
+    $result = $result && in_range( $day, 1, days_in_month( $year, $month ) );
+    $result = $result && in_range( $hour, 0, 23 );
+    $result = $result && in_range( $minute, 0, 59 );
+    $result = $result && in_range( $second, 0, 59 );
+    $result = $result && substr( $time, 4, 1 ) eq '-';
+    $result = $result && substr( $time, 7, 1 ) eq '-';
+    $result = $result && substr( $time, 10, 1 ) eq 't';
+    $result = $result && substr( $time, 13, 1 ) eq ':';
+    $result = $result && substr( $time, 16, 1 ) eq ':';
+    $result = $result && substr( $time, 19, 1 ) eq 'z';
+  }
+
+  return $result;
+}
+
+
+
+# Check if given timestamp is within the range of $time.
+# my $ok = within_time_range( $timestamp, $time );
+
+sub within_time_range {
+  my ( $timestamp, $time ) = @_;
+  my $length = length( $time );
+  my $result = is_valid_time( $timestamp );
+
+  if ( $result ) {
+
+    if ( $length == 20 ) {
+      $result = ( $timestamp eq substr( $time, 0, 20 ) );
+    } elsif ( $length == 41 ) {
+      my $first_timestamp = substr( $time, 0, 20 );
+      my $last_timestamp  = substr( $time, 21, 20 );
+      $result =
+        ( $timestamp ge $first_timestamp && $timestamp le $last_timestamp );
+    }
+  }
+
+  return $result;
+}
+
+
+
+# Compute UTC timestamp from local one.
+# my $timestamp = UTC_timestamp( $yyyy_mm_dd, $hh_mm_ss, $time_zone );
+
+sub UTC_timestamp {
+  my ( $yyyy_mm_dd, $hh_mm_ss, $time_zone ) = @_;
+  my $yyyy = substr( $yyyy_mm_dd, 0, 4 );
+  my $mm   = substr( $yyyy_mm_dd, 5, 2 );
+  my $dd   = substr( $yyyy_mm_dd, 8, 2 );
+  my $hh_mm_ss_length = length( $hh_mm_ss );
+  my $hh   = substr( $hh_mm_ss, 0, 2 );
+  my $mn   = $hh_mm_ss_length >= 5 ? substr( $hh_mm_ss, 3, 2 ) : '00';
+  my $ss   = $hh_mm_ss_length >= 8 ? substr( $hh_mm_ss, 6, 2 ) : '00';
+  my $mm_ss = "$mn:$ss";
+  my $hours_to_UTC = time_zone_offset( $time_zone );
+  $hh += $hours_to_UTC;
+  increment_timestamp( $yyyy, $mm, $dd, $hh );
+  my $result =
+    sprintf( "%04d-%02d-%02dt%02d:%sz",
+             $yyyy, $mm, $dd, $hh, $mm_ss );
+  return $result;
+}
+
+
+
+# Compute UTC timestamp from local one.
+# my $hh = time_zone_offset( $time_zone );
+
+sub time_zone_offset {
+  my $time_zone = shift;
+  my @time_zone_table = (
+    { 'name' => 'AST',   'offset' => 4 },
+    { 'name' => 'EST',   'offset' => 5 },
+    { 'name' => 'EDT',   'offset' => 4 },
+    { 'name' => 'CST',   'offset' => 6 },
+    { 'name' => 'CDT',   'offset' => 5 },
+    { 'name' => 'MST',   'offset' => 7 },
+    { 'name' => 'MDT',   'offset' => 6 },
+    { 'name' => 'PST',   'offset' => 8 },
+    { 'name' => 'PDT',   'offset' => 7 },
+    { 'name' => 'AKST',  'offset' => 9 },
+    { 'name' => 'AKDT',  'offset' => 8 },
+    { 'name' => 'HAST',  'offset' => 10 },
+    { 'name' => 'HASDT', 'offset' => 9 }
+  );
+  my $result = 0;
+  my $count = @time_zone_table;
+
+  for ( my $i = 0; $i < $count; ++$i ) {
+    my $name = $time_zone_table[ $i ]->{ name };
+
+    if ( $name eq $time_zone ) {
+      my $offset = $time_zone_table[ $i ]->{ offset };
+      $result = $offset;
+      $i = $count; # Stop looping.
+    }
+  }
+
+  return $result;
+}
+
+
+
+# increment_timestamp( $yyyy, $mm, $dd, $hh );
+
+sub increment_timestamp {
+  my ( $yyyy, $mm, $dd, $hh ) = @_;
+  my $hours_per_day   = 23;
+  my $months_per_year = 12;
+  my $days_this_month = days_in_month( $yyyy, $mm );
+  ++$hh;
+
+  if ( $hh > $hours_per_day ) {
+    $hh = 0;
+    ++$dd;
+
+    if ( $dd > $days_this_month ) {
+      $dd = 1;
+      ++$mm;
+
+      if ( $mm > $months_per_year ) {
+        $mm = 1;
+        ++$yyyy;
+      }
+    }
+  }
+
+  $_[ 0 ] = $yyyy;
+  $_[ 1 ] = $mm;
+  $_[ 2 ] = $dd;
+  $_[ 3 ] = $hh;
+}
+
+
+
+# my $yyyymmddhh = integer_timestamp( $yyyy, $mm, $dd, $hh );
+
+sub integer_timestamp {
+  my ( $yyyy, $mm, $dd, $hh ) = @_;
+  my $result = int( $yyyy * 1000000 + $mm * 10000 + $dd * 100 + $hh );
+  return $result;
+}
+
+
+
+# my $leap = is_leap_year( $year );
+
+sub is_leap_year {
+  my $year = shift;
+  my $result = $year % 4 == 0 && ( $year % 100 != 0 || $year % 400 == 0 );
+  return $result;
+}
+
+
+
+# my $days = days_in_month( $year, $month );
+
+sub days_in_month {
+  my $year  = shift;
+  my $month = shift;
+
+  # 30 days hath September, April, June and November...
+
+  my @days_per_month = ( 31, 28, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31 );
+  my $result = $days_per_month[ $month - 1 ];
+
+  if ( $month == 2 ) {
+
+    if ( is_leap_year( $year ) ) {
+      ++$result;
+    }
+  }
+
+  return $result;
+}
+
+
+
+# decrement_date( $yyyy, $mm, $dd );
+
+sub decrement_date {
+  my ( $yyyy, $mm, $dd ) = @_;
+  --$dd;
+
+  if ( $dd < 1 ) {
+    --$mm;
+
+    if ( $mm < 1 ) {
+       --$yyyy;
+       $mm = 12;
+    }
+
+    $dd = days_in_month( $yyyy, $mm );
+  }
+
+  $_[ 0 ] = $yyyy;
+  $_[ 1 ] = $mm;
+  $_[ 2 ] = $dd;
+}
+
+
+
+# increment_date( $yyyy, $mm, $dd );
+
+sub increment_date {
+  my ( $yyyy, $mm, $dd ) = @_;
+  ++$dd;
+
+  if ( $dd > 28 ) {
+    my $days_this_month = days_in_month( $yyyy, $mm );
+
+    if ( $dd > $days_this_month ) {
+      $dd = 1;
+      ++$mm;
+
+      if ( $mm > 12 ) {
+        $mm = 1;
+        ++$yyyy;
+      }
+    }
+  }
+
+  $_[ 0 ] = $yyyy;
+  $_[ 1 ] = $mm;
+  $_[ 2 ] = $dd;
+}
+
+
+

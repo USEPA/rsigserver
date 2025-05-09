@@ -1,0 +1,146 @@
+#!/usr/bin/perl -wT
+
+##############################################################################
+# PURPOSE: lungserver - Serve LUNG requests via POST command.
+#
+# NOTES:   Used by RETIGO (Gayle Hagler, PI).
+#          Example usage:
+#
+#          curl -H "Content-Type: application/json" -X POST        \
+#                -d '{"messageType":"runStatus"}'                  \
+#                'https://rtpmeta.epa.gov/cgi-bin/viperserverpost?' 
+#
+# HISTORY: 2017-08-09 mccauley.rob@epa.gov
+#
+# STATUS: unreviewed untested
+##############################################################################
+
+
+use strict;
+package main;
+$| = 1; # Turn off output buffering so messages appear in correct order.
+alarm( 1800 ); # Kill process after 30 minutes.
+# Restrict PATH and ENV. (But before popen, ENV is cleared!)
+delete @ENV{ 'PATH', 'IFS', 'CDPATH', 'ENV', 'BASH_ENV' };
+
+
+############################## TUNABLE CONSTANTS #############################
+
+
+my $debugging = 0; # 1 = print debug messages to STDERR logs/error_log.
+
+# Curl GET command and retigohost local url
+
+#my $curl_prefix = '/usr/bin/curl -v -G --data-urlencode';
+my $curl_prefix = '/usr/bin/curl -s -G --data-urlencode';
+my $retigo_host = 'https://localhost:8080/retigo';
+
+
+################################## ROUTINES ##################################
+
+
+main();
+
+
+# Parse postdata and excute curl command to run retigo with postdata as input:
+
+sub main {
+  #print "Access-Control-Allow-Origin: * \n\n";
+  print "Content-type: application/json; \n\n"; # Read by httpd.
+  use CGI qw/ untaint /;     # Load Safe untainting CGI routines.
+  $CGI::DISABLE_UPLOADS = 1; # Disable uploading of files.
+  $CGI::POST_MAX = 2048;     # Limit posts to 2048 bytes.
+  my $query = new CGI;       # Safely parse QUERY_STRING.
+  %ENV = ();                 # Unset all environment variables.
+  my @names = $query->param; # Extract names of parameters.
+  my $count = @names;
+  my $result = 1;
+  debug( "$0 @names ($count)" );
+
+  if ( $count == 1 ) {
+    $_ = $names[ 0 ];  # $_ is tainted.
+    s/[^A-Z]/_/go;     # Untaint $_ mapping non capital letters to underscore.
+    my $option = $_;   # $option is untainted. It contains only A-Z and _.
+
+    if ( "$option" eq "POSTDATA" ) {
+      $_ = $query->param( $option );            # $_ is tainted parameter value
+      # Allow only the following characters:
+      #   \w = single char alphanumeric or _
+      #   {}
+      #   ()
+      #   []
+      #   "
+      #   :
+      #   ,
+      #   -
+      #   .
+      #  \s = whitespace
+      s/[^\w\{\}\(\)\[\]\":\s,-\.]/_/go;       # Untaint $_.
+      my $postdata = $_;                        # $postdata is untainted.
+      debug( "option=$option value=$postdata" );
+      my $curl_command = "$curl_prefix \'$postdata\' $retigo_host";
+      debug( "curl_command = $curl_command" );
+      $result = execute_command( $curl_command );
+    } else {
+      print STDERR "\nInvalid option: '$option'\n";
+    }
+  }
+
+  # UNIX: zero is success, non-zero is failure.
+  debug( "exit $result" );
+  exit $result;
+}
+
+
+
+############################### HELPER ROUTINES ##############################
+
+
+
+# debug( message );
+
+sub debug {
+
+  if ( $debugging ) {
+    my $message = shift;
+    print STDERR "\n$message\n";
+  }
+}
+
+
+
+# Execute command and echo its output to STDOUT and return exit status.
+# E.g., my $result = execute_command( '/bin/ls' );
+
+sub execute_command {
+  my $command = shift;
+  my $result = 0;
+  my $the_pipe = 0;
+
+  # Untaint command (match expression is arbitrary as far as -T is concerned):
+  if ( $command =~ m#^(/[\w\{\}\(\)\[\]\"\':\s,-\.\/]+)$# ) { # Also allow slash and single-quote (/ ')
+    $command = $1; # Re-assign first match, which is enough to satisfy -T.
+    debug( "$0 executing command = $command" );
+    %ENV = (); # Unset all environment variables prior to popen.
+    # Complicated, supposedly safer way to open a readable pipe to command:
+    my $pid = open( the_pipe, "-|" );
+
+    if ( ! defined( $pid ) ) {
+      die "Couldn't open pipe to subprocess";
+    } elsif ( $pid ) { # Parent process.
+
+      while ( <the_pipe> ) {
+        print;
+      }
+
+      close( the_pipe ) or die $!;
+      $result = $?;
+    } else { # Child process.
+      exec( $command ) or die "can't exec program: $!";
+    }
+  } else {
+    print STDERR "\n$0: '$command' contains invalid characters.\n";
+  }
+
+  return $result;
+}

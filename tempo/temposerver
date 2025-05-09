@@ -1,0 +1,2065 @@
+#!/usr/bin/perl -wT
+
+##############################################################################
+# PURPOSE: temposerver - Serve TEMPO satellite data,
+#          subsetted by date/time range, variable, and
+#          longitude-latitude box, in ASCII, XDR, NetCDF-COARDS, NetCDF-IOAPI
+#          and original formats for use by other programs (e.g., via wget).
+# NOTES:   This version parses the query string then, if valid, forwards it
+#          to NASA Langley' cain sever. This approach avoids polluting the
+#          NASA server with invalid/attack queries.
+#          Server is WCS-compliant:
+#          https://www.opengeospatial.org/standards/wcs
+#          https://datafed.net/xs/OpenGIS/wcs/1.0.0/
+#          and modeled after a similar webserver application:
+#          https://webapps.datafed.net/ogc_EPA.wsfl
+#
+#          Launches the C Shell script listfiles and the
+#          C program TEMPOSubset which streams the data back on STDOUT.
+#
+#          Example usage:
+#
+#          curl 'https://ofmpub.epa.gov/rsig/temposerver?\
+#                    SERVICE=wcs&\
+#                    VERSION=1.0.0&\
+#                    REQUEST=GetCoverage&\
+#                    COVERAGE=l2.no2.column_amount&\
+#                    TIME=2013-07-15T00:00:00Z/2013-07-15T23:59:59Z&\
+#                    BBOX=-180,20,-50,70&\
+#                    FORMAT=ascii'
+#
+# HISTORY: 2023-05-03 plessel.todd@epa.gov
+# STATUS:  unreviewed tested
+##############################################################################
+
+
+use strict;
+package main;
+$| = 1; # Turn off output buffering so messages appear in correct order.
+alarm( 3600 ); # Kill process after 1 hour. Legitimate usage could be an hour!
+# Restrict PATH and ENV. (But before popen, ENV is cleared!)
+delete @ENV{ 'PATH', 'IFS', 'CDPATH', 'ENV', 'BASH_ENV' };
+
+
+############################## TUNABLE CONSTANTS #############################
+
+
+my $debugging = 0; # 1 = print debug messages to STDERR logs/error_log.
+my $valid_non_proxy_key = "YOUR_KEY_HERE";
+
+# Internal server to forward to via wget command:
+
+my $server_path  = 'https://cain.larc.nasa.gov/cgi-bin/temposerver?';
+my $bindir       = '/rsig/current/code/bin/Linux.x86_64';
+my $curl_command = "$bindir/curl -k --silent --max-time 3600 --retry 0 -L --tcp-nodelay ";
+
+
+# Variables:
+
+my @metadata = (
+
+  # NO2_L2 -------------------------------------------------------------------:
+
+  {
+    name =>        'l2.no2.solar_zenith_angle',
+    units =>       'deg',
+    description => 'Solar zenith angle at pixel center.'
+  },
+  {
+    name =>        'l2.no2.solar_azimuth_angle',
+    units =>       'deg',
+    description => 'Solar azimuth angle at pixel center.'
+  },
+  {
+    name =>        'l2.no2.viewing_zenith_angle',
+    units =>       'deg',
+    description => 'Viewing zenith angle at pixel center.'
+  },
+  {
+    name =>        'l2.no2.viewing_azimuth_angle',
+    units =>       'deg',
+    description => 'Viewing azimuth angle at pixel center.'
+  },
+  {
+    name =>        'l2.no2.relative_azimuth_angle',
+    units =>       'deg',
+    description => 'Relative azimuth angle at pixel center.'
+  },
+  {
+    name =>        'l2.no2.vertical_column_sum',
+    units =>       'molecules/cm2',
+    description => 'Nitrogen dioxide vertical column sum of ' .
+    'vertical_column_troposphere and vertical_column_stratosphere .'
+  },
+  {
+    name =>        'l2.no2.vertical_column_total',
+    units =>       'molecules/cm2',
+    description => 'Nitrogen dioxide vertical column determined from ' .
+    'fitted slant column and total AMF calculated from surface to top ' .
+    'of atmosphere.'
+  },
+  {
+    name =>        'l2.no2.vertical_column_total_uncertainty',
+    units =>       'molecules/cm2',
+    description => 'Nitrogen dioxide vertical column uncertainty.'
+  },
+  {
+    name =>        'l2.no2.vertical_column_troposphere',
+    units =>       'molecules/cm2',
+    description => 'Troposphere nitrogen dioxide vertical column.'
+  },
+  {
+    name =>        'l2.no2.vertical_column_troposphere_uncertainty',
+    units =>       'molecules/cm2',
+    description => 'Troposphere nitrogen dioxide vertical column uncertainty.'
+  },
+  {
+    name =>        'l2.no2.vertical_column_stratosphere',
+    units =>       'molecules/cm2',
+    description => 'Stratosphere nitrogen dioxide vertical column.'
+  },
+  {
+    name =>        'l2.no2.fitted_slant_column',
+    units =>       'molecules/cm2',
+    description => 'Nitrogen dioxide fitted slant column.'
+  },
+  {
+    name =>        'l2.no2.fitted_slant_column_uncertainty',
+    units =>       'molecules/cm2',
+    description => 'Nitrogen dioxide fitted slant column uncertainty.'
+  },
+  {
+    name =>        'l2.no2.snow_ice_fraction',
+    units =>       '-',
+    description => 'Fraction of pixel area covered by snow and/or ice.'
+  },
+  {
+    name =>        'l2.no2.terrain_height',
+    units =>       'm',
+    description => 'Terrain height.'
+  },
+  {
+    name =>        'l2.no2.ground_pixel_quality_flag',
+    units =>       '-',
+    description => 'shallow_ocean land shallow_inland_water shoreline ' .
+    'intermittent_water deep_inland_water continental_shelf_ocean ' .
+    'deep_ocean land_water_error sun_glint_possibility ' .
+    'solar_eclipse_possibility water evergreen_needleleaf_forest ' .
+    'evergreen_broadleaf_forest deciduous_needleleaf_forest ' .
+    'deciduous_broadleaf_forest mixed_forest closed_shrublands ' .
+    'open_shrublands woody_savannas savannas grasslands permanent_wetlands ' .
+    'croplands urban_and_built_up cropland_natural_vegetation_mosaic ' .
+    'snow_and_ice barren_or_sparsely_vegetated unclassified fill_value.'
+  },
+  {
+    name =>        'l2.no2.tropopause_pressure',
+    units =>       'hPa',
+    description => 'Tropopause pressure.'
+  },
+  {
+    name =>        'l2.no2.surface_pressure',
+    units =>       'hPa',
+    description => 'Surface pressure.'
+  },
+  {
+    name =>        'l2.no2.albedo',
+    units =>       '-',
+    description => 'Surface albedo.'
+  },
+  {
+    name =>        'l2.no2.amf_total',
+    units =>       '-',
+    description => 'Total nitrogen dioxide air mass factor (AMF) calculated ' .
+    'from surface to top of atmosphere.'
+  },
+  {
+    name =>        'l2.no2.amf_diagnostic_flag',
+    units =>       '-',
+    description => 'geometric_AMF glint snow_correction no_cloud_pressure ' .
+    'adjusted_surface_pressure adjusted_cloud_pressure no_albedo ' .
+    'no_cloud_fraction no_gas_profile no_scattering_weights AMF_disabled.'
+  },
+  {
+    name =>        'l2.no2.eff_cloud_fraction',
+    units =>       '-',
+    description => 'Effective cloud fraction from cloud retrieval.'
+  },
+  {
+    name =>        'l2.no2.amf_cloud_fraction',
+    units =>       '-',
+    description => 'Cloud radiance fraction for AMF computation.'
+  },
+  {
+    name =>        'l2.no2.amf_cloud_pressure',
+    units =>       '-',
+    description => 'Cloud pressure for AMF computation.'
+  },
+  {
+    name =>        'l2.no2.amf_troposphere',
+    units =>       '-',
+    description => 'Nitrogen dioxide tropospheric air mass factor.'
+  },
+  {
+    name =>        'l2.no2.amf_stratosphere',
+    units =>       '-',
+    description => 'Nitrogen dioxide stratospheric air mass factor.'
+  },
+  {
+    name =>        'l2.no2.fit_rms_residual',
+    units =>       '-',
+    description => 'Radiance fit RMS residual.'
+  },
+  {
+    name =>        'l2.no2.fit_convergence_flag',
+    units =>       '-',
+    description => 'failed maxiter_exceeded suspect good.'
+  },
+
+
+
+  # HCHO_L2 ------------------------------------------------------------------:
+
+  {
+    name =>        'l2.hcho.solar_zenith_angle',
+    units =>       'deg',
+    description => 'Solar zenith angle at pixel center.'
+  },
+  {
+    name =>        'l2.hcho.solar_azimuth_angle',
+    units =>       'deg',
+    description => 'Solar azimuth angle at pixel center.'
+  },
+  {
+    name =>        'l2.hcho.viewing_zenith_angle',
+    units =>       'deg',
+    description => 'Viewing zenith angle at pixel center.'
+  },
+  {
+    name =>        'l2.hcho.viewing_azimuth_angle',
+    units =>       'deg',
+    description => 'Viewing azimuth angle at pixel center.'
+  },
+  {
+    name =>        'l2.hcho.relative_azimuth_angle',
+    units =>       'deg',
+    description => 'Relative azimuth angle at pixel center.'
+  },
+  {
+    name =>        'l2.hcho.vertical_column',
+    units =>       'molecules/cm2',
+    description => 'Formaldehyde vertical column determined from fitted ' .
+    'slant column and total AMF calculated from surface to top of atmosphere.'
+  },
+  {
+    name =>        'l2.hcho.vertical_column_uncertainty',
+    units =>       'molecules/cm2',
+    description => 'Formaldehyde vertical column uncertainty.'
+  },
+  {
+    name =>        'l2.hcho.fitted_slant_column',
+    units =>       'molecules/cm2',
+    description => 'Formaldehyde fitted slant column.'
+  },
+  {
+    name =>        'l2.hcho.fitted_slant_column_uncertainty',
+    units =>       'molecules/cm2',
+    description => 'Formaldehyde fitted slant column uncertainty.'
+  },
+  {
+    name =>        'l2.hcho.snow_ice_fraction',
+    units =>       '-',
+    description => 'Fraction of pixel area covered by snow and/or ice.'
+  },
+  {
+    name =>        'l2.hcho.terrain_height',
+    units =>       'm',
+    description => 'Terrain height.'
+  },
+  {
+    name =>        'l2.hcho.ground_pixel_quality_flag',
+    units =>       '-',
+    description => 'shallow_ocean land shallow_inland_water shoreline ' .
+    'intermittent_water deep_inland_water continental_shelf_ocean deep_ocean ' .
+    'land_water_error sun_glint_possibility solar_eclipse_possibility water ' .
+    'evergreen_needleleaf_forest evergreen_broadleaf_forest ' .
+    'deciduous_needleleaf_forest deciduous_broadleaf_forest mixed_forest ' .
+    'closed_shrublands open_shrublands woody_savannas savannas grasslands ' .
+    'permanent_wetlands croplands urban_and_built_up ' .
+    'cropland_natural_vegetation_mosaic snow_and_ice ' .
+    'barren_or_sparsely_vegetated unclassified fill_value.'
+  },
+  {
+    name =>        'l2.hcho.surface_pressure',
+    units =>       'hPa',
+    description => 'Surface pressure.'
+  },
+  {
+    name =>        'l2.hcho.albedo',
+    units =>       '-',
+    description => 'Surface albedo.'
+  },
+  {
+    name =>        'l2.hcho.amf',
+    units =>       '-',
+    description => 'Total formaldehyde air mass factor (AMF) calculated from ' .
+    'surface to top of atmosphere.'
+  },
+  {
+    name =>        'l2.hcho.amf_diagnostic_flag',
+    units =>       '-',
+    description => 'Geometric_AMF glint snow_correction no_cloud_pressure ' .
+    'adjusted_surface_pressure adjusted_cloud_pressure no_albedo ' .
+    'no_cloud_fraction no_gas_profile no_scattering_weights AMF_disabled.'
+  },
+  {
+    name =>        'l2.hcho.eff_cloud_fraction',
+    units =>       '-',
+    description => 'Effective cloud fraction from cloud retrieval.'
+  },
+  {
+    name =>        'l2.hcho.amf_cloud_fraction',
+    units =>       '-',
+    description => 'Cloud radiance fraction for AMF computation.'
+  },
+  {
+    name =>        'l2.hcho.amf_cloud_pressure',
+    units =>       '-',
+    description => 'Cloud pressure for AMF computation.'
+  },
+  {
+    name =>        'l2.hcho.fit_rms_residual',
+    units =>       '-',
+    description => 'Radiance fit RMS residual.'
+  },
+  {
+    name =>        'l2.hcho.fit_convergence_flag',
+    units =>       '-',
+    description => 'failed maxiter_exceeded suspect good.'
+  },
+
+
+
+  # O3TOT_L2 -----------------------------------------------------------------:
+
+  {
+    name =>        'l2.o3tot.solar_zenith_angle',
+    units =>       'deg',
+    description => 'Solar zenith angle at pixel center.'
+  },
+  {
+    name =>        'l2.o3tot.solar_azimuth_angle',
+    units =>       'deg',
+    description => 'Solar azimuth angle at pixel center.'
+  },
+  {
+    name =>        'l2.o3tot.viewing_zenith_angle',
+    units =>       'deg',
+    description => 'Viewing zenith angle at pixel center.'
+  },
+  {
+    name =>        'l2.o3tot.viewing_azimuth_angle',
+    units =>       'deg',
+    description => 'Viewing azimuth angle at pixel center.'
+  },
+  {
+    name =>        'l2.o3tot.relative_azimuth_angle',
+    units =>       'deg',
+    description => 'Relative azimuth angle at pixel center.'
+  },
+  {
+    name =>        'l2.o3tot.terrain_height',
+    units =>       'm',
+    description => 'Terrain height.'
+  },
+  {
+    name =>        'l2.o3tot.column_amount_o3',
+    units =>       'DU',
+    description => 'Best total ozone solution.'
+  },
+  {
+    name =>        'l2.o3tot.radiative_cloud_frac',
+    units =>       '-',
+    description => 'Cloud radiance fraction = fc*Ic331/Im331.'
+  },
+  {
+    name =>        'l2.o3tot.fc',
+    units =>       '-',
+    description => 'Effective cloud fraction (mixed LER model).'
+  },
+  {
+    name =>        'l2.o3tot.o3_below_cloud',
+    units =>       '-',
+    description => 'Ozone below fractional cloud".'
+  },
+  {
+    name =>        'l2.o3tot.uv_aerosol_index',
+    units =>       '-',
+    description => 'UV aerosol index.'
+  },
+  {
+    name =>        'l2.o3tot.cloud_pressure',
+    units =>       'hPa',
+    description => 'Effective cloud pressure.'
+  },
+  {
+    name =>        'l2.o3tot.terrain_pressure',
+    units =>       'hPa',
+    description => 'Terrain pressure.'
+  },
+  {
+    name =>        'l2.o3tot.surface_reflectivity_at_331nm',
+    units =>       '-',
+    description => 'Effective surface reflectivity at 331 nm.'
+  },
+  {
+    name =>        'l2.o3tot.surface_reflectivity_at_360nm',
+    units =>       '-',
+    description => 'Effective surface reflectivity at 360 nm.'
+  },
+  {
+    name =>        'l2.o3tot.step1_o3',
+    units =>       'DU',
+    description => 'Step 1 ozone solution.'
+  },
+  {
+    name =>        'l2.o3tot.step2_o3',
+    units =>       'DU',
+    description => 'Step 2 ozone solution.'
+  },
+
+  # These variables are not yielding data from the initial files 2023-10-17:
+
+  {
+    name =>        'l2.o3tot.quality_flag',
+    units =>       '-',
+    description => 'Quality_flags.'
+  },
+  {
+    name =>        'l2.o3tot.so2_index',
+    units =>       '-',
+    description => 'SO2 index.'
+  },
+  {
+    name =>        'l2.o3tot.ground_pixel_quality_flag',
+    units =>       '-',
+    description => 'Ground pixel quality flag.'
+  },
+  {
+    name =>        'l2.o3tot.lut_wavelength',
+    units =>       'nm',
+    description => 'Lookup table wavelength.'
+  },
+  {
+    name =>        'l2.o3tot.algorithm_flags',
+    units =>       '-',
+    description => 'Algorithm_flags.'
+  },
+  {
+    name =>        'l2.o3tot.radiance_bpix_flag_accepted',
+    units =>       '-',
+    description => 'Radiance bad pixel flag accepted.'
+  },
+  {
+    name =>        'l2.o3tot.cal_adjustment',
+    units =>       '-',
+    description => 'Calibration adjustment.'
+  },
+
+
+
+  # CLDO4_L2 -----------------------------------------------------------------:
+
+  {
+    name =>        'l2.cldo4.solar_zenith_angle',
+    units =>       'deg',
+    description => 'Solar zenith angle at pixel center.'
+  },
+  {
+    name =>        'l2.cldo4.solar_azimuth_angle',
+    units =>       'deg',
+    description => 'Solar azimuth angle at pixel center.'
+  },
+  {
+    name =>        'l2.cldo4.viewing_zenith_angle',
+    units =>       'deg',
+    description => 'Viewing zenith angle at pixel center.'
+  },
+  {
+    name =>        'l2.cldo4.viewing_azimuth_angle',
+    units =>       'deg',
+    description => 'Viewing azimuth angle at pixel center.'
+  },
+  {
+    name =>        'l2.cldo4.relative_azimuth_angle',
+    units =>       'deg',
+    description => 'Relative azimuth angle at pixel center.'
+  },
+  {
+    name =>        'l2.cldo4.CloudRadianceFraction440',
+    units =>       '-',
+    description => 'Cloud radiance fraction at 440nm.'
+  },
+  {
+    name =>        'l2.cldo4.CloudRadianceFraction466',
+    units =>       '-',
+    description => 'Cloud radiance fraction at 466nm.'
+  },
+  {
+    name =>        'l2.cldo4.cloud_fraction',
+    units =>       '-',
+    description => 'Effective cloud fraction at 466nm.'
+  },
+  {
+    name =>        'l2.cldo4.cloud_pressure',
+    units =>       'hPa',
+    description => 'Optical centroid pressure for cloud.'
+  },
+  {
+    name =>        'l2.cldo4.processing_quality_flag',
+    units =>       '-',
+    description => '0_error_geoloc_or_angles 1_warn_466nm_crf_invalid ' .
+    '2_warn_ocp_repaced for_small_ecf 3_error_input_psurf_albedo ' .
+    '4_warn_ocp_replaced_for_snowice 5_warn_ocp_scd_iteration_exceeds_max ' .
+    '6_error_scd_negative_or_bad 7_info_440nm_rad_or_irr_error ' .
+    '8_error_466nm_rad_or_irr_error 9_warn_ecf_beyond_normal_range ' .
+    '10_info_pscene_SurfaceLER_TerrainP_invalid '.
+    '11_info_pscene_SceneLER_SceneP_invalid '.
+    '12_error_ecf_calc_skipped ' .
+    '13_error_ocp_calc_skipped 14_warning_ocp_beyond_normal_range ' .
+    '15_info_pscene_calc_skipped 16-29_unused_set_to_zero (4-byte only) ' .
+    '30-31_reserved_set_to_zero (4-byte only).'
+  },
+  {
+    name =>        'l2.cldo4.fit_convergence_flag',
+    units =>       '-',
+    description => 'failed maxiter_exceeded suspect good.'
+  },
+  {
+    name =>        'l2.cldo4.fit_rms_residual',
+    units =>       '-',
+    description => 'Radiance fit RMS residual.'
+  },
+  {
+    name =>        'l2.cldo4.GLER440',
+    units =>       '-',
+    description => '440nm surface reflectivity used in calculation.'
+  },
+  {
+    name =>        'l2.cldo4.GLER466',
+    units =>       '-',
+    description => '466nm surface reflectivity used in calculation.'
+  },
+  {
+    name =>        'l2.cldo4.SCD_MainDataQualityFlags',
+    units =>       '-',
+    description => 'Main data quality flags for fitted_slant_column: ' .
+    '0=normal, 1=suspicious, 2=bad.'
+  },
+  {
+    name =>        'l2.cldo4.SceneLER440',
+    units =>       'hPa',
+    description => 'LER at 440nm calculated at ScenePressure.'
+  },
+  {
+    name =>        'l2.cldo4.SceneLER466',
+    units =>       'hPa',
+    description => 'LER at 466nm calculated at ScenePressure.'
+  },
+  {
+    name =>        'l2.cldo4.ScenePressure',
+    units =>       'hPa',
+    description => 'Scene pressure.'
+  },
+  {
+    name =>        'l2.cldo4.surface_pressure',
+    units =>       'hPa',
+    description => 'Surface pressure.'
+  },
+  {
+    name =>        'l2.cldo4.ground_pixel_quality_flag',
+    units =>       '-',
+    description => 'shallow_ocean land shallow_inland_water shoreline ' .
+    'intermittent_water deep_inland_water continental_shelf_ocean ' .
+    'deep_ocean land_water_error sun_glint_possibility ' .
+    'solar_eclipse_possibility water evergreen_needleleaf_forest ' .
+    'evergreen_broadleaf_forest deciduous_needleleaf_forest ' .
+    'deciduous_broadleaf_forest mixed_forest closed_shrublands ' .
+    'open_shrublands woody_savannas savannas grasslands permanent_wetlands ' .
+    'croplands urban_and_built_up cropland_natural_vegetation_mosaic ' .
+    'snow_and_ice barren_or_sparsely_vegetated unclassified fill_value.'
+  },
+  {
+    name =>        'l2.cldo4.snow_ice_fraction',
+    units =>       '-',
+    description => 'Fraction of pixel area covered by snow and/or ice.'
+  },
+  {
+    name =>        'l2.cldo4.terrain_height',
+    units =>       'm',
+    description => 'Terrain height.'
+  },
+  {
+    name =>        'l2.cldo4.fitted_slant_column',
+    units =>       'molecules2/cm5',
+    description => 'Collision induced oxygen complex fitted slant column.'
+  },
+  {
+    name =>        'l2.cldo4.fitted_slant_column_uncertainty',
+    units =>       'molecules2/cm5',
+    description => 'Collision induced oxygen complex fitted slant column ' .
+    'uncertainty.'
+  },
+
+
+
+  # NO2_L3 -------------------------------------------------------------------:
+
+  {
+    name =>        'l3.no2.solar_zenith_angle',
+    units =>       'deg',
+    description => 'Solar zenith angle at pixel center.'
+  },
+  {
+    name =>        'l3.no2.viewing_zenith_angle',
+    units =>       'deg',
+    description => 'Viewing zenith angle at pixel center.'
+  },
+  {
+    name =>        'l3.no2.relative_azimuth_angle',
+    units =>       'deg',
+    description => 'Relative azimuth angle at pixel center.'
+  },
+  {
+    name =>        'l3.no2.surface_pressure',
+    units =>       'hPa',
+    description => 'Surface pressure.'
+  },
+  {
+    name =>        'l3.no2.terrain_height',
+    units =>       'm',
+    description => 'Terrain height.'
+  },
+  {
+    name =>        'l3.no2.snow_ice_fraction',
+    units =>       '-',
+    description => 'Fraction of pixel area covered by snow and/or ice.'
+  },
+  {
+    name =>        'l3.no2.vertical_column_sum',
+    units =>       'molecules/cm2',
+    description => 'Nitrogen dioxide vertical column sum of ' .
+    'vertical_column_troposphere and vertical_column_stratosphere .'
+  },
+  {
+    name =>        'l3.no2.vertical_column_total',
+    units =>       'molecules2/cm2',
+    description => 'Total nitrogen dioxide vertical column.'
+  },
+  {
+    name =>        'l3.no2.vertical_column_total_uncertainty',
+    units =>       'molecules2/cm2',
+    description => 'Total nitrogen dioxide vertical column uncertainty.'
+  },
+  {
+    name =>        'l3.no2.vertical_column_troposphere',
+    units =>       'molecules2/cm2',
+    description => 'Troposphere nitrogen dioxide vertical column.'
+  },
+  {
+    name =>        'l3.no2.vertical_column_troposphere_uncertainty',
+    units =>       'molecules2/cm2',
+    description => 'Troposphere nitrogen dioxide vertical column uncertainty.'
+  },
+  {
+    name =>        'l3.no2.vertical_column_stratosphere',
+    units =>       'molecules2/cm2',
+    description => 'Stratosphere nitrogen dioxide vertical column.'
+  },
+  {
+    name =>        'l3.no2.fitted_slant_column',
+    units =>       'molecules2/cm5',
+    description => 'Collision induced oxygen complex fitted slant column.'
+  },
+  {
+    name =>        'l3.no2.fitted_slant_column_uncertainty',
+    units =>       'molecules2/cm5',
+    description => 'Collision induced oxygen complex fitted slant column ' .
+    'uncertainty.'
+  },
+  {
+    name =>        'l3.no2.albedo',
+    units =>       '-',
+    description => 'Surface albedo.'
+  },
+  {
+    name =>        'l3.no2.tropopause_pressure',
+    units =>       'hPa',
+    description => 'Tropopause pressure.'
+  },
+  {
+    name =>        'l3.no2.amf_total',
+    units =>       '-',
+    description => 'Total nitrogen dioxide air mass factor (AMF) calculated ' .
+    'from surface to top of atmosphere.'
+  },
+  {
+    name =>        'l3.no2.eff_cloud_fraction',
+    units =>       '-',
+    description => 'Effective cloud fraction from cloud retrieval.'
+  },
+  {
+    name =>        'l3.no2.amf_cloud_fraction',
+    units =>       '-',
+    description => 'Cloud radiance fraction for AMF computation.'
+  },
+  {
+    name =>        'l3.no2.amf_cloud_pressure',
+    units =>       'hPa',
+    description => 'Cloud pressure for AMF computation.'
+  },
+  {
+    name =>        'l3.no2.amf_troposphere',
+    units =>       '-',
+    description => 'Nitrogen dioxide tropospheric air mass factor.'
+  },
+  {
+    name =>        'l3.no2.amf_stratosphere',
+    units =>       '-',
+    description => 'Nitrogen dioxide stratospheric air mass factor.'
+  },
+  {
+    name =>        'l3.no2.weight',
+    units =>       'km2',
+    description => 'Sum of area weights.'
+  },
+  {
+    name =>        'l3.no2.main_data_quality_flag',
+    units =>       '-',
+    description => 'Main data quality flag: 0 = normal, 1 = suspect, 2 = bad.'
+  },
+  {
+    name =>        'l3.no2.num_vertical_column_total_samples',
+    units =>       '-',
+    description => 'Number of Level 2 pixel values contributing to the area-weighted Level 3 pixel value.'
+  },
+  {
+    name =>        'l3.no2.min_vertical_column_total_sample',
+    units =>       'molecules/cm2',
+    description => 'Smallest Level 2 pixel value contributing to the area-weighted Level 3 pixel value.'
+  },
+  {
+    name =>        'l3.no2.max_vertical_column_total_sample',
+    units =>       'molecules/cm2',
+    description => 'Largest Level 2 pixel value contributing to the area-weighted Level 3 pixel value.'
+  },
+  {
+    name =>        'l3.no2.num_vertical_column_troposphere_samples',
+    units =>       '-',
+    description => 'Number of Level 2 pixel values contributing to the area-weighted Level 3 pixel value.'
+  },
+  {
+    name =>        'l3.no2.min_vertical_column_troposphere_sample',
+    units =>       'molecules/cm2',
+    description => 'Smallest Level 2 pixel value contributing to the area-weighted Level 3 pixel value.'
+  },
+  {
+    name =>        'l3.no2.max_vertical_column_troposphere_sample',
+    units =>       'molecules/cm2',
+    description => 'Largest Level 2 pixel value contributing to the area-weighted Level 3 pixel value.'
+  },
+  {
+    name =>        'l3.no2.num_vertical_column_troposphere_uncertainty_samples',
+    units =>       '-',
+    description => 'Uncertainty of number of Level 2 pixel values contributing to the area-weighted Level 3 pixel value.'
+  },
+  {
+    name =>        'l3.no2.min_vertical_column_troposphere_uncertainty_sample',
+    units =>       'molecules/cm2',
+    description => 'Uncertainty of smallest Level 2 pixel value contributing to the area-weighted Level 3 pixel value.'
+  },
+  {
+    name =>        'l3.no2.max_vertical_column_troposphere_uncertainty_sample',
+    units =>       'molecules/cm2',
+    description => 'Uncertainty of largest Level 2 pixel value contributing to the area-weighted Level 3 pixel value.'
+  },
+  {
+    name =>        'l3.no2.num_vertical_column_stratosphere_samples',
+    units =>       '-',
+    description => 'Number of Level 2 pixel values contributing to the area-weighted Level 3 pixel value.'
+  },
+  {
+    name =>        'l3.no2.min_vertical_column_stratosphere_sample',
+    units =>       'molecules/cm2',
+    description => 'Smallest Level 2 pixel value contributing to the area-weighted Level 3 pixel value.'
+  },
+  {
+    name =>        'l3.no2.max_vertical_column_stratosphere_sample',
+    units =>       'molecules/cm2',
+    description => 'Largest Level 2 pixel value contributing to the area-weighted Level 3 pixel value.'
+  },
+
+
+
+  # HCHO_L3 ------------------------------------------------------------------:
+
+  {
+    name =>        'l3.hcho.solar_zenith_angle',
+    units =>       'deg',
+    description => 'Solar zenith angle at pixel center.'
+  },
+  {
+    name =>        'l3.hcho.viewing_zenith_angle',
+    units =>       'deg',
+    description => 'Viewing zenith angle at pixel center.'
+  },
+  {
+    name =>        'l3.hcho.relative_azimuth_angle',
+    units =>       'deg',
+    description => 'Relative azimuth angle at pixel center.'
+  },
+  {
+    name =>        'l3.hcho.vertical_column',
+    units =>       'molecules/cm2',
+    description => 'Formaldehyde vertical column determined from fitted ' .
+    'slant column and total AMF calculated from surface to top of atmosphere.'
+  },
+  {
+    name =>        'l3.hcho.vertical_column_uncertainty',
+    units =>       'molecules/cm2',
+    description => 'Formaldehyde vertical column determined from fitted ' .
+    'slant column and total AMF calculated from surface to top of atmosphere ' .
+    'uncertainty.'
+  },
+  {
+    name =>        'l3.hcho.main_data_quality_flag',
+    units =>       '-',
+    description => 'normal suspicious bad.'
+  },
+  {
+    name =>        'l3.hcho.surface_pressure',
+    units =>       'hPa',
+    description => 'Surface pressure.'
+  },
+  {
+    name =>        'l3.hcho.terrain_height',
+    units =>       'm',
+    description => 'Terrain height.'
+  },
+  {
+    name =>        'l3.hcho.snow_ice_fraction',
+    units =>       '-',
+    description => 'Fraction of pixel area covered by snow and/or ice.'
+  },
+  {
+    name =>        'l3.hcho.fitted_slant_column',
+    units =>       'molecules/cm2',
+    description => 'Formaldehyde fitted slant column.'
+  },
+  {
+    name =>        'l3.hcho.fitted_slant_column_uncertainty',
+    units =>       'molecules/cm2',
+    description => 'Formaldehyde fitted slant column uncertainty.'
+  },
+  {
+    name =>        'l3.hcho.albedo',
+    units =>       '-',
+    description => 'Surface albedo.'
+  },
+  {
+    name =>        'l3.hcho.amf',
+    units =>       '-',
+    description => 'Total formaldehyde air mass factor (AMF) calculated ' .
+    'from surface to top of atmosphere.'
+  },
+  {
+    name =>        'l3.hcho.eff_cloud_fraction',
+    units =>       '-',
+    description => 'Effective cloud fraction from cloud retrieval.'
+  },
+  {
+    name =>        'l3.hcho.amf_cloud_fraction',
+    units =>       '-',
+    description => 'Cloud radiance fraction for AMF computation.'
+  },
+  {
+    name =>        'l3.hcho.amf_cloud_pressure',
+    units =>       'hPa',
+    description => 'Cloud pressure for AMF computation.'
+  },
+  {
+    name =>        'l3.hcho.weights',
+    units =>       'km2',
+    description => 'Sum of Level 2 pixel overlap areas.'
+  },
+  {
+    name =>        'l3.hcho.num_vertical_column_total_samples',
+    units =>       '-',
+    description => 'Number of Level 2 pixel values contributing to the ' .
+    'area-weighted Level 3 pixel value.'
+  },
+  {
+    name =>        'l3.hcho.min_vertical_column_total_sample',
+    units =>       'molecules/cm2',
+    description => 'Smallest Level 2 pixel value contributing to the ' .
+    'area-weighted Level 3 pixel value.'
+  },
+  {
+    name =>        'l3.hcho.max_vertical_column_total_sample',
+    units =>       'molecules/cm2',
+    description => 'Largest Level 2 pixel value contributing to the ' .
+    'area-weighted Level 3 pixel value.'
+  },
+
+
+
+  # O3TOT_L3 -----------------------------------------------------------------:
+
+  {
+    name =>        'l3.o3tot.solar_zenith_angle',
+    units =>       'deg',
+    description => 'Solar zenith angle at pixel center.'
+  },
+  {
+    name =>        'l3.o3tot.viewing_zenith_angle',
+    units =>       'deg',
+    description => 'Viewing zenith angle at pixel center.'
+  },
+  {
+    name =>        'l3.o3tot.relative_azimuth_angle',
+    units =>       'deg',
+    description => 'Relative azimuth angle at pixel center.'
+  },
+  {
+    name =>        'l3.o3tot.terrain_height',
+    units =>       'm',
+    description => 'Terrain height.'
+  },
+  {
+    name =>        'l3.o3tot.column_amount_o3',
+    units =>       'DU',
+    description => 'Best total ozone solution.'
+  },
+  {
+    name =>        'l3.o3tot.radiative_cloud_frac',
+    units =>       '-',
+    description => 'Cloud radiance fraction = fc*Ic331/Im331.'
+  },
+  {
+    name =>        'l3.o3tot.fc',
+    units =>       '-',
+    description => 'Effective cloud fraction (mixed LER model).'
+  },
+  {
+    name =>        'l3.o3tot.o3_below_cloud',
+    units =>       'DU',
+    description => 'Ozone below fractional cloud.'
+  },
+  {
+    name =>        'l3.o3tot.so2l_index',
+    units =>       '-',
+    description => 'SO2 index.'
+  },
+  {
+    name =>        'l3.o3tot.uv_aerosol_index',
+    units =>       '-',
+    description => 'UV aerosol index.'
+  },
+  {
+    name =>        'l3.o3tot.so2_index',
+    units =>       '-',
+    description => 'SO2 index.'
+  },
+  {
+    name =>        'l3.o3tot.uv_aerosol_index',
+    units =>       '-',
+    description => 'UV aerosol index.'
+  },
+  {
+    name =>        'l3.o3tot.num_column_samples',
+    units =>       '-',
+    description => 'Number of Level 2 pixel values contributing to the ' .
+    'area-weighted Level 3 pixel value.'
+  },
+  {
+    name =>        'l3.o3tot.min_column_samples',
+    units =>       'DU',
+    description => 'Smallest Level 2 pixel value contributing to the ' .
+    'area-weighted Level 3 pixel value.'
+  },
+  {
+    name =>        'l3.o3tot.max_column_samples',
+    units =>       'DU',
+    description => 'Largest Level 2 pixel value contributing to the ' .
+    'area-weighted Level 3 pixel value.'
+  },
+  {
+    name =>        'l3.o3tot.cloud_pressures',
+    units =>       'hPa',
+    description => 'Effective cloud pressure.'
+  },
+  {
+    name =>        'l3.o3tot.terrain_pressures',
+    units =>       'hPa',
+    description => 'Terrain pressure.'
+  },
+  {
+    name =>        'l3.o3tot.weight',
+    units =>       'km2',
+    description => 'Sum of Level 2 pixel overlap areas.'
+  },
+
+
+
+  # CLDO4_L3 -----------------------------------------------------------------:
+
+  {
+    name =>        'l3.cldo4.solar_zenith_angle',
+    units =>       'deg',
+    description => 'Solar zenith angle at pixel center.'
+  },
+  {
+    name =>        'l3.cldo4.viewing_zenith_angle',
+    units =>       'deg',
+    description => 'Viewing zenith angle at pixel center.'
+  },
+  {
+    name =>        'l3.cldo4.relative_azimuth_angle',
+    units =>       'deg',
+    description => 'Relative azimuth angle at pixel center.'
+  },
+  {
+    name =>        'l3.cldo4.cloud_pressure',
+    units =>       'hPa',
+    description => 'Optical centroid pressure for cloud.'
+  },
+  {
+    name =>        'l3.cldo4.cloud_fraction',
+    units =>       '-',
+    description => 'Effective cloud fraction at 466nm.'
+  },
+  {
+    name =>        'l3.cldo4.CloudRadianceFraction440',
+    units =>       '-',
+    description => 'Cloud radiance fraction at 440nm.'
+  },
+  {
+    name =>        'l3.cldo4.CloudRadianceFraction466',
+    units =>       '-',
+    description => 'Cloud radiance fraction at 466nm.'
+  },
+  {
+    name =>        'l3.cldo4.surface_pressure',
+    units =>       'hPa',
+    description => 'Surface pressure.'
+  },
+  {
+    name =>        'l3.cldo4.weight',
+    units =>       'km2',
+    description => 'Sum of Level 2 pixel overlap areas.'
+  },
+  {
+    name =>        'l3.cldo4.GLER440',
+    units =>       '-',
+    description => '440nm surface reflectivity used in calculation.'
+  },
+  {
+    name =>        'l3.cldo4.GLER466',
+    units =>       '-',
+    description => '466nm surface reflectivity used in calculation.'
+  }
+);
+
+my $begin_date = '2023-08-02';
+
+
+# Query string parsing routine dispatch table:
+
+my %parsers = (
+  'service'          => \&parse_service_option,
+  'version'          => \&parse_version_option,
+  'request'          => \&parse_request_option,
+  'coverage'         => \&parse_coverage_option,
+  'time'             => \&parse_time_option,
+  'bbox'             => \&parse_bbox_option,
+  'format'           => \&parse_format_option,
+  'compress'         => \&parse_compress_option,
+  'regrid'           => \&parse_regrid_option,
+  'regrid_aggregate' => \&parse_regrid_aggregate_option,
+  'lambert'          => \&parse_lambert_option,
+  'stereographic'    => \&parse_stereographic_option,
+  'mercator'         => \&parse_mercator_option,
+  'lonlat'           => \&parse_lonlat_option,
+  'ellipsoid'        => \&parse_ellipsoid_option,
+  'grid'             => \&parse_grid_option,
+  'levels'           => \&parse_levels_option,
+  'corners'          => \&parse_corners_option,
+  'minimum_quality'  => \&parse_minimum_quality_option,
+  'maximum_cloud_fraction' => \&parse_maximum_cloud_fraction_option,
+  'maximum_solar_zenith_angle' => \&parse_maximum_solar_zenith_angle_option,
+  'allow_negative_counts' => \&parse_allow_negative_counts_option,
+  'key'              => \&parse_key_option,
+  'check_key'        => \&parse_check_key_option
+);
+
+# Webserver content types for each output format:
+
+my %content_types = (
+  'ascii'         => 'text/plain',
+  'xdr'           => 'application/octet-stream',
+  'netcdf-coards' => 'application/netcdf',
+  'netcdf-ioapi'  => 'application/netcdf',
+  'original'      => 'application/octet-stream'
+);
+
+
+
+################################## VARIABLES #################################
+
+
+# Parsed from the URL query string:
+
+my $query_string  = ''; # The entire parsed query string to forward.
+my $service       = ''; # wcs.
+my $version       = ''; # 1.0.0.
+my $request       = ''; # getcapabilities or describecoverage or getcoverage.
+my $coverage      = ''; # no2.nitrogendioxide_tropospheric_column.
+my $format        = ''; # xdr, ascii, netcdf, original.
+my $compress      = ''; # 1 = | gzip -c otherwise don't compress (default).
+my $time          = ''; # E.g., 2008-06-21t00:00:00z/2008-06-22t23:59:59z.
+my $bbox          = ''; # E.g., -76,34,-74,36,0,0.
+my $regrid        = ''; # E.g., nearest, mean, weighted.
+my $regrid_aggregate = ''; # E.g., none, all, daily.
+my $lambert       = ''; # E.g., 33,45,-97,40.
+my $stereographic = ''; # E.g., -98,90,45.
+my $mercator      = ''; # E.g., -98.
+my $lonlat        = '';
+my $ellipsoid     = ''; # E.g., 6370000,6370000.
+my $grid          = ''; # E.g., 279,240,-1008000,-1620000,12000,12000.
+my $levels        = ''; # E.g,22,2,10000,1.0,...,0.0,9.81,287.04,50,290,100000.
+my $corners       = ''; # 1 = compute corners otherwise don't (default).
+my $minimum_quality  = ''; # Minimum accepted data quality:
+                           # 'normal', 'suspect', 'bad'. Default is 'normal'.
+my $maximum_cloud_fraction  = ''; # Max accepted cloud fraction [0,1] Def. 1.
+my $maximum_solar_zenith_angle  = ''; # Max accepted SLA [0, 90] Default 90.
+my $allow_negative_counts = ''; # 1 = Allow negative molecules/cm2? (Default 0).
+my $just_check_key = 0; # Just check key and output one line result: 0 or 1.
+my $key           = ''; # Key required for retrieval of non-proxy data.
+my $coverage_variable = -1;
+
+
+################################## ROUTINES ##################################
+
+
+main();
+
+
+sub main {
+  my $result = 0;
+
+  if ( ! parse_url() ) {
+    print "Content-type: text/plain; charset=iso-8859-1\n\n"; # For webserver
+
+    if ( $just_check_key ) {
+      print "0\n"; # 0 indicates failed to validate key.
+    }
+  } elsif ( $just_check_key ) {
+    print "Content-type: text/plain; charset=iso-8859-1\n\n"; # For webserver
+    print "1\n"; # 1 indicates validated key.
+  } else {
+    my $command = "$curl_command '$server_path$query_string'";
+    $result = execute_command( $command );
+  }
+
+  $result = 1 - $result; # UNIX: zero is success, non-zero is failure.
+  debug( "exit result = $result" );
+  exit $result;
+}
+
+
+
+# Parse URL parameters into variables.
+
+sub parse_url {
+  use CGI qw/ untaint /;     # Load Safe untainting CGI routines.
+  $CGI::DISABLE_UPLOADS = 1; # Disable uploads.
+  $CGI::POST_MAX = 1024;     # Limit posts to 1024 bytes.
+  my $query = new CGI;       # Parse QUERY_STRING.
+  %ENV = ();                 # Unset all environment variables.
+  my @names = $query->param; # Extract names of parameters.
+  my $count = @names;
+  my $result = 0;
+  debug( "@names\n$count" );
+
+  for ( my $parameter = 0; $parameter < $count; ++$parameter) {
+    $_ = $names[ $parameter ];                # $_ is tainted.
+    s/[^A-Za-z1]/_/go;                        # Untaint $_.
+    my $option = $_;                          # $option is untainted.
+    $_ = $query->param( $option );            # $_ is tainted.
+    s/[^\w\-.,:\/]/_/go;                      # Untaint $_.
+    my $value = $_;                           # $value is untainted.
+    my $lowercase_option = lc( $option );
+    my $lowercase_value  = lc( $value );
+    debug( "$lowercase_option $lowercase_value" );
+
+    if ( $parsers{ $lowercase_option } ) {
+      $result = $parsers{ $lowercase_option }->( $lowercase_value );
+    } else {
+      print STDERR "\nInvalid option #$parameter\n";
+      $result = 0;
+    }
+
+    if ( ! $result ) {
+      $parameter = $count; # Finish looping.
+    } else {
+
+      # Must print a header for httpd to strip-off:
+
+      if ( $lowercase_option eq 'format' ) {
+        my $type = $lowercase_value;
+        print "Content-type: $content_types{$type}; charset=iso-8859-1\n\n";
+      }
+
+      $query_string .= '&' . $option . '=' . $value;
+    }
+  }
+
+  $result = $result && required_options_specified();
+  return $result;
+}
+
+
+
+# Parse service option.
+
+sub parse_service_option {
+  my $value = shift;
+  my $result = parse_option( $service, $value, 'SERVICE', 'wcs' );
+  return $result;
+}
+
+
+
+# Parse version option.
+
+sub parse_version_option {
+  my $value = shift;
+  my $result = parse_option( $version, $value, 'VERSION', '1.0.0' );
+  return $result;
+}
+
+
+
+# Parse request option.
+
+sub parse_request_option {
+  my $value = shift;
+  my $result =
+    parse_option( $request, $value, 'REQUEST',
+                  'getcoverage getcapabilities describecoverage getmetadata' );
+  return $result;
+}
+
+
+
+# Parse coverage option.
+
+sub parse_coverage_option {
+  my $value = shift;
+  my $result = 0;
+
+  if ( $coverage ne '' ) {
+    print STDERR "\nRedundant COVERAGE option: '$value'\n";
+  } else {
+    my $variable_count = @metadata;
+
+    for ( my $variable = 0; $coverage eq '' && $variable < $variable_count;
+          ++$variable ) {
+      my $name = $metadata[ $variable ]->{ name };
+
+      if ( $name eq $value ) {
+        $coverage = $name;
+        $coverage_variable = $variable;
+        $result = 1;
+      }
+    }
+
+    if ( ! $result ) {
+      print STDERR "\nInvalid COVERAGE option: '$value'\n";
+    }
+  }
+
+  return $result;
+}
+
+
+
+# Parse format option:
+
+sub parse_format_option {
+  my $value = shift;
+  my $result = parse_option( $format, $value, 'FORMAT',
+                             'xdr ascii netcdf-coards netcdf-ioapi original' );
+  return $result;
+}
+
+
+
+# Parse time option.
+
+sub parse_time_option {
+  my $value = shift;
+  my $result = 0;
+
+  if ( $time ne '' ) {
+    print STDERR "\nRedundant TIME option\n";
+  } else {
+    $time = $value;
+    my $is_valid = is_valid_time( $time );
+
+    if ( ! $is_valid ) {
+      print STDERR "\nInvalid TIME option\n";
+    } else {
+      $result = 1;
+    }
+  }
+
+  return $result;
+}
+
+
+
+# Parse bbox option.
+
+sub parse_bbox_option {
+  my $value = shift;
+  my $result = 0;
+
+  if ( $bbox ne '' ) {
+    print STDERR "\nRedundant BBOX option\n";
+  } else {
+    $bbox = $value;
+    my @bounds = split( /,/, $bbox );
+    my $bounds_count = @bounds;
+
+    if ( $bounds_count != 4 && $bounds_count != 6 ) {
+      print STDERR "\nInvalid BBOX option (requires 4 or 6 numbers).\n";
+    } elsif ( ! in_range( $bounds[ 0 ], -180.0, 180.0 ) ) {
+      print STDERR "\nInvalid BBOX option (1st number)\n";
+    } elsif ( ! in_range( $bounds[ 1 ], -90.0, 90.0 ) ) {
+      print STDERR "\nInvalid BBOX option (2nd number)\n";
+    } elsif ( ! in_range( $bounds[ 2 ], $bounds[ 0 ], 180.0 ) ) {
+      print STDERR "\nInvalid BBOX option (3rd number)\n";
+    } elsif ( ! in_range( $bounds[ 3 ], $bounds[ 1 ], 90.0 ) ) {
+      print STDERR "\nInvalid BBOX option (4th number)\n";
+    } else {
+      $result = 1;
+    }
+  }
+
+  return $result;
+}
+
+
+
+# Parse compress option.
+
+sub parse_compress_option {
+  my $value = shift;
+  my $result = 0;
+
+  if ( $compress ne '' ) {
+    print STDERR "\nRedundant COMPRESS option\n";
+  } else {
+    $compress = $value;
+    my $is_valid = $compress == 0 || $compress == 1;
+
+    if ( ! $is_valid ) {
+      print STDERR "\nInvalid COMPRESS option (requires 0 or 1)\n";
+    } else {
+      $result = 1;
+    }
+  }
+
+  return $result;
+}
+
+
+
+# Parse regrid option:
+
+sub parse_regrid_option {
+  my $value = shift;
+  my $result = parse_option( $regrid, $value, 'REGRID',
+                             'nearest mean weighted' );
+  return $result;
+}
+
+
+
+# Parse regrid_aggregate option:
+
+sub parse_regrid_aggregate_option {
+  my $value = shift;
+  my $result = parse_option( $regrid_aggregate, $value, 'REGRID_AGGREGATE',
+                             'none all daily' );
+  return $result;
+}
+
+
+
+# Parse lambert option.
+
+sub parse_lambert_option {
+  my $value = shift;
+  my $result = 0;
+
+  if ( $lambert ne '' ) {
+    print STDERR "\nRedundant LAMBERT option\n";
+  } else {
+    $lambert = $value;
+    my @values = split( /,/, $value );
+    my $count = @values;
+
+    if ( $count != 4 ) {
+      print STDERR "\nInvalid LAMBERT option (requires 4 numbers)\n";
+    } elsif ( ! in_range( $values[ 0 ], -89.0, 89.0 ) ) {
+      print STDERR "\nInvalid LAMBERT option (1st number)\n";
+    } elsif ( ! in_range( $values[ 1 ], -89.0, 89.0 ) ) {
+      print STDERR "\nInvalid LAMBERT option (2nd number)\n";
+    } elsif ( ! in_range( $values[ 2 ], -180.0, 180.0 ) ) {
+      print STDERR "\nInvalid LAMBERT option: (3rd number)'\n";
+    } elsif ( ! in_range( $values[ 3 ], -89.0, 89.0 ) ) {
+      print STDERR "\nInvalid LAMBERT option:  (4th number)\n";
+    } elsif ( $values[ 0 ] > $values[ 1 ] ) {
+      print STDERR "\nInvalid LAMBERT option: (require 1st > 2nd number)\n";
+    } elsif ( $values[ 0 ] > 0.0 && $values[ 1 ] < 0.0 ) {
+      print STDERR "\nInvalid LAMBERT option: (require 1st and 2nd same sign)\n";
+    } elsif ( $values[ 0 ] < 0.0 && $values[ 1 ] > 0.0 ) {
+      print STDERR "\nInvalid LAMBERT option: (require 1st and 2nd same sign)\n";
+    } else {
+      $result = 1;
+    }
+  }
+
+  return $result;
+}
+
+
+
+# Parse stereographic option.
+
+sub parse_stereographic_option {
+  my $value = shift;
+  my $result = 0;
+
+  if ( $stereographic ne '' ) {
+    print STDERR "\nRedundant STEREOGRAPHIC option\n";
+  } else {
+    $stereographic = $value;
+    my @values = split( /,/, $value );
+    my $count = @values;
+
+    if ( $count != 3 ) {
+      print STDERR "\nInvalid STEREOGRAPHIC option (require 3 numbers)\n";
+    } elsif ( ! in_range( $values[ 0 ], -180.0, 180.0 ) ) {
+      print STDERR "\nInvalid STEREOGRAPHIC option: (require 1st in [-180, 180])\n";
+    } elsif ( ! in_range( $values[ 1 ], -90.0, 90.0 ) ) {
+      print STDERR "\nInvalid STEREOGRAPHIC option: (require 2nd in [-90, 90])\n";
+    } elsif ( ! in_range( $values[ 2 ], -90.0, 90.0 ) ) {
+      print STDERR "\nInvalid STEREOGRAPHIC option: (require 3rd in [-90, 90])\n";
+    } else {
+      $result = 1;
+    }
+  }
+
+  return $result;
+}
+
+
+
+# Parse mercator option.
+
+sub parse_mercator_option {
+  my $value = shift;
+  my $result = 0;
+
+  if ( $mercator ne '' ) {
+    print STDERR "\nRedundant MERCATOR option\n";
+  } else {
+    $mercator = $value;
+    my @values = split( /,/, $value );
+    my $count = @values;
+
+    if ( $count != 1 ) {
+      print STDERR "\nInvalid MERCATOR option (require 1 number)\n";
+    } elsif ( ! in_range( $values[ 0 ], -180.0, 180.0 ) ) {
+      print STDERR "\nInvalid MERCATOR option (require number in [-180, 180])\n";
+    } else {
+      $result = 1;
+    }
+  }
+
+  return $result;
+}
+
+
+
+# Parse lonlat option.
+
+sub parse_lonlat_option {
+  my $value = shift;
+  my $result = 0;
+
+  if ( $lonlat ne '' ) {
+    print STDERR "\nRedundant LONLAT option\n";
+  } else {
+    $lonlat = 1;
+    $result = 1;
+  }
+
+  return $result;
+}
+
+
+
+# Parse ellipsoid option.
+
+sub parse_ellipsoid_option {
+  my $value = shift;
+  my $result = 0;
+
+  if ( $ellipsoid ne '' ) {
+    print STDERR "\nRedundant ELLIPSOID option\n";
+  } else {
+    $ellipsoid = $value;
+    my @values = split( /,/, $value );
+    my $count = @values;
+
+    if ( $count != 1 && $count != 2 ) {
+      print STDERR "\nInvalid ELLIPSOID option (require 1 or 2 numbers)\n";
+    } elsif ( ! in_range( $values[ 0 ], 1.0, 1e10 ) ) {
+      print STDERR "\nInvalid ELLIPSOID option (1st number)\n";
+    } elsif ( $count == 2 ) {
+
+      if ( ! in_range( $values[ 1 ], $values[ 0 ], 1e10 ) ) {
+        print STDERR "\nInvalid ELLIPSOID option: (2nd number)\n";
+      } else {
+        $result = 1;
+      }
+    } else {
+      $result = 1;
+    }
+  }
+
+  return $result;
+}
+
+
+
+# Parse grid option.
+
+sub parse_grid_option {
+  my $value = shift;
+  my $result = 0;
+
+  if ( $grid ne '' ) {
+    print STDERR "\nRedundant GRID option\n";
+  } else {
+    $grid = $value;
+    my @values = split( /,/, $value );
+    my $count = @values;
+
+    if ( $count != 6 ) {
+      print STDERR "\nInvalid GRID option (require 6 numbers)\n";
+    } elsif ( $values[ 0 ] < 1 ) {
+      print STDERR "\nInvalid GRID option (1st number)\n";
+    } elsif ( $values[ 1 ] < 1 ) {
+      print STDERR "\nInvalid GRID option (2nd number)\n";
+    } elsif ( ! in_range( $values[ 2 ], -1e10, 1e10 ) ) {
+      print STDERR "\nInvalid GRID option (3rd number)\n";
+    } elsif ( ! in_range( $values[ 3 ], -1e10, 1e10 ) ) {
+      print STDERR "\nInvalid GRID option (4th number)\n";
+    } elsif ( ! in_range( $values[ 4 ], 0.01, 1e10 ) ) {
+      print STDERR "\nInvalid GRID option (5th number)\n";
+    } elsif ( ! in_range( $values[ 5 ], 0.01, 1e10 ) ) {
+      print STDERR "\nInvalid GRID option (6th number)\n";
+    } else {
+      $result = 1;
+    }
+  }
+
+  return $result;
+}
+
+
+
+# Parse levels option.
+
+sub parse_levels_option {
+  my $value = shift;
+  my $result = 0;
+
+  if ( $levels ne '' ) {
+    print STDERR "\nRedundant LEVELS option\n";
+  } else {
+    $levels = $value;
+    my @values = split( /,/, $value );
+    my $count = @values;
+
+    if ( $count != 3 + $values[ 0 ] + 1 + 5 ) {
+      print STDERR "\nInvalid LEVELS option (count)\n";
+    } elsif ( ! in_range( $values[ 0 ], 1, 100 ) ) {
+      print STDERR "\nInvalid LEVELS option (1st number)\n";
+    } elsif ( ! in_range( $values[ 1 ], 1, 7 ) ) {
+      print STDERR "\nInvalid LEVELS option (2nd number)\n";
+    } elsif ( ! in_range( $values[ 2 ], 0.0, 1e8 ) ) {
+      print STDERR "\nInvalid LEVELS option (3rd number)\n";
+    } else {
+
+      # Ensure level values are ordered decreasing if sigma-p else increasing:
+
+      my $end = $count - 5;
+      my $minimum = 0.0;
+      my $maximum = $lonlat ne '' ? 100000.0 : 1.0;
+      my $ok = 0;
+
+      for ( my $index = 3; $index < $end; ++$index ) {
+        my $level_value = $values[ $index ];
+        $ok = in_range( $level_value, $minimum, $maximum );
+
+        if ( ! $ok ) {
+          print STDERR "\nInvalid LEVELS option (number $index)\n";
+          $index = $count;
+        } elsif ( $lonlat ne '' ) {
+          $minimum = $level_value;
+        } else {
+          $maximum = $level_value;
+        }
+      }
+
+      # Check last parameter constants:
+
+      if ( $ok == 1 ) {
+        my $index = $count - 5;
+
+        if ( ! in_range( $values[ $index ], 0.01, 1e2 ) ) {
+          print STDERR "\nInvalid LEVELS option\n";
+        } elsif ( ! in_range( $values[ $index + 1 ], 0.01, 1e4 ) ) {
+          print STDERR "\nInvalid LEVELS option\n";
+        } elsif ( ! in_range( $values[ $index + 2 ], 0.01, 1e4 ) ) {
+          print STDERR "\nInvalid LEVELS option\n";
+        } elsif ( ! in_range( $values[ $index + 3 ], 0.01, 1e4 ) ) {
+          print STDERR "\nInvalid LEVELS option\n";
+        } elsif ( ! in_range( $values[ $index + 4 ], 0.01, 1e6 ) ) {
+          print STDERR "\nInvalid LEVELS option\n";
+        } else {
+          $result = 1;
+        }
+      }
+    }
+  }
+
+  return $result;
+}
+
+
+
+# Parse corners option:
+
+sub parse_corners_option {
+  my $value = shift;
+  my $result = 0;
+
+  if ( $corners ne '' ) {
+    print STDERR "\nRedundant CORNERS option\n";
+  } else {
+    $corners = $value;
+    my $is_valid = $corners == 0 || $corners == 1;
+
+    if ( ! $is_valid ) {
+      print STDERR "\nInvalid CORNERS option (require 0 or 1)\n";
+    } else {
+      $result = 1;
+    }
+  }
+
+  return $result;
+}
+
+
+
+# Parse minimum_quality option.
+
+sub parse_minimum_quality_option {
+  my $value = shift;
+  my $result = parse_option( $minimum_quality, $value, 'MINIMUM_QUALITY',
+                             'normal suspect bad' );
+  return $result;
+}
+
+
+
+# Parse maximum_cloud_fraction option.
+
+sub parse_maximum_cloud_fraction_option {
+  my $value = shift;
+  my $result = 0;
+
+  if ( $maximum_cloud_fraction ne '' ) {
+    print STDERR "\nRedundant MAXIMUM_CLOUD_FRACTION option\n";
+  } else {
+    $maximum_cloud_fraction = $value;
+    my $is_valid = in_range( $maximum_cloud_fraction, 0.0, 1.0 );
+
+    if ( ! $is_valid ) {
+      print STDERR "\nInvalid MAXIMUM_CLOUD_FRACTION option requires range [0.0, 1.0]\n";
+    } else {
+      $result = 1;
+    }
+  }
+
+  return $result;
+}
+
+
+
+# Parse maximum_solar_zenith_angle option.
+
+sub parse_maximum_solar_zenith_angle_option {
+  my $value = shift;
+  my $result = 0;
+
+  if ( $maximum_solar_zenith_angle ne '' ) {
+    print STDERR "\nRedundant MAXIMUM_SOLAR_ZENITH_ANGLE option\n";
+  } else {
+    $maximum_solar_zenith_angle = $value;
+    my $is_valid = in_range( $maximum_solar_zenith_angle, 0.0, 90.0 );
+
+    if ( ! $is_valid ) {
+      print STDERR "\nInvalid MAXIMUM_SOLAR_ZENITH_ANGLE option requires range [0.0, 90.0]\n";
+    } else {
+      $result = 1;
+    }
+  }
+
+  return $result;
+}
+
+
+
+# Parse allow_negative_counts option:
+
+sub parse_allow_negative_counts_option {
+  my $value = shift;
+  my $result = 0;
+
+  if ( $allow_negative_counts ne '' ) {
+    print STDERR "\nRedundant ALLOW_NEGATIVE_COUNTS option\n";
+  } else {
+    $allow_negative_counts = $value;
+    my $is_valid = $allow_negative_counts == 0 || $allow_negative_counts == 1;
+
+    if ( ! $is_valid ) {
+      print STDERR "\nInvalid ALLOW_NEGATIVE_COUNTS option (require 0 or 1)\n";
+    } else {
+      $result = 1;
+    }
+  }
+
+  return $result;
+}
+
+
+
+# Parse key option:
+
+sub parse_key_option {
+  my $value = shift;
+  my $result = 0;
+
+  if ( $key ne '' ) {
+    print STDERR "\nRedundant KEY option\n";
+  } else {
+
+    if ( $value =~ m#^([\w-]+)$# )
+    {
+      $key = uc( $value );
+      $result = $key eq $valid_non_proxy_key;
+    }
+
+    if ( ! $result ) {
+      print STDERR "\nInvalid KEY option.\n";
+      # Ignore invalid key value so Barron's code can use a placeholder value.
+      $key = '';
+      $result = 1;
+    }
+  }
+
+  return $result;
+}
+
+
+
+# Parse check_key option:
+
+sub parse_check_key_option {
+  my $value = shift;
+  my $result = 0;
+  $just_check_key = 1;
+
+  if ( $key ne '' ) {
+    print STDERR "\nRedundant CHECK_KEY/KEY option\n";
+  } else {
+
+    if ( $value =~ m#^([\w-]+)$# )
+    {
+      $key = uc( $value );
+      $result = $key eq $valid_non_proxy_key;
+    }
+  }
+
+  return $result;
+}
+
+
+
+# Check that all required 'options' have been specified:
+
+sub required_options_specified {
+  my $result = 0;
+
+  if ( $just_check_key ) {
+    $result = 1;
+  } elsif ( $service eq '' ) {
+    print STDERR "\nMissing option: 'SERVICE'\n";
+  } elsif ( $version eq '' ) {
+    print STDERR "\nMissing option: 'VERSION'\n";
+  } elsif ( $request eq '' ) {
+    print STDERR "\nMissing option: 'REQUEST'\n";
+  } elsif ( $request eq 'getcoverage' || $request eq 'getmetadata' ) {
+
+    if ( $coverage eq '' ) {
+      print STDERR "\nMissing option: 'COVERAGE'\n";
+    } elsif ( $format eq '' ) {
+      print STDERR "\nMissing option: 'FORMAT'\n";
+    } elsif ( $time eq '' ) {
+      print STDERR "\nMissing option: 'TIME'\n";
+    } elsif ( $bbox eq '' ) {
+      print STDERR "\nMissing option: 'BBOX'\n";
+    } else {
+      my $regrid_count = 0;
+      $regrid_count += $regrid ne '';
+      $regrid_count += $ellipsoid ne '';
+      $regrid_count += $grid ne '';
+      my $projection_count = 0;
+      $projection_count += $lambert ne '';
+      $projection_count += $stereographic ne '';
+      $projection_count += $mercator ne '';
+      $projection_count += $lonlat ne '';
+
+      $result =
+        $regrid_count == 0 && $projection_count == 0 ||
+        $regrid_count == 3 && $projection_count == 1;
+
+      if ( ! $result ) {
+        print STDERR "\nInvalid options: 'REGRID/";
+        print STDERR "LAMBERT/STEREOGRAPHIC/MERCATOR/LONLAT/";
+        print STDERR "GRID/ELLIPSOID'\n";
+      }
+    }
+  } else {
+    $result = 1;
+  }
+
+  return $result;
+}
+
+
+
+############################### HELPER ROUTINES ##############################
+
+
+
+# debug( message );
+
+sub debug {
+  my $message = shift;
+
+  if ( $debugging ) {
+    print STDERR "\n$message\n";
+  }
+}
+
+
+
+# Execute command and echo its output to STDOUT. E.g., execute_command( 'ls' );
+
+sub execute_command {
+  my $command = shift;
+  my $result = 0;
+  my $the_pipe = 0;
+
+  # Untaint command (match expression is arbitrary as far as -T is concerned):
+
+  if ( $command =~ m#^(/[\w-]+/[\w \$'\(\)\+,\-\./:;=>&?@\\_`{|}]+)$# ) {
+    $command = $1; # Re-assign first match, which is enough to satisfy -T.
+    debug( "$0 executing command = $command" );
+    %ENV = (); # Unset all environment variables prior to popen.
+    # Complicated, supposedly safer way to open a readable pipe to command:
+    my $pid = open( the_pipe, "-|" );
+
+    if ( ! defined( $pid ) ) {
+      die "Couldn't open pipe to subprocess";
+    } elsif ( $pid ) { # Parent process.
+
+      while ( <the_pipe> ) {
+        print;
+      }
+
+      close( the_pipe ) or die $!;
+      $result = ! $?;
+    } else { # Child process.
+      exec( $command ) or die "can't exec program: $!";
+    }
+  } else {
+    print STDERR "\n$0: command contains invalid characters.\n";
+  }
+
+  return $result;
+}
+
+
+
+# my $result = parse_option( $option, $value, $option_name, $valid_values );
+# my $result = parse_option( $variable, $value, 'COVERAGE', 'ozone pm25' );
+
+sub parse_option {
+  my ( $option, $value, $option_name, $valid_values ) = @_;
+  my $result = 0;
+
+  if ( $option ne '' ) {
+    print STDERR "\nRedundant $option_name option\n";
+  } else {
+    $result = index( " $valid_values ", " $value " ) != -1;
+
+    if ( $result ) {
+      $_[ 0 ] = $value;
+    } else {
+      print STDERR "\nInvalid $option_name option\n";
+    }
+  }
+
+  return $result;
+}
+
+
+
+# my $result = parse_range_ption( $option, $value, $option_name ) ;
+# my $result = parse_range_option( $aod_range, $value, 'AOD_RANGE' );
+
+sub parse_range_option {
+  my ( $option, $value, $option_name ) = @_;
+  my $result = 0;
+  my @values = split( /,/, $value );
+  my $count = @values;
+
+  if ( $option ne '' ) {
+    print STDERR "\nRedundant $option_name option\n";
+  } elsif ( $count != 2 ) {
+    print STDERR "\nRedundant $option_name option (require 2 numbers)\n";
+  } else {
+    $_[ 0 ] = $value;
+    $result = 1;
+  }
+
+  return $result;
+}
+
+
+
+# my $ok = in_range( $value, $minimum, $maximum );
+
+sub in_range {
+  my ( $value, $minimum, $maximum ) = @_;
+  my $result = $value >= $minimum && $value <= $maximum;
+  return $result;
+}
+
+
+
+# my $is_valid = is_valid_time( '2001-08-26t20:00:00z/2001-08-27t23:59:59z' );
+
+sub is_valid_time {
+  my $time = shift;
+  my $result = 0;
+  my $length = length( $time );
+
+  if ( $length == 41 ) {
+    $result = is_valid_time( substr( $time, 0, 20 ) );
+    $result = $result && substr( $time, 20, 1 ) eq '/';
+    $result = $result && is_valid_time( substr( $time, 21, 20 ) );
+    $result = $result && substr( $time, 0, 20 ) le substr( $time, 21, 20 );
+  } elsif ( $length == 20 ) {
+    my $year   = substr( $time, 0, 4 );
+    my $month  = substr( $time, 5, 2 );
+    my $day    = substr( $time, 8, 2 );
+    my $hour   = substr( $time, 11, 2 );
+    my $minute = substr( $time, 14, 2 );
+    my $second = substr( $time, 17, 2 );
+    $result = in_range( $year, 1900, 3000 );
+    $result = $result && in_range( $month, 1, 12 );
+    $result = $result && in_range( $day, 1, days_in_month( $year, $month ) );
+    $result = $result && in_range( $hour, 0, 23 );
+    $result = $result && in_range( $minute, 0, 59 );
+    $result = $result && in_range( $second, 0, 59 );
+    $result = $result && substr( $time, 4, 1 ) eq '-';
+    $result = $result && substr( $time, 7, 1 ) eq '-';
+    $result = $result && substr( $time, 10, 1 ) eq 't';
+    $result = $result && substr( $time, 13, 1 ) eq ':';
+    $result = $result && substr( $time, 16, 1 ) eq ':';
+    $result = $result && substr( $time, 19, 1 ) eq 'z';
+  }
+
+  return $result;
+}
+
+
+
+
+
+
+# my $leap = is_leap_year( $year );
+
+sub is_leap_year {
+  my $year = shift;
+  my $result = $year % 4 == 0 && ( $year % 100 != 0 || $year % 400 == 0 );
+  return $result;
+}
+
+
+
+# my $days = days_in_month( $year, $month );
+
+sub days_in_month {
+  my $year  = shift;
+  my $month = shift;
+
+  # 30 days hath September, April, June and November...
+
+  my @days_per_month = ( 31, 28, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31 );
+  my $result = $days_per_month[ $month - 1 ];
+
+  if ( $month == 2 ) {
+
+    if ( is_leap_year( $year ) ) {
+      ++$result;
+    }
+  }
+
+  return $result;
+}
+
+
+
+
+

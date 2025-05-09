@@ -1,0 +1,66 @@
+#!/bin/csh -f
+
+# Create an ESDR feed on behalf of a RETIGO user
+# Comma separated rgument list contains hex encoded channel names
+
+if ( $#argv != 1 ) then
+  echo
+  echo "Usage: create_feed string"
+  echo
+  exit 1
+endif
+
+
+set channel_names   = `echo "$1" |cut -c1-1024 | sed 's/,/ /g'`
+
+set uniqueID   = `/bin/date '+%s'`
+
+set dir        = /rsig/retigo/esdr/feeds
+
+set uniqueFile = ${dir}/feed_${uniqueID}_$$.txt
+
+set Lbrace = "LBRACE"
+set Rbrace = "RBRACE"
+
+# Define untaint command. Remove all characters except:
+# octal 40: space
+# octal 42: double quote
+# octal 43: hash
+# octal 47-133: safe characters
+# octal 135-175: safe characters
+set untaint_cmd =  "/usr/bin/tr -cd '\40\42\43\47-\133\135-\175'"
+
+echo -n '{"name":"Retigo data collection","exposure":"outdoor","isPublic":0,"isMobile":1,"latitude":35.9041,"longitude":-78.9478,"channelSpecs":{"comments":["## RETIGO upload"],"channels":{' > $uniqueFile
+
+
+@ counter = 1
+@ length =  $#channel_names
+foreach this_channel_name ($channel_names)
+  set decoded_name = `echo "$this_channel_name" | xxd -r -p | $untaint_cmd`
+
+  set thisCol = \"Column${counter}\":${Lbrace}\"prettyName\":\"${decoded_name}\"${Rbrace}
+  echo -n "$thisCol" | sed 's/LBRACE/{/g' | sed 's/RBRACE/}/g' >> $uniqueFile
+
+  if ( $counter < $length ) then
+    echo -n "," >> $uniqueFile
+  endif
+
+  @ counter += 1
+end
+
+echo -n "}}}" >> $uniqueFile
+
+set access_token = `cat /rsig/retigo/esdr/latest_access_token.txt`
+set device_id    = `cat /rsig/retigo/esdr/deviceID.txt`
+set quote = '"'
+
+set cmd = "/usr/bin/curl -s -X POST -H ${quote}Content-Type:application/json${quote} -H ${quote}Authorization: Bearer ${access_token}${quote} https://esdr.cmucreatelab.org/api/v1/devices/${device_id}/feeds -d @${uniqueFile}"
+
+set cmdFile = ${uniqueFile}.cmd
+echo '#\!/bin/csh -f' > ${cmdFile}
+echo "$cmd" >> ${cmdFile}
+chmod +x ${cmdFile}
+set esdrResponse = `${cmdFile} | python2 -c 'import simplejson as json,sys;obj=json.load(sys.stdin);print obj["data"]["apiKey"];'`
+echo -n "$esdrResponse"
+/bin/rm -f ${cmdFile}
+

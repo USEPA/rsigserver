@@ -1,0 +1,74 @@
+#!/bin/csh -f
+# Compile libPNG.a
+
+set LIBRARY = PNG
+set INCLUDE_DIR = ../../../../include
+
+# Determine the platform using uname:
+
+set uname_ = "`uname`"
+set uname_m = "`uname -m`"
+set platform = "$uname_.$uname_m"
+
+echo "platform is $platform"
+
+set LIB_DIR = ../../../../lib/$platform
+set LIB = $LIB_DIR/lib$LIBRARY.a
+
+if ( "$platform" == "IRIX64" ) then
+  setenv SGI_ABI "-64"
+  setenv CC "cc -64 -mips4 -xansi -fullwarn"
+  setenv CXX "CC -64 -mips4 LANG:std -fullwarn"
+else if ( "$platform" == "SunOS" ) then
+  setenv CC "gcc -m64"
+  setenv CXX "g++ -m64"
+  setenv LD "$CC"
+else if ( "$platform" == "AIX" ) then
+  set CC = 'xlc -q64 -qlanglvl=ansi -qfloat=nomaf -U__STR__'
+  set CXX = 'xlc -q64 -qfloat=nomaf -U__STR__'
+  set AR = 'ar -X64 -rv'
+  set RANLIB = 'ar -X64 -t'
+else if ( "$platform" == "Linux.i686" ) then
+  set CC = 'gcc'
+  set CXX = 'g++'
+else if ( "$platform" == "Linux.x86_64" ) then
+  set CC  = 'gcc -m64 -D_FILE_OFFSET_BITS=64 -D_LARGEFILE_SOURCE'
+  set CXX = 'g++ -m64 -D_FILE_OFFSET_BITS=64 -D_LARGEFILE_SOURCE'
+  setenv LD "$CC"
+else if ( "$platform" == "Linux.ia64" ) then
+  set CC  = 'icc'
+  set CXX = 'icc'
+  set LD "$CC"
+else if ( "$platform" == "Darwin.x86_64" || "$platform" == "Darwin.arm64" ) then
+  setenv CC "gcc -m64"
+  setenv LD "$CC"
+##setenv CFLAGS "-arch x86_64 -arch i686 -arch ppc"
+  setenv CFLAGS ""
+  setenv CXX "g++"
+  setenv CXXFLAGS "$CFLAGS"
+  setenv RANLIB "ranlib"
+  setenv AR "libtool"
+  setenv ARFLAGS "-static -o"
+endif
+
+set here = `pwd`
+
+./configure --disable-shared
+make clean
+make
+
+if ( $status ) exit $status
+
+cd .libs
+cp -p libpng16.a ../$LIB
+cd $here
+
+# Copy headers:
+
+cp -p png.h pngconf.h pnglibconf.h $INCLUDE_DIR/
+
+# Show updated products:
+
+ls -Fsalt $INCLUDE_DIR $LIB
+file $LIB
+

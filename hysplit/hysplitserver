@@ -1,0 +1,948 @@
+#!/usr/bin/perl -wT
+
+##############################################################################
+# PURPOSE: hysplitserver - Serve extract of HYSPLIT gridded model PM25 data,
+#          subsetted by date/time range, variable, and longitude-latitude box,
+#          in ASCII format for use by Ana Rappold's Wildfire App.
+#
+# NOTES:   Server is WCS-compliant:
+#          https://www.opengeospatial.org/standards/wcs
+#          https://datafed.net/xs/OpenGIS/wcs/1.0.0/
+#          and modeled after a similar webserver application:
+#          https://webapps.datafed.net/ogc_EPA.wsfl
+#
+#          Launches the C program HYSPLITSubset which streams the data on
+#          stdout.
+#
+#          Example usage:
+#
+#          curl -k --silent --retry 0 -L --tcp-nodelay --max-time 0 \
+#            'https://ofmpub.epa.gov/rsig/rsigserver?\
+#            SERVICE=wcs&\
+#            VERSION=1.0.0&\
+#            REQUEST=GetCoverage&\
+#            COVERAGE=hysplit.pm25&\
+#            TIME=2008-02-28T00:00:00Z/2008-03-01T23:59:59Z&\
+#            BBOX=-111,31,-110,32&\
+#            FORMAT=ascii'
+#
+# HISTORY: 2017-01-27 plessel.todd@epa.gov 1-919-541-5500
+#
+# STATUS:  unreviewed tested
+##############################################################################
+
+use strict;
+package main;
+$| = 1; # Turn off output buffering so messages appear in correct order.
+alarm( 3600 ); # Kill process after 1 hour. Legitimate usage could be an hour!
+# Restrict PATH and ENV. (But before popen, ENV is cleared!)
+delete @ENV{ 'PATH', 'IFS', 'CDPATH', 'ENV', 'BASH_ENV' };
+
+
+############################## TUNABLE CONSTANTS #############################
+
+
+my $debugging = 0; # 1 = print debug messages to STDERR logs/error_log.
+
+# Server where this program is installed:
+
+my $server_path = 'https://YOUR_WEBSERVER_HOST/cgi-bin';
+my $curl = '/usr/bin/curl --silent --retry 0 -L --tcp-nodelay --max-time 3600';
+my $curl_command =
+  "$curl '$server_path/airnowserver?SERVICE=wcs&VERSION=1.0.0&" .
+  "REQUEST=GetCoverage&COVERAGE=pm25&" .
+  "TIME=YYYY1-MM1-DD1T00:00:00Z/YYYY2-MM2-DD2T23:59:59Z&" .
+  "BBOX=LONMIN,LATMIN,LONMAX,LATMAX&FORMAT=ascii'";
+
+# Internal EPA server where the data and subset program are installed:
+
+my $list_file = "/data/tmp/HYSPLITserver_input_files.$$";
+my $data_directory = '/data/HYSPLIT/data';
+my $bindir     = '/rsig/current/code/bin/Linux.x86_64';
+my $subsetter  = "$bindir/HYSPLITSubset";
+
+# Query string parsing routine dispatch table:
+
+my %parsers = (
+  'service'  => \&parse_service_option,
+  'version'  => \&parse_version_option,
+  'request'  => \&parse_request_option,
+  'coverage' => \&parse_coverage_option,
+  'time'     => \&parse_time_option,
+  'bbox'     => \&parse_bbox_option,
+  'format'   => \&parse_format_option
+);
+
+
+# Webserver content types for each output format:
+
+my %content_types = (
+  'ascii' => 'text/plain'
+);
+
+# Full URL path to this program:
+
+my @pathed_program_parts = split( /\//, $0 );
+my $program_name = $pathed_program_parts[ @pathed_program_parts - 1 ];
+my $program = "$server_path/$program_name";
+
+
+################################## VARIABLES #################################
+
+
+# Parsed from the URL query string:
+
+my $service       = ''; # wcs.
+my $version       = ''; # 1.0.0.
+my $request       = ''; # getcapabilities or describecoverage or getcoverage.
+my $coverage      = ''; # Saved until time has been parsed.
+my $format        = ''; # xdr, ascii, netcdf, ioapi.
+my $time          = ''; # E.g., 2001-08-29t00:00:00z/2001-08-31t23:59:59z.
+my $bbox          = ''; # E.g., -90,28,-80,32,1,1. Where 1,1 means layer 1 only
+
+# Derived from the above parsed values:
+
+my $data_files         = ''; # /data/HYSPLIT/data/PM25_0_24_ugm3_20080101.txt
+my @bounds = split( /,/, '-180,-90,180,90' );
+my $starting_timestamp = 0;  # yyyymmddhh, e.g., 2005082600.
+my $ending_timestamp   = 0;  # yyyymmddhh, e.g., 2005083000.
+my $hours              = 0;  # E.g., 5 days = 5 x 24 = 120.
+my $command            = ''; # Subset command to run.
+
+
+################################## ROUTINES ##################################
+
+
+main();
+
+
+sub main {
+  my $result = 0;
+
+  if ( ! parse_url() ) {
+    print "Content-type: text/plain; charset=iso-8859-1\n\n"; # For webserver
+  } elsif ( $request eq 'getcapabilities' ) {
+    print "Content-type: text/xml; charset=iso-8859-1\n\n"; # For webserver
+    print_capabilities();
+    $result = 1;
+  } elsif ( $request eq 'describecoverage' ) {
+    print "Content-type: text/xml; charset=iso-8859-1\n\n"; # For webserver
+    print_coverage_description();
+    $result = 1;
+  } elsif ( $request eq 'getcoverage' ) {
+    print "Content-type: $content_types{ $format }; charset=iso-8859-1\n\n";
+    compute_time_range();
+    compute_input_files();
+
+    if ( $data_files ne '' ) {
+  
+      # Create list_file for subsetter to read:
+
+      open ( FH, "> $list_file" ) or die "Couldn't open file $list_file";
+      print FH $data_files;
+      close FH or die "Cannot close $list_file: $!";
+
+      construct_airnow_command();
+      $result = execute_airnow_command();
+      $result = $result && construct_command();
+      $result = $result && execute_command( $command );
+      debug( "unlink( '$list_file' )" );
+
+      if ( $debugging == 0 ) {
+        unlink( $list_file );
+      }
+    }
+  }
+
+  $result = 1 - $result; # UNIX: zero is success, non-zero is failure.
+  debug( "exit result = $result" );
+  exit $result;
+}
+
+
+
+# Print web server capabilities metadata.
+
+sub print_capabilities {
+  print '<?xml version="1.0" encoding="UTF-8" ?>' . "\n";
+  print '<WCS_Capabilities version="1.0.0" ';
+  print 'xmlns="https://www.opengeospatial.org/standards/wcs" ';
+  print 'xmlns:gml="https://www.opengis.net//gml" ';
+  print 'xmlns:xlink="https://www.w3.org/1999/xlink">';
+  print '
+    <Service>
+        <metadataLink xlink:type="simple" xlink:href=" https://www.epa.gov/rsig" metadataType="other" />
+        <description>EPA HYSPLIT Web Server 1.0.0</description>
+        <name>EPA_HYSPLIT_OGC_WCS_1.0.0</name>
+        <label>EPA HYSPLIT Web Server 1.0.0</label>
+        <keywords>
+            <keyword>EPA</keyword>
+            <keyword>HYSPLIT</keyword>
+            <keyword>interoperability</keyword>
+        </keywords>
+        <responsibleParty>
+            <individualName>Todd Plessel</individualName>
+            <organisationName>EPA Vislab</organisationName>
+            <contactInfo>
+                <onlineResource xlink:type="simple" xlink:href="mailto:plessel.todd@epa.gov" />
+            </contactInfo>
+        </responsibleParty>
+        <fees>NONE</fees>
+        <accessConstraints>NONE</accessConstraints>
+    </Service>
+    <Capability>
+        <Request>
+            <GetCapabilities>
+                <DCPType>
+                    <HTTP>
+                        <Get>
+                            <OnlineResource xlink:type="simple" xlink:href="https://ofmpub.epa.gov/rsig/cmaqserver?" />
+                        </Get>
+                        <Post>
+                            <OnlineResource xlink:type="simple" xlink:href="https://ofmpub.epa.gov/rsig/cmaqserver" />
+                        </Post>
+                    </HTTP>
+                </DCPType>
+            </GetCapabilities>
+            <DescribeCoverage>
+                <DCPType>
+                    <HTTP>
+                        <Get>
+                            <OnlineResource xlink:type="simple" xlink:href="https://ofmpub.epa.gov/rsig/cmaqserver?" />
+                        </Get>
+                        <Post>
+                            <OnlineResource xlink:type="simple" xlink:href="https://ofmpub.epa.gov/rsig/cmaqserver" />
+                        </Post>
+                    </HTTP>
+                </DCPType>
+            </DescribeCoverage>
+            <GetCoverage>
+                <DCPType>
+                    <HTTP>
+                        <Get>
+                            <OnlineResource xlink:type="simple" xlink:href="https://ofmpub.epa.gov/rsig/cmaqserver?" />
+                        </Get>
+                        <Post>
+                            <OnlineResource xlink:type="simple" xlink:href="https://ofmpub.epa.gov/rsig/cmaqserver" />
+                        </Post>
+                    </HTTP>
+                </DCPType>
+            </GetCoverage>
+        </Request>
+        <Exception>
+            <Format>text/xml; charset="utf-8"</Format>
+        </Exception>
+    </Capability>
+    <ContentMetadata version="1.0.0">
+    <CoverageOfferingBrief>
+      <name>pm25</name>
+      <label>pm25(ug/m3)</label>
+    <description>HYSPLIT modeled hourly aerosol fine particulates not more than 2.5 microns in diameter</description>
+      <lonLatEnvelope srsName="WGS84(DD)">
+        <gml:pos>-125 25</gml:pos>
+        <gml:pos>-65 50</gml:pos>
+      </lonLatEnvelope>
+    </CoverageOfferingBrief>
+  </ContentMetadata>
+</WCS_Capabilities>';
+}
+
+
+
+# Print web server coverage description metadata.
+
+sub print_coverage_description {
+  print '<?xml version="1.0" encoding="UTF-8" ?>';
+  print '<CoverageDescription version="1.0.0" ';
+  print 'xmlns="https://www.opengeospatial.org/standards/wcs" ';
+  print 'xmlns:gml="https://www.opengis.net/gml" ';
+  print 'xmlns:xlink="https://www.w3.org/1999/xlink">';
+  print '
+  <CoverageOffering>
+    <name>pm25</name>
+    <label>pm25(ug/m3)</label>
+    <description>HYSPLIT modeled hourly aerosol fine particulates not more than 2.5 microns in diameter</description>
+    <domainSet>
+      <spatialDomain>
+        <gml:Envelope srsName="WGS84(DD)">
+          <gml:pos>-125 25</gml:pos>
+          <gml:pos>-65 50</gml:pos>
+        </gml:Envelope>
+      </spatialDomain>
+      <temporalDomain>
+        <timePeriod>
+          <beginPosition>2011-01-01T00:00:00Z</beginPosition>
+          <endPosition>2015-12-31T23:59:59Z</endPosition>
+          <timeResolution>PT1H</timeResolution>
+        </timePeriod>
+      </temporalDomain>
+    </domainSet>
+    <rangeSet>
+      <RangeSet>
+        <name>pm25</name>
+        <label>pm25(ug/m3)</label>
+        <description>HYSPLIT modeled hourly aerosol fine particulates not more than 2.5 microns in diameter</description>
+        <nullValues>
+          <singleValue>-9999.0</singleValue>
+        </nullValues>
+      </RangeSet>
+    </rangeSet>
+    <supportedCRSs>
+      <requestResponseCRSs>CRS:84</requestResponseCRSs>
+      <nativeCRSs>CRS:84</nativeCRSs>
+    </supportedCRSs>
+    <supportedFormats>
+      <formats>ASCII</formats>
+    </supportedFormats>
+    <supportedInterpolations>
+      <interpolationMethod>none</interpolationMethod>
+    </supportedInterpolations>
+  </CoverageOffering>
+</CoverageDescription>';
+}
+
+
+
+# Parse URL parameters into variables.
+
+sub parse_url {
+  use CGI qw/ untaint /;     # Load Safe untainting CGI routines.
+  $CGI::DISABLE_UPLOADS = 1; # Disable uploads.
+  $CGI::POST_MAX = 1024;     # Limit posts to 1024 bytes.
+  my $query = new CGI;       # Parse QUERY_STRING.
+  %ENV = ();                 # Unset all environment variables.
+  my @names = $query->param; # Extract names of parameters.
+  my $count = @names;
+  my $result = 0;
+  debug( "$program_name @names ($count)" );
+
+  for ( my $parameter = 0; $parameter < $count; ++$parameter) {
+    $_ = $names[ $parameter ];                # $_ is tainted.
+    s/[^A-Za-z]/_/go;                         # Untaint $_.
+    my $option = $_;                          # $option is untainted.
+    $_ = $query->param( $option );            # $_ is tainted.
+    s/[^\w\-.,:\/]/_/go;                      # Untaint $_.
+    my $value = $_;                           # $value is untainted.
+    my $lowercase_option = lc( $option );
+    my $lowercase_value  = lc( $value );
+    debug( "$lowercase_option $lowercase_value" );
+
+    if ( $parsers{ $lowercase_option } ) {
+      $result = $parsers{ $lowercase_option }->( $lowercase_value );
+    } else {
+      print STDERR "\nInvalid option: '$option'\n";
+      $result = 0;
+    }
+
+    if ( ! $result ) {
+      $parameter = $count; # Finish looping.
+    }
+  }
+
+  $result = $result && required_options_specified();
+  return $result;
+}
+
+
+
+# Parse service option.
+
+sub parse_service_option {
+  my $value = shift;
+  my $result = parse_option( $service, $value, 'SERVICE', 'wcs' );
+  return $result;
+}
+
+
+
+# Parse version option.
+
+sub parse_version_option {
+  my $value = shift;
+  my $result = parse_option( $version, $value, 'VERSION', '1.0.0' );
+  return $result;
+}
+
+
+
+# Parse request option.
+
+sub parse_request_option {
+  my $value = shift;
+  my $result = parse_option( $request, $value, 'REQUEST',
+                             'getcoverage getcapabilities describecoverage' );
+  return $result;
+}
+
+
+
+# Parse format option:
+
+sub parse_format_option {
+  my $value = shift;
+  my $result = parse_option( $format, $value, 'FORMAT', 'ascii' );
+  return $result;
+}
+
+
+
+# Parse coverage option.
+
+sub parse_coverage_option {
+  my $value = shift;
+  my $result = parse_option( $coverage, $value, 'COVERAGE', 'pm25' );
+  return $result;
+}
+
+
+
+# Parse time option.
+
+sub parse_time_option {
+  my $value = shift;
+  my $result = 0;
+
+  if ( $time ne '' ) {
+    print STDERR "\nRedundant TIME option: '$value'\n";
+  } else {
+    $time = $value;
+    my $is_valid = is_valid_time( $time );
+
+    if ( ! $is_valid ) {
+      print STDERR "\nInvalid TIME option: '$value'\n";
+    } else {
+      $result = 1;
+    }
+  }
+
+  return $result;
+}
+
+
+
+# Parse bbox option.
+
+sub parse_bbox_option {
+  my $value = shift;
+  my $result = 0;
+
+  if ( $bbox ne '' ) {
+    print STDERR "\nRedundant BBOX option: '$value'\n";
+  } else {
+    $bbox = $value;
+    @bounds = split( /,/, $bbox );
+    my $bounds_count = @bounds;
+
+    if ( $bounds_count != 4 && $bounds_count != 6 ) {
+      print STDERR "\nInvalid bbox option: '$value'\n";
+    } elsif ( ! in_range( $bounds[ 0 ], -180.0, 180.0 ) ) {
+      print STDERR "\nInvalid bbox option: '$bounds[ 0 ]'\n";
+    } elsif ( ! in_range( $bounds[ 1 ], -90.0, 90.0 ) ) {
+      print STDERR "\nInvalid bbox option: '$bounds[ 1 ]'\n";
+    } elsif ( ! in_range( $bounds[ 2 ], $bounds[ 0 ], 180.0 ) ) {
+      print STDERR "\nInvalid bbox option: '$bounds[ 2 ]'\n";
+    } elsif ( ! in_range( $bounds[ 3 ], $bounds[ 1 ], 90.0 ) ) {
+      print STDERR "\nInvalid bbox option: '$bounds[ 3 ]'\n";
+    } else {
+      $result = 1;
+    }
+  }
+
+  return $result;
+}
+
+
+
+# Check that all required 'options' have been specified:
+
+sub required_options_specified {
+  my $result = 0;
+
+  if ( $service eq '' ) {
+    print STDERR "\nMissing option: 'SERVICE'\n";
+  } elsif ( $version eq '' ) {
+    print STDERR "\nMissing option: 'VERSION'\n";
+  } elsif ( $request eq '' ) {
+    print STDERR "\nMissing option: 'REQUEST'\n";
+  } elsif ( $request eq 'getcoverage' ) {
+
+    if ( $format eq '' ) {
+      print STDERR "\nMissing option: 'FORMAT'\n";
+    } elsif ( $time eq '' ) {
+      print STDERR "\nMissing option: 'TIME'\n";
+    } elsif ( $bbox eq '' ) {
+      print STDERR "\nMissing option: 'BBOX'\n";
+    } elsif ( $coverage eq '' ) {
+      print STDERR "\nMissing option: 'COVERAGE'\n";
+    } else {
+      $result = 1;
+    }
+  } else {
+    $result = 1;
+  }
+
+  return $result;
+}
+
+
+
+# Compute starting_timestamp and hours.
+# inputs:  $time = '2005-08-26t00:00:00z/2005-08-31t23:59:59z'
+# outputs: $starting_timestamp = 2005082600
+#          $hours = 120
+
+sub compute_time_range {
+  my $yyyy1 = substr( $time, 0, 4 );
+  my $mm1   = substr( $time, 5, 2 );
+  my $dd1   = substr( $time, 8, 2 );
+  my $hh1   = substr( $time, 11, 2 );
+  my $i     = index( $time, '/' );
+
+  $starting_timestamp = integer_timestamp( $yyyy1, $mm1, $dd1, $hh1 );
+  $ending_timestamp   = $starting_timestamp;
+  $hours = 1;
+
+  if ( $i != -1 ) {
+    ++$i;
+    my $yyyy2 = substr( $time, $i + 0, 4 );
+    my $mm2   = substr( $time, $i + 5, 2 );
+    my $dd2   = substr( $time, $i + 8, 2 );
+    my $hh2   = substr( $time, $i + 11, 2 );
+    my $yyyy  = $yyyy1;
+    my $mm    = $mm1;
+    my $dd    = $dd1;
+    my $hh    = $hh1;
+    $ending_timestamp = integer_timestamp( $yyyy2, $mm2, $dd2, $hh2 );
+
+    while ( integer_timestamp( $yyyy, $mm, $dd, $hh ) != $ending_timestamp ) {
+      increment_timestamp( $yyyy, $mm, $dd, $hh );
+      ++$hours;
+    }
+  }
+}
+
+
+
+# Compute list of input data files.
+
+sub compute_input_files {
+  my $months_per_year = 12;
+  my $hours_per_day   = 24;
+  my $hh              = $starting_timestamp % 100;
+  my $yyyymmdd        = int( $starting_timestamp / 100 );
+  my $yyyy            = int( $yyyymmdd / 10000 );
+  my $mm              = int( $yyyymmdd / 100 ) % 100;
+  my $dd              = $yyyymmdd % 100;
+  my $last_timestep   = $hh + $hours - 1;
+  my $days            = int( 1 + $last_timestep / $hours_per_day );
+
+  # Must start with previous day file since it contains data for hours 0..6:
+
+  decrement_date( $yyyy, $mm, $dd );
+  ++$days;
+
+  $data_files = '';
+
+  while ( $days-- ) {
+    my $days_this_month = days_in_month( $yyyy, $mm );
+    my $next_data_file =
+      sprintf( "$data_directory/PM25_0_24_ugm3_%04d%02d%02d.txt",
+               $yyyy, $mm, $dd );
+
+    if ( -f $next_data_file ) {
+      $data_files .= "$next_data_file\n";
+    }
+
+    ++$dd;
+
+    if ( $dd > $days_this_month ) {
+      $dd = 1;
+      ++$mm;
+
+      if ( $mm > $months_per_year ) {
+        $mm = 1;
+        ++$yyyy;
+      }
+    }
+  }
+}
+
+
+
+# Construct command.
+
+sub construct_command {
+  my $result = 1;
+  my @bounds = split( /,/, $bbox );
+  my $domain = " -domain $bounds[0] $bounds[1] $bounds[2] $bounds[3] ";
+
+  $command =
+    "$subsetter" .
+    " -files $list_file" .
+    " -timestamp $starting_timestamp -hours $hours " .
+    " -domain $bounds[0] $bounds[1] $bounds[2] $bounds[3] " .
+    " -scale 1e9 ";
+
+  return $result;
+}
+
+
+
+# Construct Airnow/AQS command.
+
+sub construct_airnow_command {
+
+  # Check date and if more than 90 days before today, use AQS, else use Airnow:
+
+  my ($sec, $min, $hour, $mday, $mon, $year, $wday, $yday, $isdst) = gmtime();
+  my $yyyy2 = $year + 1900;
+  my $mm2 = $mon + 1;
+  my $dd2 = $mday;
+  my $days = 90;
+
+  while( $days-- ) {
+    decrement_date( $yyyy2, $mm2, $dd2 );
+  }
+
+  my $yyyymmdd2 = $yyyy2 * 10000 + $mm2 * 100 + $dd2;
+  my $yyyymmdd = int( $starting_timestamp / 100 );
+  my $difference = $yyyymmdd - $yyyymmdd2;
+  my $use_aqs = ( $difference < -90 ) ? 1 : 0;
+  debug( "$yyyymmdd $yyyymmdd2 $use_aqs" );
+  $command = $curl_command;
+
+  if ( $use_aqs ) {
+    $command =~ s/airnow/aqs/;
+  }
+
+  # Get Airnow/AQS data for previous 14 days:
+
+  $yyyy2 = int( $yyyymmdd / 10000 );
+  $mm2   = int( $yyyymmdd / 100 ) % 100;
+  $dd2   = $yyyymmdd % 100;
+  my $yyyy1 = $yyyy2;
+  my $mm1   = $mm2;
+  my $dd1   = $dd2;
+
+  $days = 14;
+
+  while( $days-- ) {
+    decrement_date( $yyyy1, $mm1, $dd1 );
+  }
+
+  my $date_start = sprintf( "%04d-%02d-%02d", $yyyy1, $mm1, $dd1 );
+  my $date_end   = sprintf( "%04d-%02d-%02d", $yyyy2, $mm2, $dd2 );
+
+  $command =~ s/YYYY1-MM1-DD1/$date_start/;
+  $command =~ s/YYYY2-MM2-DD2/$date_end/;
+  $command =~ s/LONMIN/$bounds[0]/;
+  $command =~ s/LATMIN/$bounds[1]/;
+  $command =~ s/LONMAX/$bounds[2]/;
+  $command =~ s/LATMAX/$bounds[3]/;
+}
+
+
+
+# Query airnow/AQS web server and write formatted rows to a temporary file.
+# my $result = execute_airnow_command();
+
+sub execute_airnow_command {
+  my $result = 0;
+
+  # Untaint command (match expression is arbitrary as far as -T is concerned):
+
+  if ( $command =~ m#^(/[\w-]+/[\w -/.,'|^\[\]:?=&]+)$# ) {
+    $command = $1; # Re-assign first match, which is enough to satisfy -T.
+    debug( "executing command = $command" );
+    %ENV = (); # Unset all environment variables prior to popen.
+    # Complicated, supposedly safer way to open a readable pipe to command:
+    my $the_pipe = 0;
+    my $pid = open( the_pipe, "-|" );
+
+    if ( ! defined( $pid ) ) {
+      die "Couldn't open pipe to subprocess";
+    } elsif ( $pid ) { # Parent process.
+      debug( "reading result rows from airnowserver/aqsserver..." );
+      my $line = <the_pipe>; # Read first header line, if any.
+
+      if ( defined( $line ) ) {
+        my $mean = 0.0;
+        my $sum = 0.0;
+        my $count = 0;
+
+        # Read, count and sum each resulting line (that looks like this):
+        # 2008-02-14T00:00:00-0000	 -110.9367	   31.3372	040230004	    2.0000	                                       Nogales
+
+        while ( $line = <the_pipe> ) {
+          my @row = parse_line( $line );
+          debug( "row = @row\n" );
+
+          if ( $row[ 4 ] > -9999.0 ) { # Only consider non-missing values
+            $sum += $row[ 4 ]; # Sum PM25 value.
+            ++$count;
+          }
+        }
+
+        if ( $count == 0 ) {
+          $mean = -9999.0;
+        } else {
+          $mean = $sum / $count;
+        }
+
+        print "$mean\t";
+        $result = 1;
+      }
+
+      close( the_pipe ) or die $!;
+    } else { # Child process.
+      exec( $command ) or die "can't exec program: $!";
+    }
+  } else {
+    print STDERR "\n'$command' contains invalid characters.\n";
+  }
+
+  return $result;
+}
+
+
+
+# my @row = parse_line( $line );
+# Read and process each resulting line (that looks like this):
+# 2008-02-14T00:00:00-0000	 -110.9367	   31.3372	040230004	    2.0000	                                       Nogales
+
+sub parse_line {
+  my $line = shift;
+  my @row = split( /\t/, $line );
+  my $timestamp = $row[ 0 ];
+  my $longitude = $row[ 1 ];
+  my $latitude  = $row[ 2 ];
+  my $station   = $row[ 3 ];
+  my $value     = $row[ 4 ];
+  my @result = ( $timestamp, $longitude, $latitude, $station, $value );
+  return @result;
+}
+
+
+
+############################### HELPER ROUTINES ##############################
+
+
+
+# debug( message );
+
+sub debug {
+  my $message = shift;
+
+  if ( $debugging ) {
+    print STDERR "\n$message\n";
+  }
+}
+
+
+
+# Execute command and echo its output to STDOUT. E.g., execute_command( 'ls' );
+
+sub execute_command {
+  my $command = shift;
+  my $result = 0;
+  my $the_pipe = 0;
+
+  # Untaint command (match expression is arbitrary as far as -T is concerned):
+
+  if ( $command =~ m#^(/[\w-]+/[\w -/.:,'@|]+)$# ) {
+    $command = $1; # Re-assign first match, which is enough to satisfy -T.
+    debug( "$0 executing command = $command" );
+    %ENV = (); # Unset all environment variables prior to popen.
+    # Complicated, supposedly safer way to open a readable pipe to command:
+    my $pid = open( the_pipe, "-|" );
+
+    if ( ! defined( $pid ) ) {
+      die "Couldn't open pipe to subprocess";
+    } elsif ( $pid ) { # Parent process.
+
+      while ( <the_pipe> ) {
+        print;
+      }
+
+      close( the_pipe ) or die $!;
+      $result = ! $?;
+    } else { # Child process.
+      exec( $command ) or die "can't exec program: $!";
+    }
+  } else {
+    print STDERR "\n$0: '$command' contains invalid characters.\n";
+  }
+
+  return $result;
+}
+
+
+
+# my $result = parse_option( $option, $value, $option_name, $valid_values );
+# my $result = parse_option( $variable, $value, 'COVERAGE', 'ozone pm25' );
+
+sub parse_option {
+  my ( $option, $value, $option_name, $valid_values ) = @_;
+  my $result = 0;
+
+  if ( $option ne '' ) {
+    print STDERR "\nRedundant $option_name option: '$value'\n";
+  } else {
+    $result = index( " $valid_values ", " $value " ) != -1;
+
+    if ( $result ) {
+      $_[ 0 ] = $value;
+    } else {
+      print STDERR "\nInvalid $option_name option: '$value'\n";
+    }
+  }
+
+  return $result;
+}
+
+
+
+# my $ok = in_range( $value, $minimum, $maximum );
+
+sub in_range {
+  my ( $value, $minimum, $maximum ) = @_;
+  my $result = $value >= $minimum && $value <= $maximum;
+  return $result;
+}
+
+
+
+# my $is_valid = is_valid_time( '2001-08-26t20:00:00z/2001-08-27t23:59:59z' );
+
+sub is_valid_time {
+  my $time = shift;
+  my $result = 0;
+  my $length = length( $time );
+
+  if ( $length == 41 ) {
+    $result = is_valid_time( substr( $time, 0, 20 ) );
+    $result = $result && substr( $time, 20, 1 ) eq '/';
+    $result = $result && is_valid_time( substr( $time, 21, 20 ) );
+    $result = $result && substr( $time, 0, 20 ) le substr( $time, 21, 20 );
+  } elsif ( $length == 20 ) {
+    my $year   = substr( $time, 0, 4 );
+    my $month  = substr( $time, 5, 2 );
+    my $day    = substr( $time, 8, 2 );
+    my $hour   = substr( $time, 11, 2 );
+    my $minute = substr( $time, 14, 2 );
+    my $second = substr( $time, 17, 2 );
+    $result = in_range( $year, 1900, 3000 );
+    $result = $result && in_range( $month, 1, 12 );
+    $result = $result && in_range( $day, 1, days_in_month( $year, $month ) );
+    $result = $result && in_range( $hour, 0, 23 );
+    $result = $result && in_range( $minute, 0, 59 );
+    $result = $result && in_range( $second, 0, 59 );
+    $result = $result && substr( $time, 4, 1 ) eq '-';
+    $result = $result && substr( $time, 7, 1 ) eq '-';
+    $result = $result && substr( $time, 10, 1 ) eq 't';
+    $result = $result && substr( $time, 13, 1 ) eq ':';
+    $result = $result && substr( $time, 16, 1 ) eq ':';
+    $result = $result && substr( $time, 19, 1 ) eq 'z';
+  }
+
+  return $result;
+}
+
+
+
+# increment_timestamp( $yyyy, $mm, $dd, $hh );
+
+sub increment_timestamp {
+  my ( $yyyy, $mm, $dd, $hh ) = @_;
+  my $hours_per_day   = 23;
+  my $months_per_year = 12;
+  my $days_this_month = days_in_month( $yyyy, $mm );
+  ++$hh;
+
+  if ( $hh > $hours_per_day ) {
+    $hh = 0;
+    ++$dd;
+
+    if ( $dd > $days_this_month ) {
+      $dd = 1;
+      ++$mm;
+
+      if ( $mm > $months_per_year ) {
+        $mm = 1;
+        ++$yyyy;
+      }
+    }
+  }
+
+  $_[ 0 ] = $yyyy;
+  $_[ 1 ] = $mm;
+  $_[ 2 ] = $dd;
+  $_[ 3 ] = $hh;
+}
+
+
+# decrement_date( $yyyy, $mm, $dd );
+
+sub decrement_date {
+  my ( $yyyy, $mm, $dd ) = @_;
+  --$dd;
+
+  if ( $dd < 1 ) {
+    --$mm;
+
+    if ( $mm < 1 ) {
+       --$yyyy;
+       $mm = 12;
+    }
+
+    $dd = days_in_month( $yyyy, $mm );
+  }
+
+  $_[ 0 ] = $yyyy;
+  $_[ 1 ] = $mm;
+  $_[ 2 ] = $dd;
+}
+
+# my $yyyymmddhh = integer_timestamp( $yyyy, $mm, $dd, $hh );
+
+sub integer_timestamp {
+  my ( $yyyy, $mm, $dd, $hh ) = @_;
+  my $result = int( $yyyy * 1000000 + $mm * 10000 + $dd * 100 + $hh );
+  return $result;
+}
+
+
+
+# my $leap = is_leap_year( $year );
+
+sub is_leap_year {
+  my $year = shift;
+  my $result = $year % 4 == 0 && ( $year % 100 != 0 || $year % 400 == 0 );
+  return $result;
+}
+
+
+
+# my $days = days_in_month( $year, $month );
+
+sub days_in_month {
+  my $year  = shift;
+  my $month = shift;
+
+  # 30 days hath September, April, June and November...
+
+  my @days_per_month = ( 31, 28, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31 );
+  my $result = $days_per_month[ $month - 1 ];
+
+  if ( $month == 2 ) {
+
+    if ( is_leap_year( $year ) ) {
+      ++$result;
+    }
+  }
+
+  return $result;
+}
+
+
+

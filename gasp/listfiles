@@ -1,0 +1,87 @@
+#!/bin/csh -f
+# listfiles - List GASP AOD data files for given starting YYYYMMDDHH and HOURS.
+# 2009-11-12 plessel.todd@epa.gov 919-541-5500
+
+set data_directory = '/data/GASP/data'
+set temp = /data/tmp/listfiles.$$
+touch $temp ; \rm $temp
+
+@ ok = 0
+@ yyyymmddhh = 0
+@ hours      = 0
+
+if ( $#argv == 2 ) then
+  @ yyyymmddhh = $1
+  @ hours      = $2
+  @ ok = ($yyyymmddhh >= 1990010100 && $yyyymmddhh <= 2147123123 && $hours >= 1)
+
+  if ( ! $ok ) then
+    echo "$0 Invalid command-line arguments $1 $2"
+  endif
+endif
+
+if ( ! $ok ) then
+  echo
+  echo "$0 - List GASP AOD data files for given starting YYYYMMDDHH and HOURS."
+  echo "usage: $0 YYYYMMDDHH HOURS"
+  echo "example: $0 2008062112 4"
+  echo '/data/GASP/data/2008/2008173121514_i16_US.all.aod.gz'
+  echo '/data/GASP/data/2008/2008173124514_i16_US.all.aod.gz'
+  echo '/data/GASP/data/2008/2008173131514_i16_US.all.aod.gz'
+  echo '/data/GASP/data/2008/2008173134514_i16_US.all.aod.gz'
+  echo '/data/GASP/data/2008/2008173141514_i16_US.all.aod.gz'
+  echo '/data/GASP/data/2008/2008173144514_i16_US.all.aod.gz'
+  echo '/data/GASP/data/2008/2008173151514_i16_US.all.aod.gz'
+  echo '/data/GASP/data/2008/2008173154515_i16_US.all.aod.gz'
+  echo
+  exit 1
+endif
+
+# Convert (yyyymmddhh, hours) to (yyyydddhh1...yyyydddhh2):
+
+@ yyyy =   $yyyymmddhh / 1000000
+@ mm   = ( $yyyymmddhh / 10000 ) % 100
+@ dd   = ( $yyyymmddhh / 100 ) % 100
+@ hh   =   $yyyymmddhh % 100
+set days_per_month = ( 31 28 31 30 31 30 31 31 30 31 30 31 )
+@ leap = ( $yyyy % 4 == 0 && ! ( $yyyy % 100 == 0 && ! $yyyy % 400 == 0 ) )
+@ ddd = $dd
+@ m = 1
+while ( $m < $mm )
+  @ d = $days_per_month[$m] + ( ( $m == 2 ) * $leap )
+  @ ddd += $d 
+  @ m += 1
+end
+
+@ yyyydddhh = ( $yyyy * 100000 ) + ( $ddd * 100 ) + $hh
+
+@ days_per_year = 365 + $leap
+@ h = 1
+while ( $h <= $hours )
+
+  # List files matching yyyydddhh:
+
+  ls $data_directory/$yyyy/$yyyydddhh*_i??_US.all.aod* |& grep -v 'ls: ' >> $temp
+
+  @ hh += 1
+
+  if ( $hh == 24 ) then
+    @ hh = 0
+    @ ddd += 1
+
+    if ( $ddd > $days_per_year ) then
+      @ ddd = 1
+      @ yyyy += 1
+      @ leap = ($yyyy % 4 == 0 && ! ($yyyy % 100 == 0 && ! $yyyy % 400 == 0))
+      @ days_per_year = 365 + $leap
+    endif
+  endif
+
+  @ yyyydddhh = ( $yyyy * 100000 ) + ( $ddd * 100 ) + $hh
+
+  @ h += 1
+end
+
+cat $temp | sort | uniq
+\rm $temp
+

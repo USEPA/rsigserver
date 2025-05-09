@@ -1,0 +1,16 @@
+#!/bin/sh
+
+clear
+
+echo
+echo "Compiling GOESBBSubset..."
+
+gcc -m64 -Wall -D_FILE_OFFSET_BITS=64 -D_LARGEFILE_SOURCE -DNDEBUG -O -I. -o GOESBBSubset GOESBBSubset.c ReadData.c Utilities.c -L. -lNetCDF -lm -lc
+strip GOESBBSubset
+ls -l GOESBBSubset
+file  GOESBBSubset
+ldd   GOESBBSubset
+
+ls -Fsalt | head
+echo Done
+

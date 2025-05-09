@@ -1,0 +1,19 @@
+SUBSET 9.0 CMAQ
+TEMPO_L3
+http://tempo.si.edu/,TEMPOSubset
+2024-05-15T16:00:00-0000
+# data dimensions: timesteps variables layers rows columns:
+1 1 1 6 6
+# subset indices (0-based time, 1-based layer/row/column): first-timestep last-timestep first-layer last-layer first-row last-row first-column last-column:
+0 0 1 1 1300 1305 3900 3905
+# Variable names:
+vertical_column_sum
+# Variable units:
+molecules/cm2
+# lonlat projection: major_semiaxis minor_semiaxis
+6370000 6370000
+# Grid: ncols nrows xorig yorig xcell ycell vgtyp vgtop vglvls[2]:
+7750 2950 -167.990005 14.010000 0.020000 0.020000 6 40000 0 1
+# IEEE-754 64-bit reals data[variables][timesteps][layers][rows][columns]:
+C2OF³IQ`C3û9ÕìC8[²N•PC8Y\Î°C6@Út”C2³X!¶’C+Þ+è¶QQC,êüf¥<YC2ˆ»ŠµòC2oÙxtC1Ón9ñßÈC/îŠ=sÔC4 ”ñbh”C3ôéyÂC2`Ë [¸²C2`¨USâC3Hm6é%C5Â•}h¶‚C5IS[ šC5«uŒD·ïC9òt7òVC9óËƒŽ<C9£P¨C6--MÒàˆC5FÖ@òÏÈC5”ŸàfC:1ºG"^ÞC:1›ËQVC8Îî†1¦ÆC4Rˆ¾ÿC’C17yF4á…C1N¸%#ÂxC2ùÂ¹VC2ø$·
+jÖC3TìÙ÷€°C4¯Š˜VŠà

@@ -1,0 +1,2657 @@
+#!/usr/bin/perl -wT
+
+##############################################################################
+# PURPOSE: calipsoserver - Serve CALIPSO data, subsetted by date/time range,
+#          variable, and longitude-latitude box, in ASCII, XDR, MCMC,
+#          NetCDF-COARDS, NetCDF-IOAPI and original (compressed tar file of
+#          original hdf files) formats for use by other programs
+#          (e.g., via wget).
+#
+# NOTES:   Server is WCS-compliant:
+#          http://www.opengeospatial.org/standards/wcs
+#          http://datafed.net/xs/OpenGIS/wcs/1.0.0/
+#          and modeled after a similar webserver application:
+#          http://webapps.datafed.net/ogc_EPA.wsfl
+#
+#          Launches the C programs CALIPSOSubset and XDRConvert
+#          which stream the data back on STDOUT.
+#
+#          Example usage:
+#
+#          wget -q -c -T 0 -O - \
+#            'https://cain.larc.nasa.gov/cgi-bin/calipsoserver?SERVICE=wcs&\
+#             VERSION=1.0.0&REQUEST=GetCoverage&\
+#             COVERAGE=l1.spacecraft_altitude&\
+#             TIME=2006-07-05T00:00:00Z/2006-07-05T12:00:00Z&\
+#             BBOX=-100,35,-75,36,0,0&FORMAT=ascii'
+#
+# HISTORY: 2010/02/08, plessel.todd@epa.gov, 1-919-541-5500
+#
+#          2020/11/04, daniel.c.mangosing@nasa.gov, copied to new ASDC cain VM
+#          2021/01/14, walter.e.baskin@nasa.gov, calipsoserver running in prod
+#
+#		   2021/02/19, walter.e.baskin@nasa.gov  merged code updates from
+#						epa (plessel.todd@epa.gov)to support new CAL_LID versions.
+#				Summary of code changes:
+#	- Changed SQL to use exact match for data_version (rather than min/max range).
+#	- Simplified data_version to use 4.10 (for both L1 and L2) when not specified in query
+#		(since it returns data for both L1 and L2 on 2008-07-03 over CONUS - default in RSIG3D).
+#	- Relaxed logic in parse_data_version to accept anything that looks like '3.10' or even '3-10'.
+#		(No more need to check for specific allowed versions. Less maintenance burden.)
+#	- Fixed -maximumUncertainty flag passed to CALIPSOSubset.
+#							
+#
+# STATUS:  reviewed, tested.
+##############################################################################
+
+
+use strict;
+package main;
+$| = 1; # Turn off output buffering so messages appear in correct order.
+alarm( 3600 ); # Kill process after 1 hour. Legitimate usage could be an hour!
+# Restrict PATH and ENV. (But before popen, ENV is cleared!)
+delete @ENV{ 'PATH', 'IFS', 'CDPATH', 'ENV', 'BASH_ENV' };
+
+
+############################## TUNABLE CONSTANTS #############################
+
+
+# Turn-off debugging during production usage. (More secure.)
+# Only enable temporarily while diagnosing a problem.
+my $debugging = 1; # 1 = print debug messages to STDERR logs/error_log.
+
+# Server where this program is installed:
+
+my $server_path = 'http://cain-prod.larc.nasa.gov/cgi-bin';
+
+my $subsetter      = '/slocal/sites/cain.larc.nasa.gov/cgi-bin/rsig/code/bin/Linux/CALIPSOSubset';
+my $xdrconvert     = '/slocal/sites/cain.larc.nasa.gov/cgi-bin/rsig/code/bin/Linux/XDRConvert';
+my $compressor     = '/usr/bin/gzip -c';
+my $temp_directory = '/var/tmp';
+my $temp_list_file = "$temp_directory/calipsoserver_temp.$$";
+my $get_original_files  =
+  "/bin/cat $temp_list_file | /usr/bin/xargs /bin/tar -czf -";
+# To extract use: | tar -xz
+
+# Database-specific parameters:
+
+my $database = 'DBI:Pg:dbname=calipso;host=pgsql-dmz.larc.nasa.gov;port=5432';
+
+my $database_account = 'rsig';
+my $database_password = 'not_the_real_password'; # UGLY hard-coded, unencrypted password!
+
+my $timer = 0; # To time database processing.
+
+# Query string parsing routine dispatch table:
+
+my %parsers = (
+  'service'       => \&parse_service_option,
+  'version'       => \&parse_version_option,
+  'request'       => \&parse_request_option,
+  'coverage'      => \&parse_coverage_option,
+  'time'          => \&parse_time_option,
+  'bbox'          => \&parse_bbox_option,
+  'format'        => \&parse_format_option,
+  'compress'      => \&parse_compress_option,
+  'minimum_cad'   => \&parse_minimum_cad_option,
+  'maximum_uncertainty' => \&parse_maximum_uncertainty_option,
+  'regrid'        => \&parse_regrid_option,
+  'lambert'       => \&parse_lambert_option,
+  'stereographic' => \&parse_stereographic_option,
+  'mercator'      => \&parse_mercator_option,
+  'lonlat'        => \&parse_lonlat_option,
+  'ellipsoid'     => \&parse_ellipsoid_option,
+  'grid'          => \&parse_grid_option,
+  'levels'        => \&parse_levels_option,
+  'data_version'  => \&parse_data_version_option
+);
+
+# Webserver content types for each output format:
+
+my %content_types = (
+  'ascii'         => 'text/plain',
+  'mcmc'          => 'text/plain',
+  'xdr'           => 'application/octet-stream',
+  'netcdf-coards' => 'application/netcdf',
+  'netcdf-ioapi'  => 'application/netcdf',
+  'original'      => 'application/octet-stream' # Compressed tar file (tgz).
+);
+
+# Full URL path to this program:
+
+my @pathed_program_parts = split( /\//, $0 );
+my $program_name = $pathed_program_parts[ @pathed_program_parts - 1 ];
+my $program = "$server_path/$program_name";
+
+
+# Variable and units lists:
+
+my @_l1_variables = (
+  'Profile_Time',
+##'Profile_UTC_Time',
+  'Profile_ID',
+  'Land_Water_Mask',
+  'IGBP_Surface_Type',
+  'NSIDC_Surface_Type',
+  'Day_Night_Flag',
+  'Frame_Number',
+  'Lidar_Mode',
+  'Lidar_Submode',
+##'Surface_Elevation',
+  'Laser_Energy_532',
+  'Perpendicular_Amplifier_Gain_532',
+  'Parallel_Amplifier_Gain_532',
+  'Perpendicular_Background_Monitor_532',
+  'Parallel_Background_Monitor_532',
+  'Depolarization_Gain_Ratio_532',
+  'Depolarization_Gain_Ratio_Uncertainty_532',
+  'Calibration_Constant_532',
+  'Calibration_Constant_Uncertainty_532',
+  'Total_Attenuated_Backscatter_532',
+  'Perpendicular_Attenuated_Backscatter_532',
+  'Perpendicular_RMS_Baseline_532',
+  'Parallel_RMS_Baseline_532',
+  'Laser_Energy_1064',
+  'Amplifier_Gain_1064',
+  'Calibration_Constant_1064',
+  'Calibration_Constant_Uncertainty_1064',
+  'Attenuated_Backscatter_1064',
+  'RMS_Baseline_1064',
+  'Molecular_Number_Density',
+  'Ozone_Number_Density',
+  'Temperature',
+  'Pressure',
+  'Noise_Scale_Factor_532_Perpendicular',
+  'Noise_Scale_Factor_532_Parallel',
+  'Noise_Scale_Factor_1064',
+  'QC_Flag',
+  'QC_Flag_2',
+##'Latitude',
+##'Longitude',
+  'Off_Nadir_Angle',
+  'Viewing_Zenith_Angle',
+  'Viewing_Azimuth_Angle',
+  'Solar_Zenith_Angle',
+  'Solar_Azimuth_Angle',
+  'Scattering_Angle',
+  'Spacecraft_Altitude',
+  'Spacecraft_Position_X',
+  'Spacecraft_Position_Y',
+  'Spacecraft_Position_Z',
+  'Spacecraft_Velocity_X',
+  'Spacecraft_Velocity_Y',
+  'Spacecraft_Velocity_Z',
+  'Spacecraft_Attitude_X',
+  'Spacecraft_Attitude_Y',
+  'Spacecraft_Attitude_Z',
+  'Spacecraft_Attitude_Rate_X',
+  'Spacecraft_Attitude_Rate_Y',
+  'Spacecraft_Attitude_Rate_Z',
+  'Subsatellite_Latitude',
+  'Subsatellite_Longitude',
+  'Earth-Sun_Distance',
+  'Subsolar_Latitude',
+  'Subsolar_Longitude'
+);
+
+my @_l1_descriptions = @_l1_variables;
+
+my @_l1_units = (
+  'seconds_since_1993-01-01',
+##'yyyymmdd.f',
+  '-',
+  '-',
+  '-',
+  '-',
+  '-',
+  '-',
+  '-',
+  '-',
+##'km',
+  'J',
+  'V/V',
+  'V/V',
+  'counts',
+  'counts',
+  '-',
+  '-',
+  'km3*sr*counts',
+  'km3*sr*counts',
+  '/km/sr',
+  '/km/sr',
+  'counts',
+  'counts',
+  'J',
+  'V/V',
+  'km3*sr*counts',
+  'km3*sr*counts',
+  '/km/sr',
+  'counts',
+  'molecules/m3',
+  'molecules/m3',
+  'degC',
+  'hPa',
+  'square_root_of_counts',
+  'square_root_of_counts',
+  'square_root_of_counts',
+  '-',
+  '-',
+##'degrees',
+##'degrees',
+  'degrees',
+  'degrees',
+  'degrees',
+  'degrees',
+  'degrees',
+  'degrees',
+  'km',
+  'km',
+  'km',
+  'km',
+  'km/s',
+  'km/s',
+  'km/s',
+  'degrees',
+  'degrees',
+  'degrees',
+  'deg/s',
+  'deg/s',
+  'deg/s',
+  'degrees',
+  'degrees',
+  'AU',
+  'degrees',
+  'degrees'
+);
+
+
+
+my @_l2_01kmclay_variables = (
+  'Profile_ID',
+##'Latitude',
+##'Longitude',
+##'Profile_Time',
+##'Profile_UTC_Time',
+  'Day_Night_Flag',
+  'Off_Nadir_Angle',
+  'Solar_Zenith_Angle',
+  'Solar_Azimuth_Angle',
+  'Scattering_Angle',
+  'Spacecraft_Position_X',
+  'Spacecraft_Position_Y',
+  'Spacecraft_Position_Z',
+##'Parallel_Column_Reflectance_532',
+  'Parallel_Column_Reflectance_Uncertainty_532',
+  'Perpendicular_Column_Reflectance_532',
+  'Perpendicular_Column_Reflectance_Uncertainty_532',
+  'Column_Integrated_Attenuated_Backscatter_532',
+  'Column_IAB_Cumulative_Probability',
+  'Tropopause_Height',
+  'Tropopause_Temperature',
+  'IGBP_Surface_Type',
+  'NSIDC_Surface_Type',
+##'Lidar_Surface_Elevation',
+##'DEM_Surface_Elevation',
+  'Number_Layers_Found',
+##'Layer_Top_Altitude',
+##'Layer_Base_Altitude',
+  'Layer_Top_Pressure',
+  'Midlayer_Pressure',
+  'Layer_Base_Pressure',
+  'Layer_Top_Temperature',
+  'Midlayer_Temperature',
+  'Layer_Base_Temperature',
+##'Attenuated_Backscatter_Statistics_532',
+  'Integrated_Attenuated_Backscatter_532',
+  'Integrated_Attenuated_Backscatter_Uncertainty_532',
+##'Attenuated_Backscatter_Statistics_1064',
+  'Integrated_Attenuated_Backscatter_1064',
+  'Integrated_Attenuated_Backscatter_Uncertainty_1064',
+##'Volume_Depolarization_Ratio_Statistics',
+  'Integrated_Volume_Depolarization_Ratio',
+  'Integrated_Volume_Depolarization_Ratio_Uncertainty',
+##'Attenuated_Total_Color_Ratio_Statistics',
+  'Integrated_Attenuated_Total_Color_Ratio',
+  'Integrated_Attenuated_Total_Color_Ratio_Uncertainty',
+  'Overlying_Integrated_Attenuated_Backscatter_532'
+##'Layer_IAB_QA_Factor',
+##'CAD_Score',
+##'Feature_Classification_Flags'
+);
+
+my @_l2_01kmclay_descriptions = @_l2_01kmclay_variables;
+
+my @_l2_01kmclay_units = (
+  '-',
+##'deg',
+##'deg',
+##'seconds_since_1993-01-01',
+##'yyyymmdd.f',
+  '-',
+  'deg',
+  'deg',
+  'deg',
+  'deg',
+  'km',
+  'km',
+  'km',
+##'-',
+  '-',
+  '-',
+  '-',
+  '1/sr',
+  '-',
+  'km',
+  'degC',
+  '-',
+  '-',
+##'km',
+##'km',
+  '-',
+##'km',
+##'km',
+  'hPa',
+  'hPa',
+  'hPa',
+  'degC',
+  'degC',
+  'degC',
+##'1/km_1/sr',
+  '1/sr',
+  '1/sr',
+##'1/km_1/sr',
+  '1/sr',
+  '1/sr',
+##'-',
+  '-',
+  '-',
+##'-',
+  '-',
+  '-',
+  '1/sr'
+##'-',
+##'-',
+##'-'
+);
+
+
+
+my @_l2_05kmalay_variables = (
+##'Profile_ID',
+##'Latitude',
+##'Longitude',
+##'Profile_Time',
+##'Profile_UTC_Time',
+  'Day_Night_Flag',
+  'Off_Nadir_Angle',
+  'Solar_Zenith_Angle',
+  'Solar_Azimuth_Angle',
+  'Scattering_Angle',
+  'Spacecraft_Position_X',
+  'Spacecraft_Position_Y',
+  'Spacecraft_Position_Z',
+##'Parallel_Column_Reflectance_532',
+  'Parallel_Column_Reflectance_Uncertainty_532',
+  'Parallel_Column_Reflectance_RMS_Variation_532',
+  'Perpendicular_Column_Reflectance_532',
+  'Perpendicular_Column_Reflectance_Uncertainty_532',
+  'Perpendicular_Column_Reflectance_RMS_Variation_532',
+  'Column_Integrated_Attenuated_Backscatter_532',
+  'Column_IAB_Cumulative_Probability',
+  'Column_Optical_Depth_Cloud_532',
+  'Column_Optical_Depth_Cloud_Uncertainty_532',
+  'Column_Optical_Depth_Aerosols_532',
+  'Column_Optical_Depth_Aerosols_Uncertainty_532',
+  'Column_Optical_Depth_Stratospheric_532',
+  'Column_Optical_Depth_Stratospheric_Uncertainty_532',
+  'Column_Optical_Depth_Aerosols_1064',
+  'Column_Optical_Depth_Aerosols_Uncertainty_1064',
+  'Column_Optical_Depth_Stratospheric_1064',
+  'Column_Optical_Depth_Stratospheric_Uncertainty_1064',
+  'Column_Feature_Fraction',
+  'Tropopause_Height',
+  'Tropopause_Temperature',
+  'IGBP_Surface_Type',
+  'NSIDC_Surface_Type',
+##'Lidar_Surface_Elevation',
+##'DEM_Surface_Elevation',
+  'Surface_Elevation_Detection_Frequency',
+##'Normalization_Constant_Uncertainty',
+##'Calibration_Altitude_532',
+  'FeatureFinderQC',
+  'Number_Layers_Found',
+  'Surface_Wind_Speed_X',
+  'Surface_Wind_Speed_Y',
+##'Layer_Top_Altitude',
+##'Layer_Base_Altitude',
+  'Layer_Base_Extended',
+  'Layer_Top_Pressure',
+  'Midlayer_Pressure',
+  'Layer_Base_Pressure',
+  'Layer_Top_Temperature',
+  'Midlayer_Temperature',
+  'Layer_Base_Temperature',
+  'Opacity_Flag',
+  'Horizontal_Averaging',
+##'Attenuated_Backscatter_Statistics_532',
+  'Integrated_Attenuated_Backscatter_532',
+  'Integrated_Attenuated_Backscatter_Uncertainty_532',
+##'Attenuated_Backscatter_Statistics_1064',
+  'Integrated_Attenuated_Backscatter_1064',
+  'Integrated_Attenuated_Backscatter_Uncertainty_1064',
+##'Volume_Depolarization_Ratio_Statistics',
+  'Integrated_Volume_Depolarization_Ratio',
+  'Integrated_Volume_Depolarization_Ratio_Uncertainty',
+##'Attenuated_Total_Color_Ratio_Statistics',
+  'Integrated_Attenuated_Total_Color_Ratio',
+  'Integrated_Attenuated_Total_Color_Ratio_Uncertainty',
+  'Overlying_Integrated_Attenuated_Backscatter_532',
+##'Layer_IAB_QA_Factor',
+##'Feature_Classification_Flags',
+  'ExtinctionQC_532',
+  'ExtinctionQC_1064',
+##'CAD_Score',
+  'Measured_Two_Way_Transmittance_532',
+  'Measured_Two_Way_Transmittance_Uncertainty_532',
+##'Two_Way_Transmittance_Measurement_Region',
+  'Feature_Optical_Depth_532',
+  'Feature_Optical_Depth_Uncertainty_532',
+  'Initial_532_Lidar_Ratio',
+  'Final_532_Lidar_Ratio',
+  'Lidar_Ratio_532_Selection_Method',
+  'Layer_Effective_532_Multiple_Scattering_Factor',
+  'Integrated_Particulate_Depolarization_Ratio',
+  'Integrated_Particulate_Depolarization_Ratio_Uncertainty',
+##'Particulate_Depolarization_Ratio_Statistics',
+  'Feature_Optical_Depth_1064',
+  'Feature_Optical_Depth_Uncertainty_1064',
+  'Initial_1064_Lidar_Ratio',
+  'Final_1064_Lidar_Ratio',
+  'Lidar_Ratio_1064_Selection_Method',
+  'Layer_Effective_1064_Multiple_Scattering_Factor',
+  'Integrated_Particulate_Color_Ratio',
+  'Integrated_Particulate_Color_Ratio_Uncertainty',
+##'Particulate_Color_Ratio_Statistics',
+  'Relative_Humidity',
+  'Single_Shot_Cloud_Cleared_Fraction'
+);
+
+my @_l2_05kmalay_descriptions = @_l2_05kmalay_variables;
+
+my @_l2_05kmalay_units = (
+##'-',
+##'deg',
+##'deg',
+##'seconds_since_1993-01-01',
+##'yyyymmdd.f',
+  '-',
+  'deg',
+  'deg',
+  'deg',
+  'deg',
+  'km',
+  'km',
+  'km',
+  '-',
+  '-',
+  '-',
+  '-',
+  '-',
+  '1/sr',
+  '-',
+  '-',
+  '-',
+  '-',
+  '-',
+  '-',
+  '-',
+  '-',
+  '-',
+  '-',
+  '-',
+  '-',
+  'km',
+  'degC',
+  '-',
+  '-',
+##'km',
+##'km',
+  '-',
+##'-',
+##'km',
+  '-',
+  '-',
+  'm/s',
+  'm/s',
+##'km',
+##'km',
+  '-',
+  'hPa',
+  'hPa',
+  'hPa',
+  'degC',
+  'degC',
+  'degC',
+  '-',
+  'km',
+##'1/km_1/sr',
+  '1/sr',
+  '1/sr',
+##'1/km_1/sr',
+  '1/sr',
+  '1/sr',
+##'-',
+  '-',
+  '-',
+##'-',
+  '-',
+  '-',
+  '1/sr',
+##'-',
+##'-',
+  '-',
+  '-',
+##'-',
+  '-',
+  '-',
+##'km',
+  '-',
+  '-',
+  'sr',
+  'sr',
+  '-',
+  '-',
+  '-',
+  '-',
+##'-',
+  '-',
+  '-',
+  'sr',
+  'sr',
+  '-',
+  '-',
+  '-',
+  '-',
+##'-',
+  '%',
+  '-'
+);
+
+my @_l2_05kmapro_variables = (
+##'Latitude',
+##'Longitude',
+##'Profile_Time',
+##'Profile_UTC_Time',
+  'Day_Night_Flag',
+  'Column_Optical_Depth_Cloud_532',
+  'Column_Optical_Depth_Cloud_Uncertainty_532',
+  'Column_Optical_Depth_Aerosols_532',
+  'Column_Optical_Depth_Aerosols_Uncertainty_532',
+  'Column_Optical_Depth_Stratospheric_532',
+  'Column_Optical_Depth_Stratospheric_Uncertainty_532',
+  'Column_Optical_Depth_Aerosols_1064',
+  'Column_Optical_Depth_Aerosols_Uncertainty_1064',
+  'Column_Optical_Depth_Stratospheric_1064',
+  'Column_Optical_Depth_Stratospheric_Uncertainty_1064',
+  'Column_Feature_Fraction',
+  'Column_Integrated_Attenuated_Backscatter_532',
+  'Column_IAB_Cumulative_Probability',
+  'Tropopause_Height',
+  'Tropopause_Temperature',
+  'Temperature',
+  'Pressure',
+  'Molecular_Number_Density',
+  'Relative_Humidity',
+##'Surface_Elevation_Statistics',
+  'Surface_Winds_X',
+  'Surface_Winds_Y',
+  'Samples_Averaged',
+  'Aerosol_Layer_Fraction',
+  'Cloud_Layer_Fraction',
+  'Atmospheric_Volume_Description',
+## 'Extinction_QC_Flag_532',
+## 'Extinction_QC_Flag_1064',
+## 'CAD_Score',
+  'Total_Backscatter_Coefficient_532',
+  'Total_Backscatter_Coefficient_Uncertainty_532',
+  'Perpendicular_Backscatter_Coefficient_532',
+  'Perpendicular_Backscatter_Coefficient_Uncertainty_532',
+  'Particulate_Depolarization_Ratio_Profile_532',
+  'Particulate_Depolarization_Ratio_Uncertainty_532',
+  'Extinction_Coefficient_532',
+  'Extinction_Coefficient_Uncertainty_532',
+  'Aerosol_Multiple_Scattering_Profile_532',
+  'Backscatter_Coefficient_1064',
+  'Backscatter_Coefficient_Uncertainty_1064',
+  'Extinction_Coefficient_1064',
+  'Extinction_Coefficient_Uncertainty_1064',
+  'Aerosol_Multiple_Scattering_Profile_1064'
+);
+
+my @_l2_05kmapro_descriptions = @_l2_05kmapro_variables;
+
+my @_l2_05kmapro_units = (
+##'deg',
+##'deg',
+##'seconds_since_1993-01-01',
+##'yyyymmdd.f',
+  '-',
+  '-',
+  '-',
+  '-',
+  '-',
+  '-',
+  '-',
+  '-',
+  '-',
+  '-',
+  '-',
+  '-',
+  'sr^-1',
+  '-',
+  'km',
+  'degC',
+  'degC',
+  'hPa',
+  'm^-3',
+  '%',
+##'km',
+  'm/s',
+  'm/s',
+  '-',
+  '-',
+  '-',
+  '-',
+##'-',
+##'-',
+##'-',
+  'sr^-1km^-1',
+  'sr^-1km^-1',
+  'sr^-1km^-1',
+  'sr^-1km^-1',
+  '-',
+  '-',
+  'km^-1',
+  'km^-1',
+  '-',
+  'sr^-1km^-1',
+  'sr^-1km^-1',
+  'km^-1',
+  'km^-1',
+  '-'
+);
+
+
+my @_l2_05kmcpro_variables = (
+##'Latitude',
+##'Longitude',
+##'Profile_Time',
+##'Profile_UTC_Time',
+  'Day_Night_Flag',
+  'Column_Optical_Depth_Cloud_532',
+  'Column_Optical_Depth_Cloud_Uncertainty_532',
+  'Column_Optical_Depth_Aerosols_532',
+  'Column_Optical_Depth_Aerosols_Uncertainty_532',
+  'Column_Optical_Depth_Stratospheric_532',
+  'Column_Optical_Depth_Stratospheric_Uncertainty_532',
+  'Column_Optical_Depth_Aerosols_1064',
+  'Column_Optical_Depth_Aerosols_Uncertainty_1064',
+  'Column_Optical_Depth_Stratospheric_1064',
+  'Column_Optical_Depth_Stratospheric_Uncertainty_1064',
+  'Column_Feature_Fraction',
+  'Column_Integrated_Attenuated_Backscatter_532',
+  'Column_IAB_Cumulative_Probability',
+  'Tropopause_Height',
+  'Tropopause_Temperature',
+  'Temperature',
+  'Pressure',
+  'Molecular_Number_Density',
+  'Relative_Humidity',
+##'Surface_Elevation_Statistics',
+  'Surface_Winds_X',
+  'Surface_Winds_Y',
+  'Samples_Averaged',
+  'Aerosol_Layer_Fraction',
+  'Cloud_Layer_Fraction',
+  'Atmospheric_Volume_Description',
+## 'Extinction_QC_Flag_532',
+## 'CAD_Score',
+  'Total_Backscatter_Coefficient_532',
+  'Total_Backscatter_Coefficient_Uncertainty_532',
+  'Perpendicular_Backscatter_Coefficient_532',
+  'Perpendicular_Backscatter_Coefficient_Uncertainty_532',
+  'Particulate_Depolarization_Ratio_Profile_532',
+  'Particulate_Depolarization_Ratio_Uncertainty_532',
+  'Extinction_Coefficient_532',
+  'Extinction_Coefficient_Uncertainty_532',
+  'Cloud_Multiple_Scattering_Profile_532',
+  'Ice_Water_Content_Profile',
+  'Ice_Water_Content_Profile_Uncertainty'
+);
+
+my @_l2_05kmcpro_descriptions = @_l2_05kmcpro_variables;
+
+my @_l2_05kmcpro_units = (
+##'deg',
+##'deg',
+##'seconds_since_1993-01-01',
+##'yyyymmdd.f',
+  '-',
+  '-',
+  '-',
+  '-',
+  '-',
+  '-',
+  '-',
+  '-',
+  '-',
+  '-',
+  '-',
+  '-',
+  'sr^-1',
+  '-',
+  'km',
+  'degC',
+  'degC',
+  'hPa',
+  'm^-3',
+  '%',
+##'km',
+  'm/s',
+  'm/s',
+  '-',
+  '-',
+  '-',
+  '-',
+##'-',
+##'-',
+  'sr^-1km^-1',
+  'sr^-1km^-1',
+  'sr^-1km^-1',
+  'sr^-1km^-1',
+  '-',
+  '-',
+  'km^-1',
+  'km^-1',
+  '-',
+  'gm^-3',
+  'gm^-3'
+);
+
+
+my @_l2_05kmclay_variables = (
+##'Profile_ID',
+##'Latitude',
+##'Longitude',
+##'Profile_Time',
+##'Profile_UTC_Time',
+  'Day_Night_Flag',
+  'Off_Nadir_Angle',
+  'Solar_Zenith_Angle',
+  'Solar_Azimuth_Angle',
+  'Scattering_Angle',
+## 'Spacecraft_Position',
+## 'Parallel_Column_Reflectance_532',
+  'Parallel_Column_Reflectance_Uncertainty_532',
+  'Parallel_Column_Reflectance_RMS_Variation_532',
+  'Perpendicular_Column_Reflectance_532',
+  'Perpendicular_Column_Reflectance_Uncertainty_532',
+  'Perpendicular_Column_Reflectance_RMS_Variation_532',
+  'Column_Integrated_Attenuated_Backscatter_532',
+  'Column_IAB_Cumulative_Probability',
+  'Column_Optical_Depth_Cloud_532',
+  'Column_Optical_Depth_Cloud_Uncertainty_532',
+  'Column_Optical_Depth_Aerosols_532',
+  'Column_Optical_Depth_Aerosols_Uncertainty_532',
+  'Column_Optical_Depth_Stratospheric_532',
+  'Column_Optical_Depth_Stratospheric_Uncertainty_532',
+  'Column_Optical_Depth_Aerosols_1064',
+  'Column_Optical_Depth_Aerosols_Uncertainty_1064',
+  'Column_Optical_Depth_Stratospheric_1064',
+  'Column_Optical_Depth_Stratospheric_Uncertainty_1064',
+  'Column_Feature_Fraction',
+  'Tropopause_Height',
+  'Tropopause_Temperature',
+  'IGBP_Surface_Type',
+  'NSIDC_Surface_Type',
+##'Lidar_Surface_Elevation',
+##'DEM_Surface_Elevation',
+  'Surface_Elevation_Detection_Frequency',
+##'Normalization_Constant_Uncertainty',
+  'FeatureFinderQC',
+##'Calibration_Altitude_532',
+  'Number_Layers_Found',
+##'Layer_Top_Altitude',
+##'Layer_Base_Altitude',
+  'Layer_Base_Extended',
+  'Layer_Top_Pressure',
+  'Midlayer_Pressure',
+  'Layer_Base_Pressure',
+  'Layer_Top_Temperature',
+  'Midlayer_Temperature',
+  'Layer_Base_Temperature',
+  'Opacity_Flag',
+  'Horizontal_Averaging',
+  'Single_Shot_Cloud_Cleared_Fraction',
+##'Attenuated_Backscatter_Statistics_532',
+  'Integrated_Attenuated_Backscatter_532',
+  'Integrated_Attenuated_Backscatter_Uncertainty_532',
+##'Attenuated_Backscatter_Statistics_1064',
+  'Integrated_Attenuated_Backscatter_1064',
+  'Integrated_Attenuated_Backscatter_Uncertainty_1064',
+##'Volume_Depolarization_Ratio_Statistics',
+  'Integrated_Volume_Depolarization_Ratio',
+  'Integrated_Volume_Depolarization_Ratio_Uncertainty',
+##'Attenuated_Total_Color_Ratio_Statistics',
+  'Integrated_Attenuated_Total_Color_Ratio',
+  'Integrated_Attenuated_Total_Color_Ratio_Uncertainty',
+  'Overlying_Integrated_Attenuated_Backscatter_532',
+##'Layer_IAB_QA_Factor',
+##'Feature_Classification_Flags',
+##'ExtinctionQC_532',
+##'CAD_Score',
+  'Measured_Two_Way_Transmittance_532',
+  'Measured_Two_Way_Transmittance_Uncertainty_532',
+##'Two_Way_Transmittance_Measurement_Region',
+  'Feature_Optical_Depth_532',
+  'Feature_Optical_Depth_Uncertainty_532',
+  'Initial_532_Lidar_Ratio',
+  'Final_532_Lidar_Ratio',
+  'Lidar_Ratio_532_Selection_Method',
+  'Layer_Effective_532_Multiple_Scattering_Factor',
+  'Integrated_Particulate_Depolarization_Ratio',
+  'Integrated_Particulate_Depolarization_Ratio_Uncertainty'
+##'Particulate_Depolarization_Ratio_Statistics',
+##'Cirrus_Shape_Parameter',
+##'Cirrus_Shape_Parameter_Uncertainty',
+##'Cirrus_Shape_Parameter_Invalid_Points',
+##'Ice_Water_Path',
+##'Ice_Water_Path_Uncertainty'
+);
+
+my @_l2_05kmclay_descriptions = @_l2_05kmclay_variables;
+
+my @_l2_05kmclay_units = (
+##'-',
+##'deg',
+##'deg',
+##'seconds_since_1993-01-01',
+##'yyyymmdd.f',
+  '-',
+  'deg',
+  'deg',
+  'deg',
+  'deg',
+##'-',
+##'-',
+  '-',
+  '-',
+  '-',
+  '-',
+  '-',
+  '1/sr',
+  '-',
+  '-',
+  '-',
+  '-',
+  '-',
+  '-',
+  '-',
+  '-',
+  '-',
+  '-',
+  '-',
+  '-',
+  'km',
+  'degC',
+  '-',
+  '-',
+##'km',
+##'km',
+  '-',
+##'-',
+  '-',
+##'km',
+  '-',
+##'km',
+##'km',
+  '-',
+  'hPa',
+  'hPa',
+  'hPa',
+  'degC',
+  'degC',
+  'degC',
+  '-',
+  'km',
+  '-',
+##'1/km_1/sr',
+  '1/sr',
+  '1/sr',
+##'1/km_1/sr',
+  '1/sr',
+  '1/sr',
+##'-',
+  '-',
+  '-',
+##'-',
+  '-',
+  '-',
+  '1/sr',
+##'-',
+##'-',
+##'-',
+##'-',
+  '-',
+  '-',
+##'km',
+  '-',
+  '-',
+  'sr',
+  'sr',
+  '-',
+  '-',
+  '-',
+  '-'
+##'-',
+##'-',
+##'-',
+##'-',
+##'gm^-2',
+##'gm^-2'
+);
+
+
+
+my @_l2_333mclay_variables = (
+##'Profile_ID',
+##'Latitude',
+##'Longitude',
+##'Profile_Time',
+##'Profile_UTC_Time',
+  'Day_Night_Flag',
+  'Off_Nadir_Angle',
+  'Solar_Zenith_Angle',
+  'Solar_Azimuth_Angle',
+  'Scattering_Angle',
+  'Spacecraft_Position_X',
+  'Spacecraft_Position_Y',
+  'Spacecraft_Position_Z',
+##'Parallel_Column_Reflectance_532',
+##'Parallel_Column_Reflectance_Uncertainty_532',
+  'Perpendicular_Column_Reflectance_532',
+  'Perpendicular_Column_Reflectance_Uncertainty_532',
+  'Column_Integrated_Attenuated_Backscatter_532',
+  'Column_IAB_Cumulative_Probability',
+  'Tropopause_Height',
+  'Tropopause_Temperature',
+  'IGBP_Surface_Type',
+  'NSIDC_Surface_Type',
+##'Lidar_Surface_Elevation',
+##'DEM_Surface_Elevation',
+  'Number_Layers_Found',
+##'Layer_Top_Altitude',
+##'Layer_Base_Altitude',
+  'Layer_Top_Pressure',
+  'Midlayer_Pressure',
+  'Layer_Base_Pressure',
+  'Layer_Top_Temperature',
+  'Midlayer_Temperature',
+  'Layer_Base_Temperature',
+##'Attenuated_Backscatter_Statistics_532',
+  'Integrated_Attenuated_Backscatter_532',
+  'Integrated_Attenuated_Backscatter_Uncertainty_532',
+##'Attenuated_Backscatter_Statistics_1064',
+  'Integrated_Attenuated_Backscatter_1064',
+  'Integrated_Attenuated_Backscatter_Uncertainty_1064',
+##'Volume_Depolarization_Ratio_Statistics',
+  'Integrated_Volume_Depolarization_Ratio',
+  'Integrated_Volume_Depolarization_Ratio_Uncertainty',
+##'Attenuated_Total_Color_Ratio_Statistics',
+  'Integrated_Attenuated_Total_Color_Ratio',
+  'Integrated_Attenuated_Total_Color_Ratio_Uncertainty',
+  'Overlying_Integrated_Attenuated_Backscatter_532',
+##'Layer_IAB_QA_Factor',
+##'Feature_Classification_Flags'
+);
+
+my @_l2_333mclay_descriptions = @_l2_333mclay_variables;
+
+my @_l2_333mclay_units = (
+##'-',
+##'deg',
+##'deg',
+##'seconds_since_1993-01-01',
+##'yyyymmdd.f',
+  '-',
+  'deg',
+  'deg',
+  'deg',
+  'deg',
+  'km',
+  'km',
+  'km',
+##'-',
+##'-',
+  '-',
+  '-',
+  '1/sr',
+  '-',
+  'km',
+  'degC',
+  '-',
+  '-',
+##'km',
+##'km',
+  '-',
+##'km',
+##'km',
+  'hPa',
+  'hPa',
+  'hPa',
+  'degC',
+  'degC',
+  'degC',
+##'1/km_1/sr',
+  '1/sr',
+  '1/sr',
+##'1/km_1/sr',
+  '1/sr',
+  '1/sr',
+##'-',
+  '-',
+  '-',
+##'-',
+  '-',
+  '-',
+  '1/sr'
+##'-',
+##'-'
+);
+
+
+
+my @_l2_vfm_variables = (
+##'Latitude',
+##'Longitude',
+##'Profile_Time',
+##'Profile_UTC_Time',
+  'Day_Night_Flag',
+  'Land_Water_Mask',
+  'Spacecraft_Position_X',
+  'Spacecraft_Position_Y',
+  'Spacecraft_Position_Z'
+##'Feature_Classification_Flags'
+);
+
+my @_l2_vfm_descriptions = @_l2_vfm_variables;
+
+my @_l2_vfm_units = (
+##'deg',
+##'deg',
+##'seconds_since_1993-01-01',
+##'yyyymmdd.f',
+  '-',
+  '-',
+  'km',
+  'km',
+  'km'
+##'-'
+);
+
+
+
+my @sources = (
+  'l1',
+  'l2_05kmapro',
+  'l2_05kmcpro',
+  'l2_01kmclay',
+  'l2_05kmalay',
+  'l2_05kmclay',
+  'l2_333mclay',
+  'l2_vfm'
+);
+
+my %metadata_by_source = (
+  'l1' => {
+    'variables'    => \@_l1_variables,
+    'units'        => \@_l1_units,
+    'descriptions' => \@_l1_descriptions,
+    'begin_date'   => '2006-06-07T00:00:00Z',
+    'end_date'     => '2012-12-31T23:59:59Z'
+  },
+  'l2_05kmapro' => {
+    'variables'    => \@_l2_05kmapro_variables,
+    'units'        => \@_l2_05kmapro_units,
+    'descriptions' => \@_l2_05kmapro_descriptions,
+    'begin_date'   => '2006-06-07T00:00:00Z',
+    'end_date'     => '2012-12-31T23:59:59Z'
+  },
+  'l2_05kmcpro' => {
+    'variables'    => \@_l2_05kmcpro_variables,
+    'units'        => \@_l2_05kmcpro_units,
+    'descriptions' => \@_l2_05kmcpro_descriptions,
+    'begin_date'   => '2006-06-07T00:00:00Z',
+    'end_date'     => '2012-12-31T23:59:59Z'
+  },
+  'l2_01kmclay' => {
+    'variables'    => \@_l2_01kmclay_variables,
+    'units'        => \@_l2_01kmclay_units,
+    'descriptions' => \@_l2_01kmclay_descriptions,
+    'begin_date'   => '2006-06-07T00:00:00Z',
+    'end_date'     => '2012-12-31T23:59:59Z'
+  },
+  'l2_05kmalay' => {
+    'variables'    => \@_l2_05kmalay_variables,
+    'units'        => \@_l2_05kmalay_units,
+    'descriptions' => \@_l2_05kmalay_descriptions,
+    'begin_date'   => '2006-06-07T00:00:00Z',
+    'end_date'     => '2012-12-31T23:59:59Z'
+  },
+  'l2_05kmclay' => {
+    'variables'    => \@_l2_05kmclay_variables,
+    'units'        => \@_l2_05kmclay_units,
+    'descriptions' => \@_l2_05kmclay_descriptions,
+    'begin_date'   => '2006-06-07T00:00:00Z',
+    'end_date'     => '2012-12-31T23:59:59Z'
+  },
+  'l2_333mclay' => {
+    'variables'    => \@_l2_333mclay_variables,
+    'units'        => \@_l2_333mclay_units,
+    'descriptions' => \@_l2_333mclay_descriptions,
+    'begin_date'   => '2006-06-07T00:00:00Z',
+    'end_date'     => '2012-12-31T23:59:59Z'
+  },
+  'l2_vfm' => {
+    'variables'    => \@_l2_vfm_variables,
+    'units'        => \@_l2_vfm_units,
+    'descriptions' => \@_l2_vfm_descriptions,
+    'begin_date'   => '2006-06-07T00:00:00Z',
+    'end_date'     => '2012-12-31T23:59:59Z'
+  }
+);
+
+
+
+################################## VARIABLES #################################
+
+
+# Parsed from the URL query string:
+
+my $service       = ''; # wcs.
+my $version       = ''; # 1.0.0.
+my $request       = ''; # getcapabilities or describecoverage or getcoverage.
+my $format        = ''; # xdr, ascii, netcdf, original.
+my $coverage      = ''; # E.g., l1.Total_Attenuated_Backscatter_532.
+my $compress      = ''; # 1 = | gzip -c otherwise don't compress (default).
+my $time          = ''; # E.g., 2006-07-05t00:00:00z/2006-07-09t23:59:59z.
+my $bbox          = ''; # E.g., -125,25,-65,50,0,0.
+my $minimum_cad   = ''; # Minimum accepted CAD score. E.g., 30.
+my $maximum_uncertainty = ''; # Maximum accepted abs uncertainty. E.g., 99.
+my $regrid        = ''; # E.g., nearest, mean, weighted.
+my $lambert       = ''; # E.g., 33,45,-97,40.
+my $stereographic = ''; # E.g., -98,90,45.
+my $mercator      = ''; # E.g., -98.
+my $lonlat        = '';
+my $ellipsoid     = ''; # E.g., 6370997,6370997.
+my $grid          = ''; # E.g., 268,259,-420000,-1716000,12000,12000.
+my $levels        = ''; # E.g,22,2,10000,1.0,...,0.0,9.81,287.04,50,290,100000.
+my $data_product  = ''; # E.g, 'CAL_LID_L1'.
+my $data_version  = ''; # E.g, '3.00'.
+
+# Derived from the above parsed values:
+
+my $starting_timestamp = 0;  # yyyymmddhh, e.g., 2006070500.
+my $ending_timestamp   = 0;  # yyyymmddhh, e.g., 2006070523.
+my $hours              = 0;  # E.g., 5 days = 5 x 24 = 120.
+my $command            = ''; # Subset command to run on the remote host.
+
+
+################################## ROUTINES ##################################
+
+
+main();
+
+
+sub main {
+  my $result = 0;
+
+  if ( ! parse_url() ) {
+    print "Content-type: text/plain; charset=iso-8859-1\n\n"; # For webserver
+    usage();
+  } elsif ( $request eq 'getcapabilities' ) {
+    print "Content-type: text/xml; charset=iso-8859-1\n\n"; # For webserver
+    print_capabilities();
+    $result = 1;
+  } elsif ( $request eq 'describecoverage' ) {
+    print "Content-type: text/xml; charset=iso-8859-1\n\n"; # For webserver
+    print_coverage_description();
+    $result = 1;
+  } elsif ( $request eq 'getcoverage' || $request eq 'getmetadata' ) {
+    print "Content-type: $content_types{ $format }; charset=iso-8859-1\n\n";
+    compute_time_range();
+    $result = query_database(); # Creates $temp_list_file.
+
+    if ( $result ) {
+      construct_command(); # To run subsetter on temporary file (on localhost).
+
+      if ( $request eq 'getmetadata' ) {
+        print "Content-type: text/plain; charset=iso-8859-1\n\n"; # For server
+        print "NASA Langley CALIPSO data accessed via RSIG.\n";
+        print "RSIG link: https://www.epa.gov/rsig/\n";
+        print "NASA Links:\n";
+        print "https://www-calipso.larc.nasa.gov/\n";
+        print "https://eosweb.larc.nasa.gov/project/calipso/calipso_table";
+        print "\n";
+
+        if ( $format ne 'original' ) {
+          print "RSIG is used to optionally subset (by variable, lon-lat box ";
+          print "and date-time range) and reorganize/reformat the data.\n";
+          print "RSIG conservatively filters CALIPSO data according to NASA ";
+          print "Langley CALIPSO Team recommendations which include:\n";
+          print "- Valid range of data - which can include slightly negative ";
+          print "(non-physical) values required to avoid bias in any ";
+          print "subsequent aggregation.\n";
+          print "- Available/applicable QC flag data (only non-error bits ";
+          print "accepted).\n";
+          print "- Available/corresponding absolute Uncertainty data ";
+          print "(user adjustable).\n";
+          print "- CAD_Score (cloud-aerosol discrimination score) - ";
+          print "a measure of the likelyhood of correctly distinguished ";
+          print "aerosol/cloud features. (User adjustable).\n";
+          print "- Includes Uncertainty file (if available) when saving ";
+          print "CALIPSO data.\n";
+        }
+
+        print "- Detailed information about CALIPSO data products can be ";
+        print "found at:\n";
+        print "https://www-calipso.larc.nasa.gov/resources/";
+        print "calipso_users_guide/data_summaries/\n";
+        print "- See also CAD/QC filtering at:\n";
+        print "https://www-calipso.larc.nasa.gov/resources/";
+        print "calipso_users_guide/data_summaries/layer/index.php#cad_score\n";
+        print "- And Quality Summary Document:\n";
+        print "https://eosweb.larc.nasa.gov/project/";
+        print "calipso/quality_summaries/CALIOP_L2ProfileProducts_3.01.pdf\n";
+        print "\n";
+
+        if ( $format ne 'original' ) {
+          print "RSIG command used to process NASA CALIPSO files:\n";
+          print "\n$command\n\n";
+          print "Note: CALIPSOSubset and XDRConvert are custom programs ";
+          print "developed at the US EPA to\n";
+          print "subset (by variable, lon-lat box and date-time range)\n";
+          print "CALIPSO files and reformat the data ";
+          print "and optionally regrid it onto a CMAQ model grid.\n";
+          print "See RSIG website for more information on this processing.\n";
+          print "https://www.epa.gov/hesc/how-rsig-regrids-data\n";
+          print "List of NASA CALIPSO files processed:\n";
+          $command = "/bin/cat $temp_list_file";
+        }
+      }
+
+      $result = execute_command( $command );
+      unlink( $temp_list_file ); # Remove temporary file.
+    }
+
+    if ( ! $result ) {
+      usage();
+    }
+  }
+
+  $result = 1 - $result; # UNIX: zero is success, non-zero is failure.
+  debug( "exit result = $result" );
+  exit $result;
+}
+
+
+
+# Print usage examples and exit.
+
+sub usage {
+  print STDERR "\n\nUsage Examples:\n\n";
+  print STDERR "wget -q -c -T 0 -O - '$program?SERVICE=wcs&VERSION=1.0.0";
+  print STDERR "&REQUEST=GetCapabilities'\n\n";
+  print STDERR "wget -q -c -T 0 -O - '$program?SERVICE=wcs&VERSION=1.0.0";
+  print STDERR "&REQUEST=DescribeCoverage'\n\n";
+  print STDERR "wget -q -c -T 0 -O - '$program?SERVICE=wcs&VERSION=1.0.0";
+  print STDERR "&REQUEST=GetCoverage";
+  print STDERR "&COVERAGE=l1.spacecraft_altitude";
+  print STDERR "&TIME=2006-07-05T00:00:00Z/2006-07-09T23:59:59Z";
+  print STDERR "&BBOX=-125,25,-65,50,0,0&FORMAT=ascii'\n\n";
+  print STDERR "wget -q -c -T 0 -O - '$program?SERVICE=wcs&VERSION=1.0.0";
+  print STDERR "&REQUEST=GetCoverage";
+  print STDERR "&COVERAGE=l1.temperature";
+  print STDERR "&TIME=2006-07-05T00:00:00Z/2006-07-09T23:59:59Z";
+  print STDERR "&BBOX=-125,25,-65,50,0,0&FORMAT=xdr'\n\n";
+  print STDERR "  > calipso.xdr ; head -16 calipso.xdr\n\n";
+  print STDERR "wget -q -c -T 0 -O - '$program?SERVICE=wcs&VERSION=1.0.0";
+  print STDERR "&REQUEST=GetCoverage";
+  print STDERR "&COVERAGE=l1.total_attenuated_backscatter_532";
+  print STDERR "&TIME=2006-07-05T00:00:00Z/2006-07-09T23:59:59Z";
+  print STDERR "&BBOX=-125,25,-65,50,0,0&FORMAT=netcdf-coards'\n\n";
+  print STDERR "  > calipso.nc ; ncdump calipso.nc | more\n\n";
+  print STDERR "wget -q -c -T 0 -O - '$program?SERVICE=wcs&VERSION=1.0.0";
+  print STDERR "&REQUEST=GetCoverage";
+  print STDERR "&COVERAGE=l1.temperature";
+  print STDERR "&TIME=2006-07-05T00:00:00Z/2006-07-09T23:59:59Z";
+  print STDERR "&BBOX=-125,25,-65,50,0,0&FORMAT=original'\n\n";
+  print STDERR "  > calipso_files.tgz ; gtar -zxf calipso_files.tgz\n\n";
+  print STDERR "Note: these variables are implicitly included:\n";
+  print STDERR "  profile_time(seconds_since_1993-1-1_00:00:00.0_0)\n";
+  print STDERR "  longitude(degrees_east)\n";
+  print STDERR "  latitude(degrees_north)\n";
+  print STDERR "  elevation(m)\n";
+  print STDERR "wget -q -c -T 0 -O - '$program?SERVICE=wcs&VERSION=1.0.0";
+  print STDERR "&REQUEST=GetCoverage";
+  print STDERR "&COVERAGE=l1.total_attenuated_backscatter_532";
+  print STDERR "&TIME=2006-07-05T00:00:00Z/2006-07-09T23:59:59Z";
+  print STDERR "&BBOX=-125,25,-65,50,0,0&FORMAT=netcdf-ioapi";
+  print STDERR "&REGRID=weighted&LAMBERT=33,45,-97,40";
+  print STDERR "&ELLIPSOID=6370997,6370997";
+  print STDERR "&GRID=268,259,-420000,-1716000,12000,12000";
+  print STDERR "&LEVELS=22,2,10000,1.0,0.995,0.988,0.979,0.97,0.96,0.938,0.914,0.889,0.862,0.834,0.804,0.774,0.743,0.694,0.644,0.592,0.502,0.408,0.311,0.21,0.106,0.0,9.81,287.04,50,290,100000'";
+  print STDERR "  > calipso_tab.ncf ; ncdump calipso_tab.ncf | more\n\n";
+  print STDERR "\n";
+}
+
+
+
+# Print web server capabilities metadata.
+
+sub print_capabilities {
+  print '<?xml version="1.0" encoding="UTF-8" ?>' . "\n";
+  print '<WCS_Capabilities version="1.0.0" ';
+  print 'xmlns="http://www.opengeospatial.org/standards/wcs" ';
+  print 'xmlns:gml="http://www.opengis.net//gml" ';
+  print 'xmlns:xlink="http://www.w3.org/1999/xlink">';
+  print '
+  <Service>
+  <metadataLink xlink:type="simple" xlink:href="https://eosweb.larc.nasa.gov/project/calipso/calipso_table" metadataType="other" />
+  <description>EPA CALIPSO Web Server 1.0.0</description>
+  <name>EPA_CALIPSO_OGC_WCS_1.0.0</name>
+  <label>EPA CALIPSO Web Server 1.0.0</label>
+  <keywords>
+  <keyword>EPA</keyword>
+  <keyword>CALIPSO</keyword>
+  <keyword>interoperability</keyword>
+  </keywords>
+  <responsibleParty>
+  <individualName>Todd Plessel</individualName>
+  <organisationName>EPA Vislab</organisationName>
+  <contactInfo>
+  <onlineResource xlink:type="simple" xlink:href="mailto:plessel.todd@epa.gov" />
+  </contactInfo>
+  </responsibleParty>
+  <fees>NONE</fees>
+  <accessConstraints>NONE</accessConstraints>
+  </Service>
+  <Capability>
+  <Request>
+  <GetCapabilities>
+  <DCPType>
+  <HTTP>
+  <Get>
+  <OnlineResource xlink:type="simple" xlink:href="http://dev-cain-vm.cluster.net/cgi-bin/calipsoserver?" />
+  </Get>
+  <Post>
+  <OnlineResource xlink:type="simple" xlink:href="http://dev-cain-vm.cluster.net/cgi-bin/calipsoserver" />
+  </Post>
+  </HTTP>
+  </DCPType>
+  </GetCapabilities>
+  <DescribeCoverage>
+  <DCPType>
+  <HTTP>
+  <Get>
+  <OnlineResource xlink:type="simple" xlink:href="http://dev-cain-vm.cluster.net/cgi-bin/calipsoserver?" />
+  </Get>
+  <Post>
+  <OnlineResource xlink:type="simple" xlink:href="http://dev-cain-vm.cluster.net/cgi-bin/calipsoserver" />
+  </Post>
+  </HTTP>
+  </DCPType>
+  </DescribeCoverage>
+  <GetCoverage>
+  <DCPType>
+  <HTTP>
+  <Get>
+  <OnlineResource xlink:type="simple" xlink:href="http://dev-cain-vm.cluster.net/cgi-bin/calipsoserver?" />
+  </Get>
+  <Post>
+  <OnlineResource xlink:type="simple" xlink:href="http://dev-cain-vm.cluster.net/cgi-bin/calipsoserver" />
+  </Post>
+  </HTTP>
+  </DCPType>
+  </GetCoverage>
+  </Request>
+  <Exception>
+  <Format>text/xml; charset="utf-8"</Format>
+  </Exception>
+  </Capability>
+  <ContentMetadata version="1.0.0">';
+  print "\n";
+
+  for my $source ( @sources ) {
+    my $source_metadata = $metadata_by_source{ $source };
+    my $variables       = $source_metadata->{ variables };
+    my $units           = $source_metadata->{ units };
+    my $descriptions    = $source_metadata->{ descriptions };
+    my $variable_count  = @$variables;
+
+    for ( my $variable_index = 0; $variable_index < $variable_count;
+          ++$variable_index ) {
+      my $this_variable     = @$variables[ $variable_index ];
+      my $this_units        = @$units[ $variable_index ];
+      my $this_description  = @$descriptions[ $variable_index ];
+      print "        <CoverageOfferingBrief>\n";
+      print "            <name>$source.$this_variable</name>\n";
+      print "            <label>$this_variable($this_units)</label>\n";
+      print "            <description>$this_description</description>";
+      print '
+      <lonLatEnvelope srsName="WGS84(DD)">
+      <gml:pos>-180 -90</gml:pos>
+      <gml:pos>180 90</gml:pos>
+      </lonLatEnvelope>
+      </CoverageOfferingBrief>';
+      print "\n";
+    }
+  }
+
+  print "    </ContentMetadata>\n";
+  print "</WCS_Capabilities>\n";
+}
+
+
+
+# Print web server coverage description metadata.
+
+sub print_coverage_description {
+  print '<?xml version="1.0" encoding="UTF-8" ?>';
+  print '<CoverageDescription version="1.0.0" ';
+  print 'xmlns="http://www.opengeospatial.org/standards/wcs" ';
+  print 'xmlns:gml="http://www.opengis.net/gml" ';
+  print 'xmlns:xlink="http://www.w3.org/1999/xlink">';
+  print "\n";
+
+  for my $source ( @sources ) {
+    my $source_metadata = $metadata_by_source{ $source };
+    my $variables       = $source_metadata->{ variables };
+    my $units           = $source_metadata->{ units };
+    my $descriptions    = $source_metadata->{ descriptions };
+    my $begin_date      = $source_metadata->{ begin_date };
+    my $end_date        = $source_metadata->{ end_date };
+    my $variable_count  = @$variables;
+
+    for ( my $variable_index = 0; $variable_index < $variable_count;
+          ++$variable_index ) {
+      my $this_variable     = @$variables[ $variable_index ];
+      my $this_units        = @$units[ $variable_index ];
+      my $this_description  = @$descriptions[ $variable_index ];
+      my $full_variable = "$source.$this_variable";
+
+      if ( $coverage eq '' || lc( $coverage ) eq lc( $full_variable ) ) {
+        print "    <CoverageOffering>\n";
+        print "        <name>$source.$this_variable</name>\n";
+        print "        <label>$this_variable($this_units)</label>\n";
+        print "        <description>$this_description</description>";
+        print '
+        <domainSet>
+        <spatialDomain>
+        <gml:Envelope srsName="WGS84(DD)">
+        <gml:pos>-180 -90</gml:pos>
+        <gml:pos>180 90</gml:pos>
+        </gml:Envelope>
+        </spatialDomain>
+        <temporalDomain>
+        <timePeriod>';
+        print "\n";
+        print "                    <beginPosition>$begin_date</beginPosition>\n";
+        print "                    <endPosition>$end_date</endPosition>\n";
+        print '
+        <timeResolution>PT1H</timeResolution>
+        </timePeriod>
+        </temporalDomain>
+        </domainSet>
+        <rangeSet>
+        <RangeSet>';
+        print "\n";
+        print "                <name>$source.$this_variable</name>\n";
+        print "                <label>$this_variable($this_units)</label>\n";
+        print "                <description>$this_description</description>";
+        print '
+        <nullValues>
+        <singleValue>-9999.0</singleValue>
+        </nullValues>
+        </RangeSet>
+        </rangeSet>
+        <supportedCRSs>
+        <requestResponseCRSs>CRS:84</requestResponseCRSs>
+        <nativeCRSs>CRS:84</nativeCRSs>
+        </supportedCRSs>
+        <supportedFormats>
+        <formats>ASCII XDR NetCDF-COARDS NetCDF-IOAPI original</formats>
+        </supportedFormats>
+        <supportedInterpolations>
+        <interpolationMethod>none</interpolationMethod>
+        </supportedInterpolations>
+        </CoverageOffering>
+        ';
+      }
+    }
+  }
+
+  print "</CoverageDescription>\n";
+}
+
+
+
+# Parse URL parameters into variables.
+
+sub parse_url {
+  use CGI qw/ untaint /;     # Load Safe untainting CGI routines.
+  $CGI::DISABLE_UPLOADS = 1; # Disable uploads.
+  $CGI::POST_MAX = 1024;     # Limit posts to 1024 bytes.
+  my $query = new CGI;       # Parse QUERY_STRING.
+  %ENV = ();                 # Unset all environment variables.
+  my @names = $query->param; # Extract names of parameters.
+  my $count = @names;
+  my $result = 0;
+  debug( "----------- $program @names\n$count" );
+
+  for ( my $parameter = 0; $parameter < $count; ++$parameter) {
+    $_ = $names[ $parameter ];                # $_ is tainted.
+    s/[^A-Za-z]/_/go;                         # Untaint $_.
+    my $option = $_;                          # $option is untainted.
+    $_ = $query->param( $option );            # $_ is tainted.
+    s/[^\w\-.,:\/]/_/go;                      # Untaint $_.
+    my $value = $_;                           # $value is untainted.
+    my $lowercase_option = lc( $option );
+    my $lowercase_value  = lc( $value );
+    debug( "$lowercase_option $lowercase_value" );
+
+    if ( $parsers{ $lowercase_option } ) {
+      $result = $parsers{ $lowercase_option }->( $lowercase_value );
+    } else {
+      print STDERR "\nInvalid option: '$option'\n";
+    }
+
+    if ( ! $result ) {
+      $parameter = $count; # Finish looping.
+    }
+  }
+
+  $result = $result && required_options_specified();
+  return $result;
+}
+
+
+
+# Parse service option.
+
+sub parse_service_option {
+  my $value = shift;
+  my $result = parse_option( $service, $value, 'SERVICE', 'wcs kill killall sleep' );
+
+  if ( $service eq 'kill' || $service eq 'killall' ) {
+
+    # Remove RSIG processes and temp files:
+
+    my $all = $service eq 'killall';
+    my $filter = $all == 0 ? '-mmin +60' : '';
+
+    my $command =
+      '/bin/kill -9 `/bin/ps -eo pid,uname,etime,args | ' .
+      '/bin/grep -i rsig | /bin/grep -v rsigkill | ' .
+      '/bin/grep -v /bin/grep | ' .
+      "/usr/bin/awk -v all=$all '" .
+      '{ if ( all == 1 || length( $3 ) > 5 ) { print $1 } }' . "'" . '`'.
+      ' ; /usr/bin/find /rsig/tmp' .
+      ' -type f ' . $filter . ' -exec /bin/rm -f {} \;';
+    $result = execute_command( $command );
+    print "Content-type: text/plain; charset=iso-8859-1\n\n"; # For webserver
+  } elsif ( $service eq 'sleep' ) {
+    sleep( 420 );  # Test Apache timeout > 5 minute default.
+    print "Content-type: text/plain; charset=iso-8859-1\n\n"; # For webserver
+    print "\n\n----- webserver timeout test completed successfully.\n\n";
+  }
+
+  return $result;
+}
+
+
+
+# Parse version option.
+
+sub parse_version_option {
+  my $value = shift;
+  my $result = parse_option( $version, $value, 'VERSION', '1.0.0' );
+  return $result;
+}
+
+
+
+# Parse request option.
+
+sub parse_request_option {
+  my $value = shift;
+  my $result = parse_option( $request, $value, 'REQUEST',
+                             'getcoverage getcapabilities describecoverage ' .
+                             'getmetadata' );
+  return $result;
+}
+
+
+
+# Parse format option:
+
+sub parse_format_option {
+  my $value = shift;
+  my $result = parse_option($format, $value, 'FORMAT',
+               'xdr ascii netcdf-coards netcdf-ioapi original' );
+  return $result;
+}
+
+
+
+# Parse coverage option.
+
+sub parse_coverage_option {
+  my $value = shift;
+  my $result = 0;
+
+  if ( $coverage ne '' ) {
+    print STDERR "\nRedundant COVERAGE option: '$value'\n";
+  } else {
+
+    foreach my $source ( @sources ) {
+      my $source_metadata = $metadata_by_source{ $source };
+      my $variables       = $source_metadata->{ variables };
+      my $units           = $source_metadata->{ units };
+      my $descriptions    = $source_metadata->{ descriptions };
+      my $variable_count  = @$variables;
+
+      for ( my $variable_index = 0; $variable_index < $variable_count;
+            ++$variable_index ) {
+        my $this_variable = @$variables[ $variable_index ];
+        my $full_variable = "$source.$this_variable";
+
+        if ( $value eq lc( $full_variable ) ){
+          $coverage = $full_variable;
+          $result = parse_data_product( $source );
+
+          if ( $result == 0 ) {
+            print STDERR "\nInvalid COVERAGE source option: '$source'\n";
+          }
+
+          return $result;
+        }
+      }
+    }
+  }
+
+  return $result;
+}
+
+
+
+# Parse time option.
+
+sub parse_time_option {
+  my $value = shift;
+  my $result = 0;
+
+  if ( $time ne '' ) {
+    print STDERR "\nRedundant TIME option: '$value'\n";
+  } else {
+    $time = $value;
+    my $is_valid = is_valid_time( $time );
+
+    if ( ! $is_valid ) {
+      print STDERR "\nInvalid TIME option: '$value'\n";
+    } else {
+      $result = 1;
+    }
+  }
+
+  return $result;
+}
+
+
+
+# Parse bbox option.
+
+sub parse_bbox_option {
+  my $value = shift;
+  my $result = 0;
+
+  if ( $bbox ne '' ) {
+    print STDERR "\nRedundant BBOX option: '$value'\n";
+  } else {
+    $bbox = $value;
+    my @bounds = split( /,/, $bbox );
+    my $bounds_count = @bounds;
+
+    if ( $bounds_count != 4 && $bounds_count != 6 ) {
+      print STDERR "\nInvalid bbox option: '$value'\n";
+    } elsif ( ! in_range( $bounds[ 0 ], -180.0, 180.0 ) ) {
+      print STDERR "\nInvalid bbox option: '$bounds[ 0 ]'\n";
+    } elsif ( ! in_range( $bounds[ 1 ], -90.0, 90.0 ) ) {
+      print STDERR "\nInvalid bbox option: '$bounds[ 1 ]'\n";
+    } elsif ( ! in_range( $bounds[ 2 ], $bounds[ 0 ], 180.0 ) ) {
+      print STDERR "\nInvalid bbox option: '$bounds[ 2 ]'\n";
+    } elsif ( ! in_range( $bounds[ 3 ], $bounds[ 1 ], 90.0 ) ) {
+      print STDERR "\nInvalid bbox option: '$bounds[ 3 ]'\n";
+    } else {
+      $result = 1;
+    }
+  }
+
+  return $result;
+}
+
+
+
+# Parse minimum_cad option.
+
+sub parse_minimum_cad_option {
+  my $value = shift;
+  my $result = 0;
+
+  if ( $minimum_cad ne '' ) {
+    print STDERR "\nRedundant MINIMUM_CAD option: '$value'\n";
+  } else {
+    $minimum_cad = $value;
+    my $is_valid = in_range( $minimum_cad, 0.0, 100.0 );
+
+    if ( ! $is_valid ) {
+      print STDERR "\nInvalid MINIMUM_CAD option: '$value'\n";
+    } else {
+      $result = 1;
+    }
+  }
+
+  return $result;
+}
+
+
+
+# Parse maximum_uncertainty option.
+
+sub parse_maximum_uncertainty_option {
+  my $value = shift;
+  my $result = 0;
+
+  if ( $maximum_uncertainty ne '' ) {
+    print STDERR "\nRedundant MAXIMUM_UNCERTAINTY option: '$value'\n";
+  } else {
+    $maximum_uncertainty = $value;
+    my $is_valid = in_range( $maximum_uncertainty, 0.0, 100.0 );
+
+    if ( ! $is_valid ) {
+      print STDERR "\nInvalid MAXIMUM_UNCERTAINTY option: '$value'\n";
+    } else {
+      $result = 1;
+    }
+  }
+
+  return $result;
+}
+
+
+
+# Parse compress option.
+
+sub parse_compress_option {
+  my $value = shift;
+  my $result = 0;
+
+  if ( $compress ne '' ) {
+    print STDERR "\nRedundant COMPRESS option: '$value'\n";
+  } else {
+    $compress = $value;
+    my $is_valid = $compress == 0 || $compress == 1;
+
+    if ( ! $is_valid ) {
+      print STDERR "\nInvalid COMPRESS option: '$value'\n";
+    } else {
+      $result = 1;
+    }
+  }
+
+  return $result;
+}
+
+
+
+# Parse regrid option:
+
+sub parse_regrid_option {
+  my $value = shift;
+  my $result = parse_option( $regrid, $value, 'REGRID',
+                             'nearest mean weighted' );
+  return $result;
+}
+
+
+
+# Parse lambert option.
+
+sub parse_lambert_option {
+  my $value = shift;
+  my $result = 0;
+
+  if ( $lambert ne '' ) {
+    print STDERR "\nRedundant LAMBERT option: '$value'\n";
+  } else {
+    $lambert = $value;
+    my @values = split( /,/, $value );
+    my $count = @values;
+
+    if ( $count != 4 ) {
+      print STDERR "\nInvalid LAMBERT option: '$value'\n";
+    } elsif ( ! in_range( $values[ 0 ], -89.0, 89.0 ) ) {
+      print STDERR "\nInvalid LAMBERT option: '$values[ 0 ]'\n";
+    } elsif ( ! in_range( $values[ 1 ], -89.0, 89.0 ) ) {
+      print STDERR "\nInvalid LAMBERT option: '$values[ 1 ]'\n";
+    } elsif ( ! in_range( $values[ 2 ], -180.0, 180.0 ) ) {
+      print STDERR "\nInvalid LAMBERT option: '$values[ 2 ]'\n";
+    } elsif ( ! in_range( $values[ 3 ], -89.0, 89.0 ) ) {
+      print STDERR "\nInvalid LAMBERT option: '$values[ 3 ]'\n";
+    } elsif ( $values[ 0 ] > $values[ 1 ] ) {
+      print STDERR "\nInvalid LAMBERT option: '$values[ 1 ]'\n";
+    } elsif ( $values[ 0 ] > 0.0 && $values[ 1 ] < 0.0 ) {
+      print STDERR "\nInvalid LAMBERT option: '$values[ 1 ]'\n";
+    } elsif ( $values[ 0 ] < 0.0 && $values[ 1 ] > 0.0 ) {
+      print STDERR "\nInvalid LAMBERT option: '$values[ 1 ]'\n";
+    } else {
+      $result = 1;
+    }
+  }
+
+  return $result;
+}
+
+
+
+# Parse stereographic option.
+
+sub parse_stereographic_option {
+  my $value = shift;
+  my $result = 0;
+
+  if ( $stereographic ne '' ) {
+    print STDERR "\nRedundant STEREOGRAPHIC option: '$value'\n";
+  } else {
+    $stereographic = $value;
+    my @values = split( /,/, $value );
+    my $count = @values;
+
+    if ( $count != 3 ) {
+      print STDERR "\nInvalid STEREOGRAPHIC option: '$value'\n";
+    } elsif ( ! in_range( $values[ 0 ], -180.0, 180.0 ) ) {
+      print STDERR "\nInvalid STEREOGRAPHIC option: '$values[ 0 ]'\n";
+    } elsif ( ! in_range( $values[ 1 ], -90.0, 90.0 ) ) {
+      print STDERR "\nInvalid STEREOGRAPHIC option: '$values[ 1 ]'\n";
+    } elsif ( ! in_range( $values[ 2 ], -90.0, 90.0 ) ) {
+      print STDERR "\nInvalid STEREOGRAPHIC option: '$values[ 2 ]'\n";
+    } else {
+      $result = 1;
+    }
+  }
+
+  return $result;
+}
+
+
+
+# Parse mercator option.
+
+sub parse_mercator_option {
+  my $value = shift;
+  my $result = 0;
+
+  if ( $mercator ne '' ) {
+    print STDERR "\nRedundant MERCATOR option: '$value'\n";
+  } else {
+    $mercator = $value;
+    my @values = split( /,/, $value );
+    my $count = @values;
+
+    if ( $count != 1 ) {
+      print STDERR "\nInvalid MERCATOR option: '$value'\n";
+    } elsif ( ! in_range( $values[ 0 ], -180.0, 180.0 ) ) {
+      print STDERR "\nInvalid MERCATOR option: '$values[ 0 ]'\n";
+    } else {
+      $result = 1;
+    }
+  }
+
+  return $result;
+}
+
+
+
+# Parse lonlat option.
+
+sub parse_lonlat_option {
+  my $value = shift;
+  my $result = 0;
+
+  if ( $lonlat ne '' ) {
+    print STDERR "\nRedundant LONLAT option: '$value'\n";
+  } else {
+    $lonlat = 1;
+    $result = 1;
+  }
+
+  return $result;
+}
+
+
+
+# Parse ellipsoid option.
+
+sub parse_ellipsoid_option {
+  my $value = shift;
+  my $result = 0;
+
+  if ( $ellipsoid ne '' ) {
+    print STDERR "\nRedundant ELLIPSOID option: '$value'\n";
+  } else {
+    $ellipsoid = $value;
+    my @values = split( /,/, $value );
+    my $count = @values;
+
+    if ( $count != 1 && $count != 2 ) {
+      print STDERR "\nInvalid ELLIPSOID option: '$value'\n";
+    } elsif ( ! in_range( $values[ 0 ], 1.0, 1e10 ) ) {
+      print STDERR "\nInvalid ELLIPSOID option: '$values[ 0 ]'\n";
+    } elsif ( $count == 2 ) {
+
+      if ( ! in_range( $values[ 1 ], $values[ 0 ], 1e10 ) ) {
+        print STDERR "\nInvalid ELLIPSOID option: '$values[ 1 ]'\n";
+      } else {
+        $result = 1;
+      }
+    } else {
+      $result = 1;
+    }
+  }
+
+  return $result;
+}
+
+
+
+# Parse grid option.
+
+sub parse_grid_option {
+  my $value = shift;
+  my $result = 0;
+
+  if ( $grid ne '' ) {
+    print STDERR "\nRedundant GRID option: '$value'\n";
+  } else {
+    $grid = $value;
+    my @values = split( /,/, $value );
+    my $count = @values;
+
+    if ( $count != 6 ) {
+      print STDERR "\nInvalid GRID option: '$value'\n";
+    } elsif ( $values[ 0 ] < 1 ) {
+      print STDERR "\nInvalid GRID option: '$values[ 0 ]'\n";
+    } elsif ( $values[ 1 ] < 1 ) {
+      print STDERR "\nInvalid GRID option: '$values[ 1 ]'\n";
+    } elsif ( ! in_range( $values[ 2 ], -1e10, 1e10 ) ) {
+      print STDERR "\nInvalid GRID option: '$values[ 2 ]'\n";
+    } elsif ( ! in_range( $values[ 3 ], -1e10, 1e10 ) ) {
+      print STDERR "\nInvalid GRID option: '$values[ 3 ]'\n";
+    } elsif ( ! in_range( $values[ 4 ], 0.01, 1e10 ) ) {
+      print STDERR "\nInvalid GRID option: '$values[ 4 ]'\n";
+    } elsif ( ! in_range( $values[ 5 ], 0.01, 1e10 ) ) {
+      print STDERR "\nInvalid GRID option: '$values[ 5 ]'\n";
+    } else {
+      $result = 1;
+    }
+  }
+
+  return $result;
+}
+
+
+
+# Parse levels option.
+
+sub parse_levels_option {
+  my $value = shift;
+  my $result = 0;
+
+  if ( $levels ne '' ) {
+    print STDERR "\nRedundant LEVELS option: '$value'\n";
+  } else {
+    $levels = $value;
+    my @values = split( /,/, $value );
+    my $count = @values;
+
+    if ( $count != 3 + $values[ 0 ] + 1 + 5 ) {
+      print STDERR "\nInvalid LEVELS option: '$value'\n";
+    } elsif ( ! in_range( $values[ 0 ], 1, 100 ) ) {
+      print STDERR "\nInvalid LEVELS option: '$values[ 0 ]'\n";
+    } elsif ( ! in_range( $values[ 1 ], 1, 7 ) ) {
+      print STDERR "\nInvalid LEVELS option: '$values[ 1 ]'\n";
+    } elsif ( ! in_range( $values[ 2 ], 0.0, 1e8 ) ) {
+      print STDERR "\nInvalid LEVELS option: '$values[ 2 ]'\n";
+    } else {
+
+      # Ensure level values are ordered decreasing if sigma-p else increasing:
+
+      my $end = $count - 5;
+      my $minimum = 0.0;
+      my $maximum = $lonlat ne '' ? 100000.0 : 1.0;
+      my $ok = 0;
+
+      for ( my $index = 3; $index < $end; ++$index ) {
+        my $level_value = $values[ $index ];
+        $ok = in_range( $level_value, $minimum, $maximum );
+
+        if ( ! $ok ) {
+          print STDERR "\nInvalid LEVELS option: '$values[ $index ]'\n";
+          $index = $count;
+        } elsif ( $lonlat ne '' ) {
+          $minimum = $level_value;
+        } else {
+          $maximum = $level_value;
+        }
+      }
+
+      # Check last parameter constants:
+
+      if ( $ok == 1 ) {
+        my $index = $count - 5;
+
+        if ( ! in_range( $values[ $index ], 0.01, 1e2 ) ) {
+          print STDERR "\nInvalid LEVELS option: '$values[ $index ]'\n";
+        } elsif ( ! in_range( $values[ $index + 1 ], 0.01, 1e4 ) ) {
+          print STDERR "\nInvalid LEVELS option: '$values[ $index + 1 ]'\n";
+        } elsif ( ! in_range( $values[ $index + 2 ], 0.01, 1e4 ) ) {
+          print STDERR "\nInvalid LEVELS option: '$values[ $index + 2 ]'\n";
+        } elsif ( ! in_range( $values[ $index + 3 ], 0.01, 1e4 ) ) {
+          print STDERR "\nInvalid LEVELS option: '$values[ $index + 3 ]'\n";
+        } elsif ( ! in_range( $values[ $index + 4 ], 0.01, 1e6 ) ) {
+          print STDERR "\nInvalid LEVELS option: '$values[ $index + 4 ]'\n";
+        } else {
+          $result = 1;
+        }
+      }
+    }
+  }
+
+  return $result;
+}
+
+
+
+# Parse $source to yield $data_product.
+
+sub parse_data_product {
+  my $value = shift;
+  my $result =
+    parse_option( $data_product, $value, 'DATA_PRODUCT',
+                  'l1 ' .
+                  'l2_05kmapro ' .
+                  'l2_05kmcpro ' .
+                  'l2_05kmalay ' .
+                  'l2_05kmclay ' .
+                  'l2_01kmclay ' .
+                  'l2_333mclay ' .
+                  'l2_vfm ' );
+  # Make upper/mixed-case for SQL:
+  $data_product = 'CAL_LID_' . uc( $data_product );
+  $data_product =~ s/KM/km/;   # E.g., CAL_LID_L2_05kmCLay.
+  $data_product =~ s/PRO/Pro/; # E.g., CAL_LID_L2_05kmAPro.
+  $data_product =~ s/LAY/Lay/; # E.g., CAL_LID_L2_05kmCLay.
+  $data_product =~ s/3MC/3mC/; # E.g., CAL_LID_L2_333mCLay.
+  return $result;
+}
+
+
+
+# Parse data_version option.
+# Allow any real number form '3.10' or even '3-10'.
+
+sub parse_data_version_option {
+  my $value = shift;
+  my $result = 0;
+
+  if ( $data_version ne '' ) {
+    print STDERR "\nRedundant DATA_VERSION option: '$value'\n";
+  } elsif ( $value =~ m#^([0-9]+[0-9\.\-]+)$# )
+  {
+    $data_version = $value;
+    $result = 1;
+  }
+
+  return $result;
+}
+
+
+
+# Check that all required 'options' have been specified:
+
+sub required_options_specified {
+  my $result = 0;
+
+  if ( $service eq 'kill' || $service eq 'killall' ) {
+    $result = 1;
+  } elsif ( $service eq '' ) {
+    print STDERR "\nMissing option: 'SERVICE'\n";
+  } elsif ( $version eq '' ) {
+    print STDERR "\nMissing option: 'VERSION'\n";
+  } elsif ( $request eq '' ) {
+    print STDERR "\nMissing option: 'REQUEST'\n";
+  } elsif ( $request eq 'getcoverage' ) {
+
+    if ( $coverage eq '' ) {
+      print STDERR "\nMissing option: 'COVERAGE'\n";
+    } elsif ( $format eq '' ) {
+      print STDERR "\nMissing option: 'FORMAT'\n";
+    } elsif ( $time eq '' ) {
+      print STDERR "\nMissing option: 'TIME'\n";
+    } elsif ( $bbox eq '' ) {
+      print STDERR "\nMissing option: 'BBOX'\n";
+    } else {
+      my $regrid_count = 0;
+      $regrid_count += $regrid ne '';
+      $regrid_count += $ellipsoid ne '';
+      $regrid_count += $grid ne '';
+      my $projection_count = 0;
+      $projection_count += $lambert ne '';
+      $projection_count += $stereographic ne '';
+      $projection_count += $mercator ne '';
+      $projection_count += $lonlat ne '';
+
+      $result =
+        $regrid_count == 0 && $projection_count == 0 ||
+        $regrid_count == 3 && $projection_count == 1;
+
+      if ( ! $result ) {
+        print STDERR "\nInvalid options: 'REGRID/";
+        print STDERR "LAMBERT/STEREOGRAPHIC/MERCATOR/LONLAT/";
+        print STDERR "GRID/ELLIPSOID'\n";
+      }
+    }
+  } else {
+    $result = 1;
+  }
+
+  return $result;
+}
+
+
+
+# Compute starting_timestamp, ending_timestamp and hours.
+# inputs:  $time = '2006-07-05t00:00:00z/2006-07-09t23:59:59z'
+# outputs: $starting_timestamp = 2006070500
+#          $ending_timestamp   = 2006070923
+#          $hours = 120
+
+sub compute_time_range {
+  my $yyyy1 = substr( $time, 0, 4 );
+  my $mm1   = substr( $time, 5, 2 );
+  my $dd1   = substr( $time, 8, 2 );
+  my $hh1   = substr( $time, 11, 2 );
+  my $i     = index( $time, '/' );
+
+  $starting_timestamp = integer_timestamp( $yyyy1, $mm1, $dd1, $hh1 );
+  $ending_timestamp   = $starting_timestamp;
+  $hours = 1;
+
+  if ( $i != -1 ) {
+    ++$i;
+    my $yyyy2 = substr( $time, $i + 0, 4 );
+    my $mm2   = substr( $time, $i + 5, 2 );
+    my $dd2   = substr( $time, $i + 8, 2 );
+    my $hh2   = substr( $time, $i + 11, 2 );
+    my $yyyy  = $yyyy1;
+    my $mm    = $mm1;
+    my $dd    = $dd1;
+    my $hh    = $hh1;
+    $ending_timestamp = integer_timestamp( $yyyy2, $mm2, $dd2, $hh2 );
+
+    while ( integer_timestamp( $yyyy, $mm, $dd, $hh ) !=
+            integer_timestamp( $yyyy2, $mm2, $dd2, $hh2 ) ) {
+      increment_timestamp( $yyyy, $mm, $dd, $hh );
+      ++$hours;
+    }
+  }
+}
+
+
+
+# Construct command.
+
+sub construct_command {
+  my @domain = split( /,/, $bbox );
+  my $domain_count = @domain;
+  my $lower_layer = '';
+  my $upper_layer = '';
+  my $layer_option = '';
+  my @coverage_parts = split( /\./, $coverage );
+  my $source   = $coverage_parts[ 0 ];
+  my $variable = $coverage_parts[ 1 ];
+  my $my_format = $format;
+  my $my_xdrconvert = '';
+  my $my_compressor = '';
+  my $minimum_cad_option = '';
+  my $maximum_uncertainty_option = '';
+
+  if ( $domain_count == 6 ) {
+    $lower_layer = $domain[ 4 ];
+    $upper_layer = $domain[ 5 ];
+
+    if ( ! ( $lower_layer == 0.0 && $upper_layer == 0.0 ) ) {
+      $layer_option = " -elevation $lower_layer $upper_layer";
+    }
+  }
+
+  if ( $format eq 'original' ) {
+    $command = $get_original_files;
+  } else {
+
+    if ( $format ne 'xdr' || $regrid ne '' ) {
+      my $xdrconvert_format = $format;
+      my @format_parts = split( /-/, $format );
+      my $format_parts_count = @format_parts;
+
+      if ( $format_parts_count == 2 ) {
+        $xdrconvert_format = $format_parts[ 1 ];
+      }
+
+      my $regrid_args = '';
+
+      if ( $regrid ne '' ) {
+        my $projection_args =
+          $lambert ne '' ? "-lambert $lambert "
+          : $stereographic ne '' ? "-stereographic $stereographic "
+          : $mercator ne '' ? "-mercator $mercator "
+          : "-lonlat ";
+        $projection_args =~ tr/,/ /;
+        my @ellipsoid_args = split( /,/, $ellipsoid );
+        my $ellipsoid_args_count = @ellipsoid_args;
+        my $major_semiaxis = $ellipsoid_args[ 0 ];
+        my $minor_semiaxis =
+          $ellipsoid_args_count == 1 ? $major_semiaxis : $ellipsoid_args[ 1 ];
+        my $grid_args = "-grid $grid ";
+        $grid_args =~ tr/,/ /;
+        my $layer_args = '';
+
+        if ( $levels ne '' ) {
+          $layer_args = "-layers $levels ";
+          $layer_args =~ tr/,/ /;
+        }
+
+        $regrid_args =
+          "-regrid $regrid " .
+          $projection_args .
+          "-ellipsoid $major_semiaxis $minor_semiaxis " .
+          $grid_args .
+          $layer_args;
+      }
+
+      $my_format = 'xdr';
+      $my_xdrconvert = " | $xdrconvert $regrid_args -$xdrconvert_format";
+    }
+
+    if ( $compress ne '' && $compress == 1 ) {
+      $my_compressor = " | $compressor";
+    }
+
+    if ( $minimum_cad ne '' ) {
+      $minimum_cad_option = " -minimumCAD $minimum_cad";
+    }
+
+    if ( $maximum_uncertainty ne '' ) {
+      $maximum_uncertainty_option =
+        " -maximumUncertainty $maximum_uncertainty";
+    }
+
+    $command =
+      "$subsetter" .
+      " -files $temp_list_file" .
+      " -tmpdir $temp_directory" .
+      " -desc https://eosweb.larc.nasa.gov/project/calipso/calipso_table" .
+      ",CALIPSOSubset" .
+      " -timestamp $starting_timestamp -hours $hours" .
+      " -variable $variable" .
+      " -domain $domain[ 0 ] $domain[ 1 ] $domain[ 2 ] $domain[ 3 ]" .
+      "$layer_option" .
+      "$minimum_cad_option" .
+      "$maximum_uncertainty_option" .
+      "$my_xdrconvert$my_compressor";
+  }
+}
+
+
+
+############################### HELPER ROUTINES ##############################
+
+
+
+# debug( message );
+
+sub debug {
+  my $message = shift;
+
+  if ( $debugging ) {
+    print STDERR "\n$message\n";
+  }
+}
+
+
+
+# Execute command and echo its output to STDOUT. E.g., execute_command( 'ls' );
+
+sub execute_command {
+  my $command = shift;
+  my $result = 0;
+  my $the_pipe = 0;
+
+  # Untaint command - match expression is arbitrary as far as -T is concerned,
+  # but should be as restricted as possible but still allow valid command to
+  # invoke subsetter and converter:
+
+  if ( $command =~ m#^(/[\w-]+/[\w \$'\(\)\+,-./:;=>?@\\_`{|}]+)$# ) {
+    $command = $1; # Re-assign first match, which is enough to satisfy -T.
+    debug( "executing command = $command" );
+    %ENV = (); # Unset all environment variables prior to popen.
+    # Complicated, supposedly safer way to open a readable pipe to command:
+    my $pid = open( the_pipe, "-|" );
+
+    if ( ! defined( $pid ) ) {
+      die "Couldn't open pipe to subprocess";
+    } elsif ( $pid ) { # Parent process.
+
+      while ( <the_pipe> ) {
+        print;
+      }
+
+      close( the_pipe ) or die $!;
+      $result = ! $?;
+    } else { # Child process.
+      exec( $command ) or die "can't exec program: $!";
+    }
+  } else {
+    print STDERR "\n'$command' contains invalid characters.\n";
+  }
+
+  return $result;
+}
+
+
+
+# my $result = parse_option( $option, $value, $option_name, $valid_values );
+# my $result = parse_option( $variable, $value, 'COVERAGE', 'ozone pm25' );
+
+sub parse_option {
+  my ( $option, $value, $option_name, $valid_values ) = @_;
+  my $result = 0;
+
+  if ( $option ne '' ) {
+    print STDERR "\nRedundant $option_name option: '$value'\n";
+  } else {
+    $result = index( " $valid_values ", " $value " ) != -1;
+
+    if ( $result ) {
+      $_[ 0 ] = $value;
+    } else {
+      print STDERR "\nInvalid $option_name option: '$value'\n";
+    }
+  }
+
+  return $result;
+}
+
+
+
+# my $ok = in_range( $value, $minimum, $maximum );
+
+sub in_range {
+  my ( $value, $minimum, $maximum ) = @_;
+  my $result = $value >= $minimum && $value <= $maximum;
+  return $result;
+}
+
+
+
+# my $is_valid = is_valid_time( '2001-08-26t20:00:00z/2001-08-27t23:59:59z' );
+
+sub is_valid_time {
+  my $time = shift;
+  my $result = 0;
+  my $length = length( $time );
+
+  if ( $length == 41 ) {
+    $result = is_valid_time( substr( $time, 0, 20 ) );
+    $result = $result && substr( $time, 20, 1 ) eq '/';
+    $result = $result && is_valid_time( substr( $time, 21, 20 ) );
+    $result = $result && substr( $time, 0, 20 ) le substr( $time, 21, 20 );
+  } elsif ( $length == 20 ) {
+    my $year   = substr( $time, 0, 4 );
+    my $month  = substr( $time, 5, 2 );
+    my $day    = substr( $time, 8, 2 );
+    my $hour   = substr( $time, 11, 2 );
+    my $minute = substr( $time, 14, 2 );
+    my $second = substr( $time, 17, 2 );
+    $result = in_range( $year, 1900, 3000 );
+    $result = $result && in_range( $month, 1, 12 );
+    $result = $result && in_range( $day, 1, days_in_month( $year, $month ) );
+    $result = $result && in_range( $hour, 0, 23 );
+    $result = $result && in_range( $minute, 0, 59 );
+    $result = $result && in_range( $second, 0, 59 );
+    $result = $result && substr( $time, 4, 1 ) eq '-';
+    $result = $result && substr( $time, 7, 1 ) eq '-';
+    $result = $result && substr( $time, 10, 1 ) eq 't';
+    $result = $result && substr( $time, 13, 1 ) eq ':';
+    $result = $result && substr( $time, 16, 1 ) eq ':';
+    $result = $result && substr( $time, 19, 1 ) eq 'z';
+  }
+
+  return $result;
+}
+
+
+
+# increment_timestamp( $yyyy, $mm, $dd, $hh );
+
+sub increment_timestamp {
+  my ( $yyyy, $mm, $dd, $hh ) = @_;
+  my $hours_per_day   = 23;
+  my $months_per_year = 12;
+  my $days_this_month = days_in_month( $yyyy, $mm );
+  ++$hh;
+
+  if ( $hh > $hours_per_day ) {
+    $hh = 0;
+    ++$dd;
+
+    if ( $dd > $days_this_month ) {
+      $dd = 1;
+      ++$mm;
+
+      if ( $mm > $months_per_year ) {
+        $mm = 1;
+        ++$yyyy;
+      }
+    }
+  }
+
+  $_[ 0 ] = $yyyy;
+  $_[ 1 ] = $mm;
+  $_[ 2 ] = $dd;
+  $_[ 3 ] = $hh;
+}
+
+
+
+# my $yyyymmddhh = integer_timestamp( $yyyy, $mm, $dd, $hh );
+
+sub integer_timestamp {
+  my ( $yyyy, $mm, $dd, $hh ) = @_;
+  my $result = int( $yyyy * 1000000 + $mm * 10000 + $dd * 100 + $hh );
+  return $result;
+}
+
+
+
+# my $leap = is_leap_year( $year );
+
+sub is_leap_year {
+  my $year = shift;
+  my $result = $year % 4 == 0 && ! ( $year % 100 == 0 && ! $year % 400 == 0 );
+  return $result;
+}
+
+
+
+# my $days = days_in_month( $year, $month );
+
+sub days_in_month {
+  my $year  = shift;
+  my $month = shift;
+
+  # 30 days hath September, April, June and November...
+
+  my @days_per_month = ( 31, 28, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31 );
+  my $result = $days_per_month[ $month - 1 ];
+
+  if ( $month == 2 ) {
+
+    if ( is_leap_year( $year ) ) {
+      ++$result;
+    }
+  }
+
+  return $result;
+}
+
+
+
+
+############################## Database Routines #############################
+
+
+
+# Query the database and write reformatted rows to a temporary file.
+# my $result = query_database();
+
+sub query_database {
+  my $result = 0;
+  my $start_yyyymmdd =
+    substr( $starting_timestamp, 0, 4 ) . '-' .
+    substr( $starting_timestamp, 4, 2 ) . '-' .
+    substr( $starting_timestamp, 6, 2 ) . ' ' .
+    substr( $starting_timestamp, 8, 2 ) . ':00:00';
+
+  my $end_yyyymmdd =
+    substr( $ending_timestamp, 0, 4 ) . '-' .
+    substr( $ending_timestamp, 4, 2 ) . '-' .
+    substr( $ending_timestamp, 6, 2 ) . ' ' .
+    substr( $ending_timestamp, 8, 2 ) . ':59:59';
+
+  my @domain = split( /,/, $bbox ); # minlon, minlat, maxlon, maxlat, 0, 0.
+  my $west_bound  = $domain[ 0 ];
+  my $east_bound  = $domain[ 2 ];
+  my $south_bound = $domain[ 1 ];
+  my $north_bound = $domain[ 3 ];
+
+  if ( $data_product eq '' ) {
+    $data_product = 'CAL_LID_L1';
+  }
+
+  # Set DATA_VERSION based on TIME and data_product:
+  # https://eosweb.larc.nasa.gov/project/calipso/lidar_l1b_profile_table
+  # https://eosweb.larc.nasa.gov/project/calipso/aerosol_profile_table
+  # https://eosweb.larc.nasa.gov/project/calipso/aerosol_layer_table
+
+  if ( $data_version eq '' ) { # Unspecified.
+    #$data_version = '4.10'; # Latest available version for both L1 and L2.
+    $data_version = '4.%'; # % is a PosgrSQL SQL wildcard. Use LIKE in SQL code.
+    # Up to 2020-06-30, L1 version = 4.10 and L2 version = 4.20.
+    # After 2020-06-30, L1 version = 4.11 and L2 version = 4.21.
+  }
+
+  $timer = time();
+
+  # Connect to the database then execute query and read resulting rows:
+
+  use DBI;
+
+  my $database_handle =
+    DBI->connect( $database, $database_account, $database_password,
+                  { AutoCommit => 1, RaiseError => 1 } )
+    or die "Failed to connect to database because $DBI::errstr\n";
+
+  report_elapsed_time( 'connecting to database' );
+
+  my $database_query = qq/
+    SELECT
+      source_path || '\/' || granulename
+    FROM
+      metadata_product
+    WHERE
+      product_id = '$data_product' AND
+      visible_id = 4 AND
+      release_version LIKE '$data_version' AND
+      NOT ('$end_yyyymmdd' < start_date OR '$start_yyyymmdd' > stop_date) AND
+      st_intersects( st_geomfromtext( 'POLYGON(($west_bound $south_bound, $west_bound $north_bound, $east_bound $north_bound, $east_bound $south_bound, $west_bound $south_bound))',4326),geom)
+    ORDER BY
+      start_date
+    /;
+
+  # Compile and execute the above parameterized query:
+
+  my $statement_handle = $database_handle->prepare( $database_query );
+  debug( "executing $database_query" );
+  $statement_handle->execute();
+  report_elapsed_time( 'executing SQL' );
+  debug( "reading result rows and processing into $temp_list_file..." );
+
+  my $temp_file = 0;
+  open( temp_file, ">$temp_list_file" );
+
+  if ( $temp_file >= 0 ) {
+    my $processed_rows = 0;
+
+    # Read and print each resulting row (that looks like this):
+    # /some/directory/CAL_LID_L1-Prov-V1-10.2006-07-04T23-21-01ZN.hdf
+
+    while ( my @row = $statement_handle->fetchrow_array ) {
+      debug( "@row\n" );
+      stat ( "@row" ); # HACK to perhaps force update of possibly stale NFS.
+      print temp_file "@row\n";
+      ++$processed_rows;
+    }
+
+    close( temp_file );
+    $result = ( $processed_rows > 0 );
+    debug( "read $processed_rows rows\n" );
+  }
+
+  $statement_handle->finish;
+  $database_handle->disconnect;
+  report_elapsed_time( 'finished processing rows' );
+  return $result;
+}
+
+
+
+sub report_elapsed_time {
+  my $prefix = shift;
+  my $current_time = time();
+  my $elapsed_time = $current_time - $timer;
+  my $message = $prefix . " took $elapsed_time seconds.";
+  debug( $message );
+  $timer = $current_time;
+}
+

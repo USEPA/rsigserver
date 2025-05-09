@@ -1,0 +1,43 @@
+#!/bin/csh -f
+
+## nwis_download - a wrapper for the USGS National Water Information System.
+##
+##
+## args: - siteID
+##       - parameter list (comma separated)
+##       - format
+##       - period
+##
+## e.g.  nwisserver 01480065 00065,00010,00095,00400,00300
+
+if ( $#argv < 2 | $#argv > 4 ) then
+  /bin/echo
+  /bin/echo "Usage: nwis_download siteID parameter_list format period"
+  /bin/echo
+  exit 1
+endif
+
+set siteID = $1
+set parameter_list = $2
+set period = $4
+set format = $3
+
+
+#echo siteid $siteID
+#echo params $parameter_list
+#echo period $period
+
+set webservice = "https://waterservices.usgs.gov/nwis/iv/?";
+
+set parser = 'tee' #default. if parser is not specified, then JSON will be returned
+if ($format == 'ascii') then
+  set parser = '/bin/python3 /rsig/villageblue/usgs_json_parser.py'
+endif
+
+if ($period == '') then
+  /usr/bin/curl -s "${webservice}format=json&sites=${siteID}&parameterCd=${parameter_list}&access=1" | $parser
+else
+  /usr/bin/curl -s "${webservice}format=json&sites=${siteID}&parameterCd=${parameter_list}&period=${period}&access=1" | $parser
+
+endif
+

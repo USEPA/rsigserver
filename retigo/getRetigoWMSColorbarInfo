@@ -1,0 +1,25 @@
+#!/bin/csh -f
+
+## getRetigoWMSColorbarInfo - A wrapper for returning the colorbar information (hex colors for each bin)
+##                            corresponding to RETIGO WMS requests.
+##                            Called from /opt/Apache/cgi-bin/retigowmsserver
+##
+## args: - id
+#
+## e.g. getRetigoWMSColorbarInfo 30608_1537291963
+
+
+set server    = "http://rtpmeta.epa.gov/cgi-bin/rsigserver?"
+#set server    = "http://YOUR_WEBSERVER_HOST/rsig-cgi/rsigserver?"
+set scriptDir = "/rsig/WMS/scripts"
+set outputDir = "/rsig/WMS/data/output"
+
+
+## if we got this far, assume the parameters are in the correct order
+set id = $1
+
+## send back colorbar info
+set colorbarInfoFile = $outputDir/${id}_colorbarinfo.txt
+if (-e $colorbarInfoFile) then
+  cat $colorbarInfoFile
+endif

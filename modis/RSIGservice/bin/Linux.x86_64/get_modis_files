@@ -1,0 +1,51 @@
+#!/usr/local/bin/perl -w
+# get_modis_files - tar, compress and output a set of
+# MODIS .hdf files specified in the input file.
+
+use strict;
+
+use FileHandle;
+use File::Spec;
+
+my ($vol,$bdir,$name) = File::Spec->splitpath($0);
+$bdir =~ s|/$||;      # untaint and remove trailing /
+
+# Tuneable parameters:
+
+my $temp_file = "modis_hdf.$$.tgz";
+
+my $bounds_file = $ARGV[0];
+die "no bounds_file" unless $bounds_file;
+my $fh = new FileHandle($bounds_file) or die "could not open $bounds_file";
+my @hdf_list = ();
+while (my $line = $fh->getline())
+{
+  chomp $line;
+  next unless $line;
+  push @hdf_list, $line;
+}
+$fh->close();
+my $n_hdf = scalar(@hdf_list);
+die "no files to process" unless $n_hdf;
+
+# need the PATH environment set so that gtar can find gzip and cat...
+$ENV{PATH} = "$bdir:/usr/bin:/bin";
+
+# Create compressed tar file:
+my @cmd = (
+  "$bdir/gtar",
+  "-zcf",
+  $temp_file,
+  @hdf_list,
+);
+#print STDERR "get_modis_files : cmd = ", join(' ',@cmd), "\n";
+my $result = system(@cmd);
+die "FAIL : tar $n_hdf files" unless $result == 0;
+
+
+# Output compressed tar file:
+my $cmd = "cat $temp_file";
+$result = system($cmd);
+die "FAIL : $cmd" unless $result == 0;
+
+0;

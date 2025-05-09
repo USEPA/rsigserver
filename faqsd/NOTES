@@ -1,0 +1,50 @@
+2017-11-13
+From: reff.adam@epa.gov
+x5683
+
+Hi Todd, 
+
+I have created updates to the Downscaler files for 2002 through 2008.
+Would it be possible to update those files posted on RSIG with these new ones?
+The new files are at the locations on atmos listed below.
+This first directory contains the new 2002-2006 files,
+the remaining 4 paths point directly to the 2007 and 2008 files.
+
+Also, the webpage currently labels the 2002-2006 files as "Eastern US",
+but these files actually contain output for the whole CONUS.
+Would you be able to change those labels as well?
+
+Thanks!
+
+atmos1:/home/areff/SurfFusion/CDCRequest2012_ReDo/Results/Pooled12_36DSSurfaces/*.csv
+atmos1:/home/areff/SurfFusion/CDCRequest2012_ReDo/Results/pm25_12km_2007/RESULTS/Predictions.csv
+atmos1:/home/areff/SurfFusion/CDCRequest2012_ReDo/Results/pm25_12km_2008/RESULTS/Predictions.csv
+atmos1:/home/areff/SurfFusion/CDCRequest2012_ReDo/Results/ozone_12km_2007/RESULTS/Predictions.csv
+atmos1:/home/areff/SurfFusion/CDCRequest2012_ReDo/Results/ozone_12km_2008/RESULTS/Predictions.csv
+
+----
+
+2020-09-25:
+
+# Inputs:
+scp -p "atmos1:/work/ROMO/users/areff/projects/SurfFusion/CDC_2017Data/Data/*.csv" .
+
+# Outputs:
+scp -p atmos1:/work/ROMO/users/areff/projects/SurfFusion/CDC_2017Data/Results/ozone/RESULTS/Predictions.csv  2017_ozone_daily_8hour_maximum.csv
+scp -p atmos1:/work/ROMO/users/areff/projects/SurfFusion/CDC_2017Data/Results/pm25/RESULTS/Predictions.csv   2017_pm25_daily_average.csv
+
+-------
+
+AQS inputs:
+/work/ROMO/users/areff/projects/SurfFusion/CDC_2019Data/Data/ds.input.aqs.ozone.2019.csv
+/work/ROMO/users/areff/projects/SurfFusion/CDC_2019Data/Data/ds.input.aqs.pm25.2019.csv
+
+CMAQ inputs:
+/work/ROMO/users/areff/projects/SurfFusion/CDC_2019Data/Data/ds.input.cmaq.ozone.2019.csv
+/work/ROMO/users/areff/projects/SurfFusion/CDC_2019Data/Data/ds.input.cmaq.pm25.2019.csv
+
+DS outputs:
+/work/ROMO/users/areff/projects/SurfFusion/CDC_2019Data/Results/ozone/RESULTS/Predictions.csv
+/work/ROMO/users/areff/projects/SurfFusion/CDC_2019Data/Results/pm25/RESULTS/Predictions.csv
+
+

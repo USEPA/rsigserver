@@ -1,0 +1,375 @@
+#!/bin/csh -f
+###############################################################################
+# PURPOSE: Run PurpleAirSubset hourly or non-aggregated xdr-format in parallel.
+# INPUTS:  processes  Number of PurpleAirSubset parallel tasks to launch.
+#          command    PurpleAirSubset command to decompose into parallel tasks
+#                     based on the timerange.
+# HISTORY: 2021-01-31 plessel.todd@epa.gov
+# STATUS:  unreviewed tested
+# NOTES:   PurpleAirSubset command is of the form:
+#          /rsig/current/code/bin/Linux.x86_64/PurpleAirSubset \
+#           -files <listfile> \
+#           -tmpdir <temp_directory> \
+#           -desc "description text" \
+#           -timerange <yyyymmddhhmmss> <yyyymmddhhmmss> \
+#           -variable <name> \
+#           -bounds <minimum_longitude> <minimum_latitude> \
+#                   <maximum_longitude> <maximum_latitude> \
+#           -format ascii | xdr \
+#           [-sensor sensor_id] \
+#           [-out_in_flag 0|1]
+#           [-aggregate hourly | daily | all]
+#
+#          After parsing the original PurpleAirSubset command into a set of
+#          parallel PurpleAirSubset commands - each operating on a subrange of
+#          timesteps - it runs these in the background and
+#          when they all finish (each creating an xdr file for their subrange)
+#          it runs PointSubset on these xdr files and streams the final xdr.
+###############################################################################
+
+# 0 = run without printing debug statements to file $log.
+# 1 = run and print debug statements to file $log.
+# 2 = do not run subsetters, just print debug statements to file $log.
+
+@ debugging = 0
+
+set PointSubset = /rsig/current/code/bin/Linux.x86_64/PointSubset
+
+if ( $#argv < 20 ) then
+  echo
+  echo "$0 - Run PurpleAirSubset hourly or non-aggregated xdr-format in parallel."
+  echo
+  echo "Usage: $0 <tasks> <command>"
+  echo
+  echo "Example:"
+  echo "$0 4 /rsig/current/code/bin/Linux.x86_64/PurpleAirSubset \ "
+  echo '  -files /data/tmp/file_list \ '
+  echo '  -tmpdir /data/tmp \ '
+  echo '  -desc 'https://api.purpleair.com,PurpleAirSubset' \ '
+  echo '  -timerange 20210101000000 20210107235959 \ '
+  echo '  -variable pm25_corrected \ '
+  echo '  -bounds -180 -90 180, 90 \ '
+  echo '  -format xdr \ '
+  echo '  -out_in_flag 0 \ '
+  echo '  -aggregate hourly \ '
+  echo '  > purpleair_pm25_corrected_hourly_2021-01-01_to_2021-01-07.xdr'
+  echo
+  exit 1
+endif
+
+# 1st arg is the maximum number of PurpleAirSubset parallel processes to run:
+
+@ processes = $1
+shift
+set original_command = "$*"
+
+# Temp files created by this program use the same tmpdir as original command:
+
+set tmpdir = `echo "-tmpdir $original_command" | awk '{ for ( i = 2; i <= NF; ++i ) if ( $i == $1 ) print $(i + 1) }'`
+
+set log = "$tmpdir/run_parallel_log.$$"
+
+if ( $debugging ) then
+  date > $log
+endif
+
+set temp_output_file_list = "$tmpdir/junk_run_parallel_file_list.$$"
+set temp_run_file         = "$tmpdir/junk_run_parallel_run_file.$$"
+
+# Per-task ".$process" will be appended to these file names:
+
+set temp_output_file      = "$tmpdir/junk_run_parallel_output_file.$$"
+set temp_input_file_list  = "$tmpdir/junk_run_parallel_input_file_list.$$"
+
+#------------------------------------------------------------------------------
+
+@ parallelizable = ( $processes > 1 )
+@ hours = 0
+
+if ( $parallelizable ) then
+
+  # Check that the PurpleAirSubset command is parallelizable:
+
+  # Is format xdr?
+  set format = `echo "-format $original_command" | awk '{ for ( i = 2; i <= NF; ++i ) if ( $i == $1 ) print $(i + 1) }'`
+  @ parallelizable = $format == 'xdr'
+
+  if ( $parallelizable ) then # Check aggregate:
+    set aggregate = `echo "-aggregate $original_command" | awk '{ for ( i = 2; i <= NF; ++i ) if ( $i == $1 ) print $(i + 1) }'`
+    @ parallelizable = ( $aggregate == '' || $aggregate == 'hourly' )
+
+    if ( $parallelizable ) then # Check timerange hours >= $processes:
+      set yyyymmddhhmmss_yyyymmddhhmmss = `echo "-timerange $original_command" | awk '{ for ( i = 2; i <= NF; ++i ) if ( $i == $1 ) print $(i + 1) " " $(i + 2) }'`
+      @ parallelizable = ( "$yyyymmddhhmmss_yyyymmddhhmmss" != '' )
+
+      if ( $parallelizable ) then
+        @ yyyymmddhh1 = `echo $yyyymmddhhmmss_yyyymmddhhmmss | awk '{ print substr( $1, 1, 10 ) }'`
+        @ mmss1       = `echo $yyyymmddhhmmss_yyyymmddhhmmss | awk '{ print substr( $1, 9, 4 ) }'`
+        @ yyyymmddhh2 = `echo $yyyymmddhhmmss_yyyymmddhhmmss | awk '{ print substr( $2, 1, 10 ) }'`
+        @ mmss2       = `echo $yyyymmddhhmmss_yyyymmddhhmmss | awk '{ print substr( $2, 9, 4 ) }'`
+
+        @ yyyymmddhh = $yyyymmddhh1
+        @ yyyy = $yyyymmddhh / 1000000
+        @ mm   = $yyyymmddhh / 10000 % 100
+        @ dd   = $yyyymmddhh / 100 % 100
+        @ hh   = $yyyymmddhh % 100
+        @ hours = 1
+
+        set days_each_month = ''
+        @ m = 1
+
+        while ( $m <= 12 )
+          @ days = `cal $m $yyyy | tr ' ' '\n' | grep -v ^$ | tail -1`
+          set days_each_month = "$days_each_month $days"
+          @ m += 1
+        end
+
+        while ( $yyyymmddhh < $yyyymmddhh2 )
+
+          @ hh += 1
+
+          if ( $hh == 24 ) then
+            @ hh = 0
+            @ dd += 1
+
+            if ( $dd > 28 ) then
+              @ month_days = `echo $days_each_month $dd | awk '{ print $($NF) }'`
+
+              if ( $dd > $month_days ) then
+                @ dd = 1
+                @ mm += 1
+
+                if ( $mm > 12 ) then
+                  @ mm = 1
+                  @ yyyy += 1
+                endif
+              endif
+            endif
+          endif
+
+          @ hours += 1
+          @ yyyymmddhh = `printf "%d%02d%02d%02d" $yyyy $mm $dd $hh`
+        end
+
+        @ parallelizable = ( $hours >= $processes )
+      endif
+    endif
+  endif
+endif
+
+if ( $debugging ) then
+  echo "$processes processes, $hours hours, parallelizable = $parallelizable" >> $log
+endif
+
+if ( ! $parallelizable ) then # Just run original command:
+  @ the_status = 0
+
+  if ( $debugging ) then
+    echo "$original_command" >> $log
+  endif
+
+  if ( $debugging != 2 ) then
+    $original_command
+    @ the_status = $status
+  endif
+
+  if ( $debugging ) then
+    date >> $log
+    echo "Exit status = $the_status" >> $log
+  else
+    rm -f $log $temp_run_file $temp_output_file_list $temp_input_file_list.* $temp_output_file.*
+  endif
+
+  exit $the_status
+endif
+
+#------------------------ Continue with parallel runs -------------------------
+
+set yyyymmddhhmmss = '' # Per-process begin/end timerange.
+
+#------------------------------------------------------------------------------
+# Partition the set of input files and the timerange for each parallel process:
+
+@ hour_increment = `echo $hours $processes | awk '{ q = int( $1 / $2 ); r = $1 % $2; print q + ( r != 0 ) }'`
+
+# Recompute actual number of processes based on actual increment:
+
+@ processes = `echo $hours $hour_increment | awk '{ print int( $1 / $2 ) }'`
+
+if ( $debugging ) then
+  echo "hour_increment = $hour_increment actual processes = $processes" >> $log
+endif
+
+# Compute list of begin/end timeranges:
+
+set yyyymmddhhmmss1 = `echo "$yyyymmddhhmmss_yyyymmddhhmmss" | awk '{ print $1 }'`
+set yyyymmddhhmmss2 = `echo "$yyyymmddhhmmss_yyyymmddhhmmss" | awk '{ print $2 }'`
+@ yyyymmddhh = $yyyymmddhh1
+@ yyyy = $yyyymmddhh / 1000000
+@ mm   = $yyyymmddhh / 10000 % 100
+@ dd   = $yyyymmddhh / 100 % 100
+@ hh   = $yyyymmddhh % 100
+
+while ( $yyyymmddhh <= $yyyymmddhh2 )
+
+  if ( "$yyyymmddhhmmss" == '' ) then # Initialize to original begin timerange:
+    set yyyymmddhhmmss = "$yyyymmddhhmmss1"
+  else # Else use beginning of hour:
+    set yyyymmddhhmmss = "$yyyymmddhhmmss ${yyyymmddhh}0000"
+  endif
+
+  @ yyyy_p = 0
+  @ mm_p   = 0
+  @ dd_p   = 0
+  @ hh_p   = 0
+
+  @ h = 0
+
+  while ( $h < $hour_increment )
+    @ hh += 1
+
+    if ( $hh == 24 ) then
+      @ yyyy_p = $yyyy
+      @ mm_p   = $mm
+      @ dd_p   = $dd
+      @ hh_p   = 23
+
+      @ hh = 0
+      @ dd += 1
+
+      if ( $dd > 28 ) then
+        @ month_days = `echo $days_each_month $dd | awk '{ print $($NF) }'`
+
+        if ( $dd > $month_days ) then
+          @ dd = 1
+          @ mm += 1
+
+          if ( $mm > 12 ) then
+            @ mm = 1
+            @ yyyy += 1
+          endif
+        endif
+      endif
+    endif
+
+    @ h += 1
+  end
+
+  if ( $hh > 0 ) then
+    @ hh -= 1
+    @ yyyymmddhh = `printf "%d%02d%02d%02d" $yyyy $mm $dd $hh`
+    @ hh += 1
+  else if ( $hh == 0 ) then
+    @ yyyymmddhh = `printf "%d%02d%02d%02d" $yyyy_p $mm_p $dd_p $hh_p`
+  endif
+
+  set yyyymmddhhmmss = "$yyyymmddhhmmss ${yyyymmddhh}5959"
+
+  @ yyyymmddhh = `printf "%d%02d%02d%02d" $yyyy $mm $dd $hh`
+end
+
+# Ensure original end timestamp is used:
+
+@ is_even = `echo "$yyyymmddhhmmss" | awk '{ print ( NF % 2 == 0 ) }'`
+
+if ( $is_even ) then # Remove last timestamp:
+  set yyyymmddhhmmss = `echo "$yyyymmddhhmmss" | awk '{ for ( i = 1; i < NF; ++i ) printf "%s ", $i }'`
+endif
+
+# Append original end timestamp:
+
+set yyyymmddhhmmss = "$yyyymmddhhmmss $yyyymmddhhmmss2"
+
+# Recompute number of actual processes to be launched:
+
+#@ processes = `echo "$yyyymmddhhmmss" | awk '{ print NF / 2 }'`
+
+if ( $debugging ) then
+  echo "$processes processes $yyyymmddhhmmss" >> $log
+endif
+
+#------------------------------------------------------------------------------
+# Extract the subset of input files matching each timerange:
+# Each line in the list file is of the form:
+# /data/PurpleAir/data/2020/20201202/purpleair_181802.json
+
+set original_file_list = `echo "-files $original_command" | awk '{ for ( i = 2; i <= NF; ++i ) if ( $i == $1 ) print $(i + 1) }'`
+@ process = 0
+
+while ( $process < $processes )
+  set yyyymmddhhmmss1 = `echo $yyyymmddhhmmss $process | awk '{ print $($NF*2+1) }'`
+  set yyyymmddhhmmss2 = `echo $yyyymmddhhmmss $process | awk '{ print $($NF*2+2) }'`
+
+  awk -F/ -v yyyymmddhhmmss1="$yyyymmddhhmmss1" -v yyyymmddhhmmss2="$yyyymmddhhmmss2" \
+    '{ yyyymmdd = $(NF-1); hhmmss = substr( $NF, length( $NF ) - 10, 6 ); yyyymmddhhmmss = yyyymmdd hhmmss; if ( yyyymmddhhmmss >= yyyymmddhhmmss1 && yyyymmddhhmmss <= yyyymmddhhmmss2 ) print }' \
+     < $original_file_list > $temp_input_file_list.$process
+
+  if ( $debugging ) then
+    echo >> $log
+    head -1 $temp_input_file_list.$process >> $log
+    echo ... >> $log
+    tail -1 $temp_input_file_list.$process >> $log
+  endif
+
+  @ process += 1
+end
+
+#------------------------------------------------------------------------------
+# Background run each PurpleAirSubset program on a subset of files/timerange:
+
+@ process = 0
+
+echo '#\!/bin/sh' > $temp_run_file
+
+while ( $process < $processes )
+  set yyyymmddhhmmss1 = `echo $yyyymmddhhmmss $process | awk '{ print $($NF * 2 + 1) }'`
+  set yyyymmddhhmmss2 = `echo $yyyymmddhhmmss $process | awk '{ print $($NF * 2 + 2) }'`
+
+  # Start with original command and edit parameters: -files and -timerange:
+
+  set command = "$original_command"
+  set command = `echo "-files $temp_input_file_list.$process        $command" | awk '{ for ( i = 3; i <= NF; ++i ) if ( $i == $1 ) { printf " %s %s",    $1, $2;     i += 1 } else printf " %s", $i }'`
+  set command = `echo "-timerange $yyyymmddhhmmss1 $yyyymmddhhmmss2 $command" | awk '{ for ( i = 4; i <= NF; ++i ) if ( $i == $1 ) { printf " %s %s %s", $1, $2, $3; i += 2 } else printf " %s", $i }'`
+
+  if ( $debugging ) then
+    echo "$command > $temp_output_file.$process &" >> $log
+  endif
+
+  if ( $debugging != 2 ) then
+    echo "$command > $temp_output_file.$process &" >> $temp_run_file
+  endif
+
+  echo $temp_output_file.$process >> $temp_output_file_list
+  @ process += 1
+end
+
+if ( $debugging != 2 ) then
+  echo wait >> $temp_run_file
+  chmod +x $temp_run_file
+  $temp_run_file >& /dev/null
+endif
+
+#------------------------------------------------------------------------------
+# Finally, run PointSubset on the set of resulting xdr output files:
+
+set bounds = `echo "-bounds $original_command" | awk '{ for ( i = 2; i <= NF; ++i ) if ( $i == $1 ) print $(i + 1) " " $(i + 2) " " $(i + 3)  " " $(i + 4)  }'`
+
+if ( $debugging ) then
+  echo "$PointSubset -files $temp_output_file_list -tmpdir $tmpdir -bounds $bounds" >> $log
+endif
+
+if ( $debugging != 2 ) then
+  $PointSubset -files $temp_output_file_list -tmpdir $tmpdir -bounds $bounds
+endif
+
+@ the_status = $status
+
+if ( $debugging ) then
+  date >> $log
+  echo "Exit status = $the_status" >> $log
+else
+  rm -f $log $temp_run_file $temp_output_file_list $temp_input_file_list.* $temp_output_file.*
+endif
+
+exit $the_status
+

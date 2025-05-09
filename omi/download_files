@@ -1,0 +1,25 @@
+#!/bin/csh -f
+# Manually run this to download entire archive of OMI files to maple.
+
+@ yyyy = 2023
+while ( $yyyy > 2004 )
+  @ leap = ( ( $yyyy % 4 == 0 ) && ( ( $yyyy % 100 != 0 ) || ( $yyyy % 400 == 0 ) ) )
+
+  @ m = 12
+  while ( $m >= 1 )
+    @ d = `cal $m $yyyy | grep -v '^ ' | grep -v ^$ | tail -1 | awk '{print $NF}'`
+    while ( $d > 0 )
+      set yyyymmdd = `echo $yyyy $m $d | awk '{ printf "%04d%02d%02d", $1, $2, $3 }'`
+      echo
+      echo "----------------------------- get_omi_files $yyyymmdd"
+      echo
+      /data/OMI/get_omi_files $yyyymmdd
+      @ d -= 1
+    end
+
+    @ m -= 1
+  end
+
+  @ yyyy -= 1
+end
+

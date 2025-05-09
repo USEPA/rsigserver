@@ -1,0 +1,50 @@
+#!/bin/csh -f
+# PandoraSubset - Subset program for Pandora site data.
+
+set FDD = /rsig/current/code/bin/Linux.x86_64/fdd
+set input = /data/Pandora/pandora_sites.txt
+set temp = /data/tmp/junk_Pandora.$$
+
+set desc = "$4"
+@ yyyymmddhh1 = `echo "$6" | awk '{ printf "%d", $1 / 10000 }'`
+@ yyyymmddhh2 = `echo "$7" | awk '{ printf "%d", $1 / 10000 }'`
+set lonmin      = "$11"
+set latmin      = "$12"
+set lonmax      = "$13"
+set latmax      = "$14"
+
+# Subset by lon-lat bounds:
+
+awk -v lonmin="$lonmin" -v lonmax="$lonmax"  -v latmin="$latmin" -v latmax="$latmax" \
+'{ lon = $2; lat = $3; if ( lon >= lonmin && lon <= lonmax && lat >= latmin && lat <= latmax ) print }' \
+< $input > $temp
+@ subset_points = ` cat $temp | wc -l`
+
+if ( $subset_points ) then
+  @ YYYY1 = $yyyymmddhh1 / 1000000
+  @ YYYY2 = $yyyymmddhh2 / 1000000
+  @ MM1   = $yyyymmddhh1 / 10000 % 100
+  @ MM2   = $yyyymmddhh2 / 10000 % 100
+  @ DD1   = $yyyymmddhh1 / 100 % 100
+  @ DD2   = $yyyymmddhh2 / 100 % 100
+
+  echo "Point 1.0"
+  echo "$desc"
+  printf "%04d-%02d-%02dT00:00:00-0000 %04d-%02d-%02dT23:59:59-0000\n" $YYYY1 $MM1 $DD1 $YYYY2 $MM2 $DD2
+  echo '# Dimensions: variables points'
+  echo "4 $subset_points"
+  echo '# Variable names:'
+  echo 'timestamp longitude latitude yearly_id'
+  echo '# Variable units:'
+  echo 'yyyymmddhhmmss deg deg -'
+  echo '# char notes[points][80] and'
+  echo '# IEEE-754 64-bit reals data[variables][points]:'
+  awk '{ printf "%-79s\n", $4 }' < $temp
+  awk -v yyyymmddhh="$yyyymmddhh1" '{ printf "%d0000\n", yyyymmddhh }' < $temp | $FDD conv=ascii-real8 conv=swab8
+  awk '{ print $2 }' < $temp | $FDD conv=ascii-real8 conv=swab8
+  awk '{ print $3 }' < $temp | $FDD conv=ascii-real8 conv=swab8
+  awk '{ print $1 }' < $temp | $FDD conv=ascii-real8 conv=swab8
+endif 
+
+rm $temp
+

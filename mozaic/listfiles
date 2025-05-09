@@ -1,0 +1,155 @@
+#!/bin/csh -f
+# listfiles - List MOZAIC data files for given starting YYYYMMDDHH and HOURS.
+# 2010-02-17 plessel.todd@epa.gov 919-541-5500
+
+set data_directory = '/data/MOZAIC/data'
+set temp = /data/tmp/listfiles.$$
+touch $temp ; \rm $temp
+
+
+@ ok = 0
+@ yyyymmddhh = 0
+@ hours      = 0
+
+if ( $#argv == 2 || $#argv == 3 ) then
+  @ yyyymmddhh = $1
+  @ hours      = $2
+  set profile  = "$3"
+  @ ok = ($yyyymmddhh >= 1990010100 && $yyyymmddhh <= 2147123123 && $hours >= 1)
+
+  if ( ! $ok ) then
+    echo "$0 Invalid command-line arguments $1 $2"
+  endif
+endif
+
+if ( ! $ok ) then
+  echo
+  echo "$0 - List MOZAIC data files for given starting YYYYMMDDHH and HOURS."
+  echo "usage: $0 YYYYMMDDHH HOURS"
+  echo "examples:"
+  echo "$0 2006070300 24"
+  echo '/data/MOZAIC/data/M200607/M20060702014.txt'
+  echo '/data/MOZAIC/data/M200607/M20060702023.txt'
+  echo '/data/MOZAIC/data/M200607/M20060702035.txt'
+  echo '/data/MOZAIC/data/M200607/M20060702044.txt'
+  echo '/data/MOZAIC/data/M200607/M20060702053.txt'
+  echo '/data/MOZAIC/data/M200607/M20060702062.txt'
+  echo '/data/MOZAIC/data/M200607/M20060703014.txt'
+  echo '/data/MOZAIC/data/M200607/M20060703023.txt'
+  echo '/data/MOZAIC/data/M200607/M20060703035.txt'
+  echo '/data/MOZAIC/data/M200607/M20060703042.txt'
+  echo '/data/MOZAIC/data/M200607/M20060703054.txt'
+  echo '/data/MOZAIC/data/M200607/M20060703063.txt'
+  echo
+  echo "$0 2006070300 24 profiles"
+  echo '/data/MOZAIC/data/MP2006/MA20060702014.txt'
+  echo '/data/MOZAIC/data/MP2006/MA20060702023.txt'
+  echo '/data/MOZAIC/data/MP2006/MA20060702035.txt'
+  echo '/data/MOZAIC/data/MP2006/MA20060702044.txt'
+  echo '/data/MOZAIC/data/MP2006/MA20060702053.txt'
+  echo '/data/MOZAIC/data/MP2006/MA20060702062.txt'
+  echo '/data/MOZAIC/data/MP2006/MD20060702014.txt'
+  echo '/data/MOZAIC/data/MP2006/MD20060702023.txt'
+  echo '/data/MOZAIC/data/MP2006/MD20060702035.txt'
+  echo '/data/MOZAIC/data/MP2006/MD20060702044.txt'
+  echo '/data/MOZAIC/data/MP2006/MD20060702053.txt'
+  echo '/data/MOZAIC/data/MP2006/MD20060702062.txt'
+  echo '/data/MOZAIC/data/MP2006/MA20060703014.txt'
+  echo '/data/MOZAIC/data/MP2006/MA20060703023.txt'
+  echo '/data/MOZAIC/data/MP2006/MA20060703035.txt'
+  echo '/data/MOZAIC/data/MP2006/MA20060703042.txt'
+  echo '/data/MOZAIC/data/MP2006/MA20060703054.txt'
+  echo '/data/MOZAIC/data/MP2006/MA20060703063.txt'
+  echo '/data/MOZAIC/data/MP2006/MD20060703014.txt'
+  echo '/data/MOZAIC/data/MP2006/MD20060703023.txt'
+  echo '/data/MOZAIC/data/MP2006/MD20060703035.txt'
+  echo '/data/MOZAIC/data/MP2006/MD20060703042.txt'
+  echo '/data/MOZAIC/data/MP2006/MD20060703054.txt'
+  echo '/data/MOZAIC/data/MP2006/MD20060703063.txt'
+  echo
+  exit 1
+endif
+
+@ yyyy = `echo  $yyyymmddhh | awk '{ printf "%d", substr( $1, 1, 4 ) }'`
+@ mm   = `echo  $yyyymmddhh | awk '{ printf "%d", substr( $1, 5, 2 ) }'`
+@ dd   = `echo  $yyyymmddhh | awk '{ printf "%d", substr( $1, 7, 2 ) }'`
+@ hh   = `echo  $yyyymmddhh | awk '{ printf "%d", substr( $1, 9, 2 ) }'`
+
+@ leap = ( $yyyy % 4 == 0 && ! ( $yyyy % 100 == 0 && ! $yyyy % 400 == 0 ) )
+if ( $leap ) then
+  set days_per_month = ( 31 29 31 30 31 30 31 31 30 31 30 31 )
+else
+  set days_per_month = ( 31 28 31 30 31 30 31 31 30 31 30 31 )
+endif
+
+@ days = `echo $hours | awk '{ printf "%d", ( $1 - 1 ) / 24 + 1}'`
+
+# Backup a day since some files contain data that spills over into the next day:
+
+@ days += 1 # Must process one extra day.
+
+# Decrement day:
+
+@ dd -= 1
+
+
+if ( $dd == 0 ) then
+  @ mm -= 1
+
+  if ( $mm == 0 ) then
+    @ mm = 12
+    @ yyyy -= 1
+    @ leap = ( $yyyy % 4 == 0 && ( $yyyy % 100 != 0 || $yyyy % 400 == 0 ) )
+  endif
+
+  if ( $leap ) then
+    set days_per_month = ( 31 29 31 30 31 30 31 31 30 31 30 31 )
+  else
+    set days_per_month = ( 31 28 31 30 31 30 31 31 30 31 30 31 )
+  endif
+
+  @ dd = $days_per_month[$mm]
+endif
+
+@ d = 1
+while ( $d <= $days )
+
+  # List files matching yyyymmdd:
+
+  @ yyyymm   = `printf "%04d%02d" $yyyy $mm`
+  @ yyyymmdd = `printf "%d%02d" $yyyymm $dd`
+
+  if ( "$profile" == 'profiles' ) then
+    ls $data_directory/$yyyy/MP$yyyy/MD$yyyymmdd*.txt |& grep -v 'ls: ' >> $temp
+    ls $data_directory/$yyyy/MP$yyyy/MA$yyyymmdd*.txt |& grep -v 'ls: ' >> $temp
+  else
+    ls $data_directory/$yyyy/M$yyyymm/M$yyyymmdd*.txt |& grep -v 'ls: ' >> $temp
+  endif
+
+  # Increment day:
+
+  @ dd += 1
+
+  if ( $dd > $days_per_month[$mm] ) then
+    @ dd = 1
+    @ mm += 1
+
+    if ( $mm > 12 ) then
+      @ mm = 1
+      @ yyyy += 1
+      @ leap = ( $yyyy % 4 == 0 && ( $yyyy % 100 != 0 || $yyyy % 400 == 0 ) )
+
+      if ( $leap ) then
+        set days_per_month = ( 31 29 31 30 31 30 31 31 30 31 30 31 )
+      else
+        set days_per_month = ( 31 28 31 30 31 30 31 31 30 31 30 31 )
+      endif
+    endif
+  endif
+
+  @ d += 1
+end
+
+cat $temp | sort | uniq
+\rm $temp
+

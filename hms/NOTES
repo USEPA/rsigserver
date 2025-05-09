@@ -1,0 +1,232 @@
+2016-10-18
+
+Todd and Matt,
+ 
+Can you look at this NOAA ftp site,
+ftp://satepsanone.nesdis.noaa.gov/FIRE/HMS/GIS/
+and let me know how difficult it would be to start including the
+HMS_fire locations hms_fireYYYYMMDD.dbf
+and HMS_smoke hms_smokeYYYYMMDD.shp/shx/dbf
+in RSIG?
+They produce the files in various formats twice a day,
+so the final files are the ones we would use.
+If we can setup an ftp pull for this and add this data without much effort,
+this would be good.
+ 
+Jim   
+
+-----------------------------------------------
+2016-10-19
+From: mark.ruminski@noaa.gov
+
+For the ecosys classification codes seen in the dbf file you indicate,
+I am pretty sure, but not certain, that the ecosystem code is from
+the attached file.
+I know that we use that for the text files that we generate but
+I'm not positive that it's the same for the GIS file
+(one would think they should be the same).
+I will check with our programmer to verify.
+
+For the sensor identification, it's not in the dbf file but
+it is in the text file
+ftp://satepsanone.nesdis.noaa.gov/FIRE/HMS/hms20161012.txt
+and also in the kml files
+ftp://satepsanone.nesdis.noaa.gov/FIRE/HMS/KML/
+Don't ask me why the information isn't the same in all the file formats.
+It's a legacy issue that we should probably resolve someday.
+
+The density in the smoke files represents smoke concentration
+in ug/m3 and is one of 3 values (5, 16 or 27) that roughly
+correspond to light, medium and dense smoke.
+These shouldn't be considered as exact values fro the smoke
+concentration within the plume but rather a rough estimate a
+range of values.
+It's better to view these as relative densities within the plume.
+The smoke plumes are also available in kml format if that's useful for you.
+Hope this is helpful. Let me know if you need more.
+
+Mark
+
+-----------------------------------------------
+ 
+http://www.ssd.noaa.gov/PS/FIRE/hms.html
+
+-----------------------------------------------
+
+For fire point locations, we only need to dbf files:
+
+dbfdump hms_fire20161017.dbf | head
+  ID       Lon     Lat  YearDay  Time Ecosys 
+   1   -76.736  35.480  2016291  1929   27   
+   2   -80.502  26.467  2016291  1810   31   
+   3   -80.442  26.786  2016291  1715   31   
+   4   -80.580  26.618  2016291  1635   31   
+   5   -80.618  26.758  2016291  1635   27   
+
+For smoke polygons, we need the shp/shx/dbf files:
+
+dbfdump hms_smoke20161017.dbf | head
+ ID Start  End    Density 
+  0 2215   2315   5.000   
+  1 2215   2315   16.000  
+  2 2215   2315   5.000   
+  3 2215   2315   16.000  
+
+shpdump hms_smoke20161017.shp | more
+Shapefile Type: Polygon   # of Shapes: 46
+
+File Bounds: (    -115.035,      26.235,0,0)
+         to  (     -79.764,      40.260,0,0)
+
+Shape:0 (Polygon)  nVertices=18, nParts=1
+  Bounds:(    -105.303,      37.546, 0, 0)
+      to (     -95.227,      39.565, 0, 0)
+     (    -105.029,      37.963, 0, 0) Ring 
+     (    -105.303,      38.159, 0, 0)  
+     (    -105.104,      38.258, 0, 0)  
+
+--------------------------------------------------
+
+Smoke density units are ug/m3.
+
+Ecosys codes:
+1 Urban
+2 Low Sparse Grassland
+3 Coniferous Forest
+4 Deciduous Conifer Forest
+5 Deciduous Broadleaf Forest
+6 Evergreen Broadleaf Forests
+7 Tall Grasses and Shrubs
+8 Bare Desert
+9 Upland Tundra
+10 Irrigated Grassland
+11 Semi Desert
+12 Glacier Ice
+13 Wooded Wet Swamp
+14 Inland Water
+15 Sea Water
+16 Shrub Evergreen
+17 Shrub Deciduous
+18 Mixed Forest and Field
+19 Evergreen Forest and Fields
+20 Cool Rain Forest
+21 Conifer Boreal Forest
+22 Cool Conifer Forest
+23 Cool Mixed Forest
+24 Mixed Forest
+25 Cool Broadleaf Forest
+26 Deciduous Broadleaf Forest
+27 Conifer Forest
+28 Montane Tropical Forests
+29 Seasonal Tropical Forest
+30 Cool Crops and Towns
+31 Crops and Town
+32 Dry Tropical Woods
+33 Tropical Rainforest
+34 Tropical Degraded Forest
+35 Corn and Beans Cropland
+36 Rice Paddy and Field
+37 Hot Irrigated Cropland
+38 Cool Irrigated Cropland
+39 Cold Irrigated Cropland
+40 Cool Grasses and Shrubs
+41 Hot and Mild Grasses and Shrubs
+42 Cold Grassland
+43 Savanna (Woods)
+44 Mire, Bog, Fen
+45 Marsh Wetland
+46 Mediterranean Scrub
+47 Dry Woody Scrub
+48 Dry Evergreen Woods
+49 Volcanic Rock
+50 Sand Desert
+51 Semi Desert Shrubs
+52 Semi Desert Sage
+53 Barren Tundra
+54 Cool Southern Hemisphere Mixed Forests
+55 Cool Fields and Woods
+56 Forest and Field
+57 Cool Forest and Field
+58 Fields and Woody Savanna
+59 Succulent and Thorn Scrub
+60 Small Leaf Mixed Woods
+61 Deciduous and Mixed Boreal Forest
+62 Narrow Conifers
+63 Wooded Tundra
+64 Heath Scrub
+65 Coastal Wetland, NW
+66 Coastal Wetland, NE
+67 Coastal Wetland, SE
+68 Coastal Wetland, SW
+69 Polar and Alpine Desert
+70 Glacier Rock
+71 Salt Playas
+72 Mangrove
+73 Water and Island Fringe
+74 Land, Water, and Shore
+75 Land and Water, Rivers
+76 Crop and Water Mixtures
+77 Southern Hemisphere Conifers
+78 Southern Hemisphere Mixed Forest
+79 Wet Sclerophylic Forest
+80 Coastline Fringe
+81 Beaches and Dunes
+82 Sparse Dunes and Ridges
+83 Bare Coastal Dunes
+84 Residual Dunes and Beaches
+85 Compound Coastlines
+86 Rocky Cliffs and Slopes
+87 Sandy Grassland and Shrubs
+88 Bamboo
+89 Moist Eucalyptus
+90 Rain Green Tropical Forest
+91 Woody Savanna
+92 Broadleaf Crops
+93 Grass Crops
+94 Crops, Grass, Shrubs
+95 Evergreen Tree Crop
+96 Deciduous Tree Crop
+99 Interrupted Areas (Goodes Homolosine Projection)
+100 Missing Data 
+
+---------------------------------------------------------
+
+2017-12-28
+Subject: GOES-16 in HMS
+
+Season's greeting from the HMS Team! As we approach a new year we will be incorporating a new satellite into the Hazard Mapping System (HMS). GOES-16 was launched about a year ago and has been undergoing extensive checkout. It was declared to be the operational GOES-EAST satellite on December 18, with an overlap period with GOES-13 until January 3. We are planning on switching from GOES-13 to GOES-16 data for GOES-EAST coverage in the HMS on Thursday December 28. For the HMS analysis on the 28th we will only use GOES-16. It will be listed as GOES-EAST in the output files, just as GOES-13 has been. Beginning on the 28th we will incorporate the GOES-16 automated fire detections (from the Fire Detection and Characterization (FDC) algorithm) into the HMS for the analysts to evaluate. As with all other automated satellite fire products, image analysts will remove those occurrences potentially associated with a false detection and add new ones into the HMS product where fires may have been omitted. However, it should be noted that the un-inspected FDC data will not yet be made available via our website (http://www.ospo.noaa.gov/Products/land/fire.html) since the FDC algorithm is not yet operational. This is expected to occur later in 2018.
+The GOES-16 imagery represents a new generation of satellite capability with higher temporal and spatial resolution. Nominal resolution of the 4um shortwave IR band (used for fire detection) is 2 km compared to 4 km for the previous GOES satellites. Imagery within the CONUS area of coverage will typically update every 5 minutes while data from the Full Disk area of coverage (such as over most of Canada) will typically update every 15 minutes. The FDC data are not currently available in the mesoscale scanning mode (i.e., 1000´1000km sub-regions imaged at up to 30sec interval). 
+
+The GOES-16 data will be included in the HMS text files as follows:
+
+Lon,     Lat,    YearDay, Time,       Satellite,       Method of Detect, Ecosys, Fire RadPower
+-80.592,  26.796, 2017352, 1607,         GOES-EAST,         ANALYSIS,      31,     -999.000000
+-80.651,  26.796, 2017352, 1527,         GOES-EAST,         ANALYSIS,      31,     -999.000000
+-119.140,  34.510, 2017352, 0815,       GOES-EAST,             ABBA,    022,     -999.000000
+-119.120,  34.540, 2017352, 1000,       GOES-WEST,            ABBA,    022,     -999.000000
+-119.160,  34.560, 2017352, 1203,   AVHRR NOAA-19,         FIMMA,     22,     -999.000000
+-119.143,  34.552, 2017352, 1005,      MODIS AQUA,           MODIS,     22,       74.836174
+-119.130,  34.550, 2017352, 1005,      MODIS AQUA,           MODIS,     22,       35.963303
+-82.480,  28.360, 2017352, 1447,         GOES-EAST,                    FDC,    31,    -999.000000
+-81.130,  26.860, 2017352, 1447,         GOES-EAST,                    FDC,    31,    -999.000000
+
+Please note that the ‘Method of detect’ reflects the new name of the algorithm (FDC) for the automatically detected fires as opposed to the previous ABBA for GOES-13. Please also note that, as with previous GOES satellites, Fire Radiative Power (FRP) is only available for those detections marked with a fire mask class of 5 (‘processed’), 3 (‘high probability’), and 4 (‘medium probability’).
+The GOES-16 data will similarly be incorporated into the kml and GIS shapefiles as well.
+
+
+
+Real-time GOES-East imagery has been posted to our web site at http://www.ssd.noaa.gov/PS/FIRE/sat_east.html  However, GOES-16 imagery will not be available on our web page. GOES-13 imagery will continue to be available on this site until it is turned off on January 3. After January 3, users are requested to access GOES-16 imagery from  https://www.star.nesdis.noaa.gov/GOES/index.php
+If you have any questions, comments or concerns, please feel free to contact us at either:  john.simko@noaa.gov  or  SSDFireTeam@noaa.gov
+
+
+Mark
+
+
+Mark Ruminski  -  Fire and Smoke Program Team Leader
+NOAA/NESDIS Satellite Analysis Branch
+5830 University Research Ct  Suite 4035
+College Park MD  20740
+301-683-1400
+mark.ruminski@noaa.gov
+
+

@@ -1,0 +1,95 @@
+#!/bin/csh -f
+# get_viirs_files - Download (manually or via cronjob) VIIRS JRR-AOD*.nc data files
+# from NOAA CLASS ftp server (90-day archive).
+#
+# Usage:
+# get_viirs_files
+#   Get yesterday's files.
+# get_viirs_files 20220301
+#   Get files for one date
+# get_viirs_files 20220301 20220310
+#   Get files for ten days
+#
+# See also download_files to manually order other archive files.
+# Notes:
+# It will use ftp to download files from:
+#  ftp://ftp-jpss.avl.class.noaa.gov/JPSS-GRAN/YYYYMMDD/VIIRS-Aerosol-Optical-Depth-and-Aerosol-Particle-Size-EDRs/J01/*.tar
+#  ftp://ftp-jpss.avl.class.noaa.gov/JPSS-GRAN/YYYYMMDD/VIIRS-Aerosol-Optical-Depth-and-Aerosol-Particle-Size-EDRs/NPP/*.tar
+# NOAA support contact: 828-271-4850 x3183 class.help@noaa.gov
+# 2022-03-12 plessel.todd@epa.gov
+########################################################################
+
+set here = /data/VIIRS_NOAA
+set data_directory = $here/data/JPSSRR-AOD
+#set server = ftp-jpss.avl.class.noaa.gov
+set server = ftp-data.class.noaa.gov/JPSS
+#set ftp_command = 'wget -r --ftp-user=anonymous --ftp-password=plessel'
+set ftp_command = 'wget -r --ftp-user=ftp --ftp-password=plessel'
+set product = JPSS-GRAN/VIIRS-Aerosol-Optical-Depth-and-Aerosol-Particle-Size-EDRs
+
+cd $here
+
+if ( $#argv == 2 ) then
+  @ yyyymmdd1 = $1
+  @ yyyymmdd2 = $2
+
+  if ( $yyyymmdd1 / 100 != $yyyymmdd2 / 100 ) then
+    echo "Sorry, yyyymm must match."
+    exit 1
+  endif
+else if ( $#argv == 1 ) then
+  @ yyyymmdd1 = $1
+  @ yyyymmdd2 = $1
+else # Get data from 4 days ago:
+  @ seconds = `date -u "+%s"`
+  @ seconds = $seconds - ( 4 * 24 * 60 * 60 )
+  @ yyyymmdd1 = `date -u --date="@$seconds" "+%Y%m%d"`
+  @ yyyymmdd2 = $yyyymmdd1
+endif
+
+@ yyyymmdd = $yyyymmdd1
+
+echo $yyyymmdd $yyyymmdd2
+
+while ( $yyyymmdd <= $yyyymmdd2 )
+  echo Retrieving J01 $yyyymmdd
+  $ftp_command "ftp://$server/$yyyymmdd/$product/J01/"
+  if ( $status ) exit $status
+  echo Retrieving NPP $yyyymmdd
+  $ftp_command "ftp://$server/$yyyymmdd/$product/NPP/"
+  if ( $status ) exit $status
+  @ yyyymmdd += 1
+end
+
+# For each downloaded tar file, untar then move the data files:
+
+foreach directory ( $here/$server/20??????/$product/J01 $here/$server/20??????/$product/NPP )
+  echo $directory
+  cd $directory
+
+  foreach tar_file ( *.tar )
+    tar -xvf $tar_file
+  end
+
+  foreach tar_gz_file ( *.gz )
+    tar -xvf $tar_gz_file
+  end
+
+  foreach data_file ( *.nc )
+    chmod 444 $data_file
+    @ yyyymmdd = `echo $data_file | awk '{ i = index( $1, "_s20" ); yyyymmdd = substr( $1, i + 2, 8 ); print yyyymmdd }'`
+    set output_directory = $data_directory/$yyyymmdd
+
+    if ( ! -d $output_directory ) then
+      mkdir $output_directory
+    endif
+
+    mv -f $data_file $output_directory/
+    ls -l $output_directory/$data_file
+  end
+end
+
+#rm -rf $here/$server
+
+echo Finished
+

@@ -1,0 +1,15 @@
+#!/bin/sh
+
+clear
+
+echo
+echo "Compiling ncf2bin"
+gcc -m64 -Wall -D_FILE_OFFSET_BITS=64 -D_LARGEFILE_SOURCE -DNDEBUG -O -Inetcdf -o ncf2bin ncf2bin.c -Lnetcdf/lib/Linux.x86_64 -lnetcdf4 -lhdf5_hl -lhdf5 -lcurl -lz -ldl -lm -lc
+strip ncf2bin
+ls -l ncf2bin
+file  ncf2bin
+ldd   ncf2bin
+
+ls -Fsalt | head
+echo Done
+

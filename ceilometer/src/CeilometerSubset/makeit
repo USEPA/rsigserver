@@ -1,0 +1,20 @@
+#!/bin/sh
+
+
+echo
+echo "Compiling Utilities..."
+cd Utilities
+gcc -m64 -Wall -D_FILE_OFFSET_BITS=64 -D_LARGEFILE_SOURCE -DNO_ASSERTIONS -DSERIAL_REGRID -O -I. -c Utilities.c BasicNumerics.c DateTime.c Failure.c Memory.c Stream.c Pr
+ojector.c Lambert.c Stereographic.c Mercator.c VoidList.c Grid.c elevation.c RegridQuadrilaterals.c
+ls -l *.o
+cd ..
+
+
+# Compile CeilometerSubset:
+
+gcc -m64 -Wall -D_FILE_OFFSET_BITS=64 -D_LARGEFILE_SOURCE -DNDEBUG -O -I. -IUtilities -IHDF5 -o CeilometerSubset CeilometerSubset.c ReadData.c ReadFile.c Utilities/*.o -L. -lhdf5_hl -lhdf5 -lcurl -lz -ldl -lm -lc
+strip CeilometerSubset
+ls -l CeilometerSubset
+file  CeilometerSubset
+ldd   CeilometerSubset
+

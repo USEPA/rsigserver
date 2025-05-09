@@ -1,0 +1,357 @@
+#!/bin/csh -f
+###############################################################################
+# PURPOSE: Run parallel swath subsetters and merge results to stdout.
+# INPUTS:  processes  Number of parallel tasks to launch.
+#          command    Subsetter command to decompose into parallel tasks
+#                     based on the input files.
+# HISTORY: 2021-12-10 plessel.todd@epa.gov
+# STATUS:  reviewed tested
+# NOTES:   subset command is of the form:
+#          /rsig/current/code/bin/Linux.x86_64/*Subset \
+#           -files <listfile> \
+#           -tmpdir <temp_directory> \
+#           ...other options...
+#
+#          After parsing the original Subset command into a set of
+#          parallel Subset commands - each operating on a subrange of
+#          timesteps - it runs these in the background and
+#          when they all finish (each creating an xdr file for their subrange)
+#          it runs PointSubset on these xdr files and streams the final xdr.
+###############################################################################
+
+# 0 = run without printing debug statements to file $log.
+# 1 = run and print debug statements to file $log.
+# 2 = do not run subsetters, just print debug statements to file $log.
+
+@ debugging = 0
+
+# Make tail +n work!
+setenv _POSIX2_VERSION 199209
+set _POSIX_VERSION=199209
+
+set FDD = /rsig/current/code/bin/Linux.x86_64/fdd
+
+if ( $#argv < 5 ) then
+  echo
+  echo "$0 - Run Subset program (xdr-format) in parallel."
+  echo
+  echo "Usage: $0 <tasks> <command>"
+  echo
+  echo "Example:"
+  echo "$0 4 /rsig/current/code/bin/Linux.x86_64/TROPOMISubset \ "
+  echo '  -files /data/tmp/file_list \ '
+  echo '  -tmpdir /data/tmp \ '
+  echo '  -desc "http://www.tropomi.eu/data-products/nitrogen-dioxide/,TROPOMISubset" \ '
+  echo '  -timestamp 2017112800 -hours 24 \ '
+  echo '  -variable nitrogendioxide_tropospheric_column \ '
+  echo '  -domain -126 25 -65 50 \ '
+  echo '  -corners \ '
+  echo '  > subset.xdr'
+  echo
+  echo 'xdrdump subset.xdr | more'
+  echo 'Swath 2.0'
+  echo 'http://www.tropomi.eu/data-products/nitrogen-dioxide/,TROPOMISubset'
+  echo '2017-11-28T00:00:00-0000'
+  echo '# Dimensions: variables timesteps scans:'
+  echo '11 24 2'
+  echo '# Variable names:'
+  echo 'Longitude Latitude nitrogendioxide_tropospheric_column Longitude_SW Longitude_SE Longitude_NW Longitude_NELatitude_SW Latitude_SE Latitude_NW Latitude_NE'
+  echo '# Variable units:'
+  echo 'deg deg - deg deg deg deg deg deg deg deg'
+  echo '# Domain: <min_lon> <min_lat> <max_lon> <max_lat>'
+  echo '-126 25 -65 50'
+  echo '# MSB 64-bit integers (yyyydddhhmm) timestamps[scans] and'
+  echo '# MSB 64-bit integers points[scans] and'
+  echo '# IEEE-754 64-bit reals data_1[variables][points_1] ... data_S[variables][points_S]:'
+  echo '<big-endian binary format arrays>'
+  echo '20173311632'
+  echo '20173312318'
+  echo '5'
+  echo '122'
+  echo '-7.1847106933593750e+01'
+  echo '-7.1855308532714844e+01'
+  echo ' ...'
+  echo '3.5999182701110840e+01'
+  echo '3.5997957229614258e+01'
+  echo
+  exit 1
+endif
+
+# 1st arg is the maximum number of parallel Subset processes to run:
+
+@ processes = $1
+shift
+set subset_command = "$*"
+
+# Temp files created by this program use the same tmpdir as original command:
+
+set tmpdir = `echo "-tmpdir $subset_command" | awk '{ for ( i = 2; i <= NF; ++i ) { if ( $i == $1 ) { print $(i + 1); i = NF } } }'`
+
+if ( $tmpdir == '' ) then
+  set tmpdir = /data/tmp
+endif
+
+set log = "$tmpdir/junk_run_parallel_swaths_log.$$"
+
+set temp_run_file = "$tmpdir/junk_run_parallel_swaths_run_file.$$"
+
+# Per-task ".$process" will be appended to these file names:
+
+set temp_input_file_list = "$tmpdir/junk_run_parallel_swaths_file_list.$$"
+set temp_output_file = "$tmpdir/junk_run_parallel_swaths_output_file.$$"
+
+
+if ( $debugging ) then
+  date > $log
+endif
+
+set file_list = `echo "-files $subset_command" | awk '{ for ( i = 2; i <= NF; ++i ) { if ( $i == $1 ) { print $(i + 1); i = NF } } }'`
+@ file_list_count = `cat $file_list | wc -l`
+
+# Limit processes to the number of input files to subset:
+
+if ( $file_list_count < $processes ) then
+  @ processes = $file_list_count
+endif
+
+@ parallelizable = ( $processes > 1 )
+
+
+#-------------------- If not parallelizable then run serial -------------------
+
+if ( $debugging ) then
+  echo "$processes processes, parallelizable = $parallelizable" >> $log
+endif
+
+if ( ! $parallelizable ) then # Just run original subset command:
+  @ the_status = 0
+
+  if ( $debugging ) then
+    echo "$subset_command" >> $log
+  endif
+
+  if ( $debugging != 2 ) then
+    $subset_command
+    @ the_status = $status
+  endif
+
+  if ( $debugging ) then
+    date >> $log
+    echo "Exit status = $the_status" >> $log
+  endif
+
+  rm -f $log $temp_run_file $temp_input_file_list.* $temp_output_file.*
+  exit $the_status
+endif
+
+#------------------------ Continue with parallel runs -------------------------
+
+if ( $debugging ) then
+  date >> $log
+  echo "Partition the set of input files for each parallel process" >> $log
+endif
+
+# Partition the set of input files for each parallel process:
+
+@ files_per_process      = $file_list_count / $processes
+@ files_per_last_process = $file_list_count % $processes + $files_per_process
+
+if ( $debugging ) then
+  echo "$files_per_process files_per_process, $files_per_last_process files_per_last_process" >> $log
+endif
+
+# Background run each Subset program on a subset of files:
+
+echo '#\!/bin/sh' > $temp_run_file
+
+@ offset = 1
+@ process = 1
+while ( $process <= $processes )
+
+  if ( $process == $processes ) then
+    @ count = $files_per_last_process
+  else
+    @ count = $files_per_process
+  endif
+
+  tail +$offset $file_list | head -$count > $temp_input_file_list.$process
+
+  set command = `echo "-files $temp_input_file_list.$process $subset_command" | awk '{ for ( i = 3; i <= NF; ++i ) if ( $i == $1 ) { printf " %s %s", $1, $2; i += 1 } else printf " %s", $i }'`
+
+  if ( $debugging ) then
+    echo "$command > $temp_output_file.$process &" >> $log
+  endif
+
+  echo "$command > $temp_output_file.$process &" >> $temp_run_file
+  @ offset += $count
+  @ process += 1
+end
+
+echo wait >> $temp_run_file
+chmod +x $temp_run_file
+
+if ( $debugging == 2 ) then
+  date >> $log
+  exit 0
+endif
+
+if ( $debugging ) then
+  date >> $log
+  echo "Launch parallel Subset programs and wait for all of them to finish" >> $log
+endif
+
+# Launch the parallel Subset programs and wait for all of them to finish:
+
+$temp_run_file >& /dev/null
+
+
+#-------------------------- Merge xdr output files ----------------------------
+
+if ( $debugging ) then
+  date >> $log
+  echo "Merge xdr output files" >> $log
+endif
+
+# Header looks like this:
+
+# Swath 2.0
+# http://www.star.nesdis.noaa.gov/smcd/emb/viirs_aerosol/,VIIRSSubset
+# 2013-06-15T00:00:00-0000
+# # Dimensions: variables timesteps scans:
+# 12 24 4
+# # Variable names:
+# Longitude Latitude Scan_Start_Time faot550 Longitude_SW Longitude_SE Longitude_NW Longitude_NE Latitude_SW Latitude_SE Latitude_NW Latitude_NE
+# # Variable units:
+# deg deg YYYYDDDHHMM - deg deg deg deg deg deg deg deg
+# # Domain: <min_lon> <min_lat> <max_lon> <max_lat>
+# -113 26 -111 26.5
+# # MSB 64-bit integers (yyyydddhhmm) timestamps[scans] and
+# # MSB 64-bit integers points[scans] and
+# # IEEE-754 64-bit reals data_1[variables][points_1] ... data_S[variables][points_S]:
+# 20131662059
+# 20131662100
+# 20131672040
+# 20131672041
+# 74
+# 102
+# 7
+# 48
+# -1.1093963623046875e+02
+# ...
+
+if ( $debugging ) then
+  date >> $log
+  echo "Computing list of scans" >> $log
+endif
+
+@ header_lines = 14
+
+# Compute list of scans:
+
+set scans_list = '' # List of timestamp-ordered pairs of file,scans.
+@ dimension_line = 5
+@ total_scans = 0
+@ timesteps1 = 0
+@ variables1 = 0
+@ process = 1
+while ( $process <= $processes )
+  set header_line_1 = `head -1 $temp_output_file.$process`
+
+  if ( "$header_line_1" == 'Swath 2.0' ) then
+    set dimensions_line = `head -$dimension_line $temp_output_file.$process | tail -1`
+    @ variables = `echo $dimensions_line | awk '{ print $1 }'`
+    @ timesteps = `echo $dimensions_line | awk '{ print $2 }'`
+    @ scans     = `echo $dimensions_line | awk '{ print $3 }'`
+
+    if ( $timesteps > 0 && $timesteps1 == 0 ) then
+      @ timesteps1 = $timesteps
+    endif
+
+    if ( $variables > 0 && $variables1 == 0 ) then
+      @ variables1 = $variables
+    endif
+
+    if ( $variables == $variables1 && $timesteps == $timesteps1 && $scans > 0 ) then
+      @ total_scans += $scans
+      set scans_list = "$scans_list $temp_output_file.$process,$scans"
+    endif
+  endif
+
+  @ process += 1
+end
+
+# Output header:
+
+if ( $debugging ) then
+  date >> $log
+  echo "Output header" >> $log
+endif
+
+set first_output_file = `echo $scans_list | awk -F, '{ print $1 }'`
+
+head -$header_lines $first_output_file | \
+awk -v variables1=$variables1 \
+    -v timesteps1=$timesteps1 \
+    -v total_scans=$total_scans \
+    -v dimension_line=$dimension_line \
+    '{ if ( NR == dimension_line ) printf "%d %d %d\n", variables1, timesteps1, total_scans; else print }'
+
+# Output timestamps[scans]:
+
+if ( $debugging ) then
+  date >> $log
+  echo "Output timestamps" >> $log
+endif
+
+@ data_line = $header_lines + 1
+foreach output_scan ( $scans_list )
+  set temp_file = `echo $output_scan | awk -F, '{ print $1 }'`
+  @ scans       = `echo $output_scan | awk -F, '{ print $2 }'`
+  @ header_bytes = `head -$header_lines $temp_file | wc -c`
+  @ bytes = $scans * 8
+  $FDD if=$temp_file iseek=$header_bytes count=$bytes
+end
+
+# Output points[scans]:
+
+if ( $debugging ) then
+  date >> $log
+  echo "Output points[scans]" >> $log
+endif
+
+@ data_line = $header_lines + 1
+foreach output_scan ( $scans_list )
+  set temp_file = `echo $output_scan | awk -F, '{ print $1 }'`
+  @ scans       = `echo $output_scan | awk -F, '{ print $2 }'`
+  @ header_bytes = `head -$header_lines $temp_file | wc -c`
+  @ bytes = $scans * 8
+  @ skip_bytes = $header_bytes + $bytes
+  $FDD if=$temp_file iseek=$skip_bytes count=$bytes
+end
+
+# Output per scan data_s[variables][points_s]:
+
+if ( $debugging ) then
+  date >> $log
+  echo "Output per scan data_s[variables][points_s]" >> $log
+endif
+
+@ data_line = $header_lines + 1
+
+foreach output_scan ( $scans_list )
+  set temp_file = `echo $output_scan | awk -F, '{ print $1 }'`
+  @ scans       = `echo $output_scan | awk -F, '{ print $2 }'`
+  @ header_bytes = `head -$header_lines $temp_file | wc -c`
+  @ skip_bytes = $header_bytes + $scans * 8 * 2
+  $FDD if=$temp_file iseek=$skip_bytes cbs=104857600
+end
+
+# Delete temp output files:
+
+if ( $debugging ) then
+  date >> $log
+else
+  rm -f $log $temp_run_file $temp_input_file_list.* $temp_output_file.*
+endif
+
+

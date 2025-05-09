@@ -1,0 +1,80 @@
+
+http://www.nsstc.uah.edu/nsstc/
+http://satdas.nsstc.nasa.gov/
+http://weather.msfc.nasa.gov/GOES/
+http://satdas.nsstc.nasa.gov/
+http://weather.msfc.nasa.gov/GOES/
+
+mcnider@nsstc.uah.edu
+biazar@nsstc.uah.edu
+kevin.doty@nsstc.uah.edu
+don.moss@nasa.gov
+
+data availability: May 2005-present
+
+Arastoo Pour Biazar <biazar@nsstc.uah.edu>
+Wed 12/17/2014 6:33 PM
+To: Plessel, Todd;
+Cc: Szykman, James J. (LARC-E303)[EPA/LaRC] <james.j.szykman@nasa.gov>;
+mcnider@nsstc.uah.edu; Freeman, Matt; don Moss <don.moss@nasa.gov>;
+
+Hello Todd,
+
+I have placed some sample data on our ftp server for you to test (links below).
+File 2013.tar contains one week of GOES retrievals from
+September 1, 2013 through September 7, 2013.
+
+By un-tarring this file you will get a set of daily compressed tar files.
+This is how you will see the files we archive.
+Basically, the directory tree for our archives is:
+
+YYYY/gp_YYYYMMDD.tar.gz 
+
+Meaning that under each year,
+you will find a compressed tar file for each day of the year
+(YYYY is the year, MM is the month and DD is the day).
+Un-compressing and un-tarring each daily file
+will provide you with a set of hourly files for each variable (product).
+The convention for the file names is:
+
+goes_Sensor_Product_Version_YYYYMMDDHHMMZ.txt
+
+Where "Sensor" is either "img" for Imager or "snd" for Sounder,
+"Product" stands for the variable retrieved, and
+"Version" indicates the retrieval version (currently set to "v00").
+Products are:
+INSL (incident radiation at the surface, insolation in W/m^2)
+CALB (cloud albedo, % 0-100)
+SALB (surface albedo, % 0-100)
+CTP  (cloud top pressure, Pa)
+LWIR (IR temperature, degrees K)
+TSKN (surface skin temperature, degrees K)
+TPW  (total precipitable water, mm)
+PARW (Photosynthetically Active Radiation, PAR, W/m^2)
+PARM (Photosynthetically Active Radiation, PAR, micro-mol/m^2/s)
+-999.0 denotes missing value.
+
+CTP and LWIR are produced from both Imager and Sounder measurements.
+
+The other two links are the geolocation files for Imager and Sounder products.
+The area of coverage and the resolution for each sensor is fixed.
+
+Here are the links:
+http://nsstc.uah.edu/public/outgoing/biazar/rsig/2013.tar
+http://nsstc.uah.edu/public/outgoing/biazar/rsig/sport_goesImager_latLon_20130919.txt
+http://nsstc.uah.edu/public/outgoing/biazar/rsig/sport_goesSounder_latLon_20130919.txt
+
+Please let me know if you have any question.
+
+Best.
+Arastoo
+
+On 12/10/2014 7:09 AM, Szykman, James J. (LARC-E303)[EPA/LaRC] wrote:
+Arastoo and Dick,
+ 
+Would you have time available this afternoon between 2-5 pm for a call to
+discuss bringing some of the UAH data sets into RSIG?
+I’m at EPA this week, so Todd, Matt and I can get together to call you.
+ 
+Jim
+

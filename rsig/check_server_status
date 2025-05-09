@@ -1,0 +1,123 @@
+#!/bin/csh -f
+# Quick test of each data source to verify that the servers are operational.
+
+
+if ( "$1" == 'maple' ) then
+  set rsigserver = 'https://YOUR_WEBSERVER_HOST/rsig/rsigserver?'
+else
+  set rsigserver = 'https://ofmpub.epa.gov/rsig/rsigserver?'
+endif
+
+#set command = '/usr/bin/curl -k --verbose --retry 0 -L --tcp-nodelay --max-time '
+set command = '/rsig/current/code/bin/Linux.x86_64/curl -k --verbose --retry 0 -L --tcp-nodelay --max-time '
+set log_file = /data/servers_offline.log
+set temp_file = /data/tmp/junk
+set temp_run_file = /data/tmp/junk2
+@ timeout_seconds = 60
+@ longer_timeout_seconds = 360
+
+
+set the_date = `date`
+
+# ofs data is only available for the current or past month so ofs url uses these
+
+@ YYYY = `date -u "+%Y"`
+set MM = `date -u "+%m"`
+
+# If aqs is failing due to expired (read-only) DB password then
+# immediately comment-out aqs url below until password is updated
+# (to avoid lockout due to too many failed DB accesses).
+# Then edit old/new DB password in aqspw and copy new password to aqsserver.
+# Then retest aqs and set it back to 1.
+
+set urls = ( \
+  'SERVICE=wcs&VERSION=1.0.0&REQUEST=GetCoverage&COVERAGE=airnow.pm25&FORMAT=ascii&TIME=2016-08-26T20:00:00Z/2016-08-27T01:59:59Z&BBOX=-90,30,-78,32,0,0&RSIG_ID=rsigid-check_server_status' \
+  'SERVICE=wcs&VERSION=1.0.0&REQUEST=GetCoverage&COVERAGE=aqs.ozone&FORMAT=ascii&TIME=2001-08-26T00:00:00Z/2001-08-26T12:59:59Z&BBOX=-90,28,-89,30&RSIG_ID=rsigid-check_server_status' \
+  'SERVICE=wcs&VERSION=1.0.0&REQUEST=GetCoverage&COVERAGE=aquarius.daily_salinity&FORMAT=bin&TIME=2013-08-22T00:00:00Z/2013-08-22T23:59:59Z&BBOX=-75,30,-65,50&RSIG_ID=rsigid-check_server_status' \
+  'SERVICE=wcs&VERSION=1.0.0&REQUEST=GetCoverage&COVERAGE=buoy.salinity&FORMAT=ascii&TIME=2006-07-17T00:00:00Z/2006-07-17T23:59:59Z&BBOX=-72,41,-70,42&RSIG_ID=rsigid-check_server_status' \
+  'SERVICE=wcs&VERSION=1.0.0&REQUEST=GetCoverage&COVERAGE=calipso.l1.total_attenuated_backscatter_532&FORMAT=ascii&TIME=2006-07-05T00:00:00Z/2006-07-05T12:00:00Z&BBOX=-100,35,-75,36,0,0&RSIG_ID=rsigid-check_server_status' \
+  'SERVICE=wcs&VERSION=1.0.0&REQUEST=GetCoverage&COVERAGE=cmaq.equates.conus.aconc.o3&FORMAT=ascii&TIME=2012-07-28T20:00:00Z/2012-07-28T20:59:59Z&BBOX=-90,30,-89.5,30.1,1,1&RSIG_ID=rsigid-check_server_status' \
+  'SERVICE=wcs&VERSION=1.0.0&REQUEST=GetCoverage&COVERAGE=dv.discharge&FORMAT=ascii&TIME=2007-08-08T00:00:00Z/2007-08-09T23:59:59Z&BBOX=-82,26,-81,27&RSIG_ID=rsigid-check_server_status' \
+  'SERVICE=wcs&VERSION=1.0.0&REQUEST=GetCoverage&COVERAGE=erddap.modis.daytime_sea_surface_temperature&FORMAT=bin&TIME=2020-07-01T00:00:00Z&BBOX=-92,30,-90,32,0,0&RSIG_ID=rsigid-check_server_status' \
+  'SERVICE=wcs&VERSION=1.0.0&REQUEST=GetCoverage&COVERAGE=faqsd.ozone_daily_8hour_maximum&FORMAT=ascii&TIME=2002-08-28T00:00:00Z&BBOX=-90,30,-89.5,30.5&RSIG_ID=rsigid-check_server_status' \
+  'SERVICE=wcs&VERSION=1.0.0&REQUEST=GetCoverage&COVERAGE=gasp.aod&FORMAT=ascii&TIME=2008-06-21T12:00:00Z&BBOX=-75.03,39,-75,39.2&RSIG_ID=rsigid-check_server_status' \
+  'SERVICE=wcs&VERSION=1.0.0&REQUEST=GetCoverage&COVERAGE=goesbb.pm25_emission&FORMAT=ascii&TIME=2018-11-09T00:00:00Z/2018-11-10T23:59:59Z&BBOX=-135,20,-70,55&RSIG_ID=rsigid-check_server_status' \
+  'SERVICE=wcs&VERSION=1.0.0&REQUEST=GetCoverage&COVERAGE=hms.fire_power&FORMAT=ascii&TIME=2018-07-01T00:00:00Z/2018-07-01T23:59:59Z&BBOX=-130,30,-90,40&RSIG_ID=rsigid-check_server_status' \
+  'SERVICE=wcs&VERSION=1.0.0&REQUEST=GetCoverage&COVERAGE=hrrr.wind_10m&FORMAT=ascii&TIME=2022-07-01T00:00:00Z/2022-07-01T23:59:59Z&BBOX=-77,37,-76,38&RSIG_ID=rsigid-check_server_status' \
+  'SERVICE=wcs&VERSION=1.0.0&REQUEST=GetCoverage&COVERAGE=landuse.atlantic.elevation&FORMAT=bin&TIME=2006-07-03T00:00:00Z/2006-07-03T23:59:59Z&BBOX=-84,33,-82,34&RSIG_ID=rsigid-check_server_status' \
+  'SERVICE=wcs&VERSION=1.0.0&REQUEST=GetCoverage&COVERAGE=metar.temperature&FORMAT=ascii&TIME=2016-02-24T16:00:00Z/2016-02-24T16:59:59Z&BBOX=-76,25,-75,40&RSIG_ID=rsigid-check_server_status' \
+  'SERVICE=wcs&VERSION=1.0.0&REQUEST=GetCoverage&COVERAGE=modis.mod4.optical_depth_land_and_ocean&FORMAT=ascii&TIME=2013-06-15T18:00:00Z/2013-06-15T18:59:59Z&BBOX=-113,26,-111,27,0,0&RSIG_ID=rsigid-check_server_status' \
+  'SERVICE=wcs&VERSION=1.0.0&REQUEST=GetCoverage&COVERAGE=mozaic.profile.ozone&FORMAT=ascii&TIME=2006-07-03T00:00:00Z/2006-07-03T23:59:59Z&BBOX=-84,33,-82,34&RSIG_ID=rsigid-check_server_status' \
+  'SERVICE=wcs&VERSION=1.0.0&REQUEST=GetCoverage&COVERAGE=nerrs.temperature&FORMAT=ascii&TIME=2006-07-03T00:00:00Z/2006-07-03T23:59:59Z&BBOX=-71,42,-70,44&RSIG_ID=rsigid-check_server_status' \
+  'SERVICE=wcs&VERSION=1.0.0&REQUEST=GetCoverage&COVERAGE=nesdis.pm25&FORMAT=ascii&TIME=2007-08-26T20:00:00Z/2007-08-27T01:59:59Z&BBOX=-75,35,-70,40,0,0&RSIG_ID=rsigid-check_server_status' \
+  'SERVICE=wcs&VERSION=1.0.0&REQUEST=GetCoverage&COVERAGE=neubrew.ozone&FORMAT=ascii&TIME=2010-07-10T00:00:00Z/2010-07-10T23:59:59Z&BBOX=-96,29,-95,30&RSIG_ID=rsigid-check_server_status' \
+  'SERVICE=wcs&VERSION=1.0.0&REQUEST=GetCoverage&COVERAGE=nldas.temperature&FORMAT=bin&TIME=2016-07-01T00:00:00Z/2016-07-01T00:59:59Z&BBOX=-75.4,38.5,-74.7,39.1&RSIG_ID=rsigid-check_server_status' \
+  'SERVICE=wcs&VERSION=1.0.0&REQUEST=GetCoverage&COVERAGE=ofs.CBOFS.air_pressure&FORMAT=bin&TIME=YYYY-MM-01T00:00:00Z/YYYY-MM-01T23:59:59Z&BBOX=-75.5732,39.5544,-75.5685,39.559,1,1&RSIG_ID=rsigid-check_server_status' \
+  'SERVICE=wcs&VERSION=1.0.0&REQUEST=GetCoverage&COVERAGE=omibehr.columnamountno2&FORMAT=ascii&TIME=2009-07-01T18:00:00Z/2009-07-01T18:59:59Z&BBOX=-90,29,-89,30&RSIG_ID=rsigid-check_server_status' \
+  'SERVICE=wcs&VERSION=1.0.0&REQUEST=GetCoverage&COVERAGE=omibehrioapi.no2&FORMAT=ascii&TIME=2015-10-12T20:00:00Z/2015-10-12T20:59:59Z&BBOX=-74,40,-73.9,40.1&RSIG_ID=rsigid-check_server_status' \
+  'SERVICE=wcs&VERSION=1.0.0&REQUEST=GetCoverage&COVERAGE=pandora.L2_rfuh5p1_8.formaldehyde_layer_amount&FORMAT=ascii&TIME=2022-07-01T00:00:00Z/2022-07-01T23:59:59Z&BBOX=-76,39,-72,42&RSIG_ID=rsigid-check_server_status' \
+  'SERVICE=wcs&VERSION=1.0.0&REQUEST=GetCoverage&COVERAGE=purpleair.pm25_corrected&FORMAT=ascii&TIME=2023-03-01T00:00:00Z/2023-03-01T23:59:59Z&BBOX=-74,40,-72,42&KEY=EPA&RSIG_ID=rsigid-check_server_status' \
+  'SERVICE=wcs&VERSION=1.0.0&REQUEST=GetCoverage&COVERAGE=smap.daily_salinity&FORMAT=bin&TIME=2016-08-22T00:00:00Z/2016-08-22T23:59:59Z&BBOX=-72.6729,39.1154,-66.8961,44.8923,-500,-500&RSIG_ID=rsigid-check_server_status' \
+  'SERVICE=wcs&VERSION=1.0.0&REQUEST=GetCoverage&COVERAGE=tempo.l2.no2.vertical_column_total&FORMAT=ascii&TIME=2024-03-01T18:00:00Z/2024-03-01T18:59:59Z&BBOX=-100,35,-99,36,0,0&KEY=TEMPOST&RSIG_ID=rsigid-check_server_status' \
+  'SERVICE=wcs&VERSION=1.0.0&REQUEST=GetCoverage&COVERAGE=tidal.mtl&FORMAT=ascii&TIME=2006-07-18T00:00:00Z/2006-07-20T23:59:59Z&BBOX=-71,41,-70,42&RSIG_ID=rsigid-check_server_status' \
+  'SERVICE=wcs&VERSION=1.0.0&REQUEST=GetCoverage&COVERAGE=uvnet.irradiance&FORMAT=ascii&TIME=1996-01-01T00:00:00Z/1996-01-02T23:59:59Z&BBOX=-118,33,-117,35,0,0&RSIG_ID=rsigid-check_server_status' \
+  'SERVICE=wcs&VERSION=1.0.0&REQUEST=GetCoverage&COVERAGE=tropomi.offl.no2.nitrogendioxide_total_column&TIME=2024-03-01T19:00:00Z/2024-03-01T19:59:59Z&BBOX=-105,35,-100,36&FORMAT=ascii&RSIG_ID=rsigid-check_server_status' \
+  'SERVICE=wcs&VERSION=1.0.0&REQUEST=GetCoverage&COVERAGE=viirsnoaa.jrraod.AOD550&FORMAT=ascii&TIME=2017-08-01T18:00:00Z/2017-08-01T18:59:59Z&BBOX=-91,29,-90,30&RSIG_ID=rsigid-check_server_status' \
+  'SERVICE=wcs&VERSION=1.0.0&REQUEST=GetCoverage&COVERAGE=wqp.turbidity&FORMAT=ascii&TIME=2006-07-18T00:00:00Z/2006-07-20T23:59:59Z&BBOX=-82,26,-81,27&RSIG_ID=rsigid-check_server_status' \
+)
+
+foreach url ( $urls )
+  set coverage = `echo "$url" | awk -FCOVERAGE= '{ print $2 }' | awk -F. ' { print $1 }'`
+  set format   = `echo "$url" | awk -FFORMAT=   '{ print $2 }' | awk -F\& '{ print $1 }'`
+
+  if ( "$coverage" == 'ofs' ) then
+    set url = `echo "$url" | sed "s/YYYY-MM/$YYYY-$MM/g"`
+  endif
+
+  sleep 1
+  echo
+  echo "$coverage..."
+
+  # ofs is slow and only works for about a month so url will use $YYYY and $MM.
+
+  @ the_timeout_seconds = $timeout_seconds
+
+  if ( "$coverage" == 'ofs' ) then
+    @ the_timeout_seconds = $longer_timeout_seconds
+  endif
+
+  #$command $the_timeout_seconds "'$rsigserver$url'" > $temp_file
+
+  echo '#\!/bin/csh -f' > $temp_run_file
+  echo "$command $the_timeout_seconds '$rsigserver$url' > $temp_file" >> $temp_run_file
+  chmod +x $temp_run_file
+  $temp_run_file
+
+  @ the_status = $?
+  @ ok = 0
+
+  # Check returned content for failure:
+
+  if ( $the_status == 0 ) then
+
+    if ( "$format" == 'bin' ) then
+      @ ok = `head -1 $temp_file | awk '{ print ( $1 == "Content-type:" ) }'`
+    else
+      @ ok = `head -1 $temp_file | grep '<' > /dev/null ; echo $status`
+
+      if ( $ok ) then
+        @ ok = `ls -l $temp_file | awk '{ print ( $5 > 500 ) }'`
+      endif
+    endif
+  endif
+
+  if ( $ok == 1 ) then
+    echo ok
+  else
+    head $temp_file
+    echo OFFLINE
+    echo "$coverage OFFLINE (error $the_status) $the_date" >> $log_file
+  endif
+
+end
+

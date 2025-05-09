@@ -1,0 +1,599 @@
+#!/usr/bin/perl -wT
+
+##############################################################################
+# PURPOSE: wmsserver - Serve WMS requests for static map images.
+#
+# NOTES:   Used by EstuaryDataMapper.
+#          Example usage:
+#
+#          curl 'https://ofmpub.epa.gov/rsig/rsigsserver?
+#                SERVICE=wms
+#                &VERSION=1.3.0
+#                &REQUEST=GetMap
+#                &STYLES=road
+#                &CRS=epsg:4326
+#                &BBOX=-109.0467,37,-105.0467,41
+#                &WIDTH=1500
+#                &HEIGHT=1500
+#                &FORMAT=image/png
+#                &WITH_HEADER=1'
+#
+#          Uses Bing staticmap webservice with EPA 'enterprise key'
+#          (w/ billing to EPA credit card).
+#          key provided by Hultgren.Torrin@epa.gov (GDIT).
+#
+# HISTORY: 2023-01-10 plessel.todd@epa.gov
+#
+# STATUS:  unreviewed tested
+##############################################################################
+
+
+use strict;
+use POSIX qw(strftime);
+package main;
+$| = 1; # Turn off output buffering so messages appear in correct order.
+alarm( 3600 ); # Kill process after 1 hour. Legitimate usage could be an hour!
+# Restrict PATH and ENV. (But before popen, ENV is cleared!)
+delete @ENV{ 'PATH', 'IFS', 'CDPATH', 'ENV', 'BASH_ENV' };
+
+############################## TUNABLE CONSTANTS #############################
+
+my $debugging = 0; # 1 = Print debug messages to STDERR logs/error_log.
+
+# use_file_cache: 1 = Check for and save map files to data_directory
+# so repeated requests are not sent to the external webservice (faster/cheaper).
+# HACK: disabled due to possible race condition.
+
+my $use_file_cache = 0;
+
+# data_directory must be writable by apache:
+
+my $data_directory = $use_file_cache ? '/data/map/data' : '/data/tmp';
+my $bindir = '/rsig/current/code/bin/Linux.x86_64';
+my $curl = "$bindir/curl -k --silent --retry 0 -L --tcp-nodelay --max-time 120";
+my $minimum_size = 100;  # Minimum pixel size supported.
+my $maximum_size = 1500; # Maximum pixel size supported.
+
+# Server where this program is installed:
+
+my $server_path = 'https://YOUR_WEBSERVER_HOST/cgi-bin';
+
+# Query string parsing routine dispatch table:
+
+my %parsers = (
+  'service'     => \&parse_service_option,
+  'version'     => \&parse_version_option,
+  'request'     => \&parse_request_option,
+  'format'      => \&parse_format_option,
+  'styles'      => \&parse_styles_option,
+  'crs'         => \&parse_crs_option,
+  'bbox'        => \&parse_bbox_option,
+  'width'       => \&parse_width_option,
+  'height'      => \&parse_height_option,
+  'with_header' => \&parse_with_header_option
+);
+
+# Full URL path to this program:
+
+my @pathed_program_parts = split( /\//, $0 );
+my $program_name = $pathed_program_parts[ @pathed_program_parts - 1 ];
+my $program = "$server_path/$program_name";
+
+################################## VARIABLES #################################
+
+# Parsed from the URL query string, with examples:
+
+my $service       = ''; # wms.
+my $version       = ''; # 1.3.0
+my $request       = ''; # getmap
+my $format        = ''; # image/png
+my $styles        = ''; # road
+my $crs           = ''; # epsg:4326
+my $bbox          = ''; # -109.0467,37,-105.0467,41
+my $width         = ''; # 1500
+my $height        = ''; # 1500
+my $with_header   = ''; # 1 or 0
+
+# Derived:
+
+
+################################## ROUTINES ##################################
+
+main();
+
+sub main {
+  my $result = 0;
+
+  if ( parse_url() ) {
+
+    if ( $request eq 'getmap' ) {
+      print "Content-type: text/plain; charset=iso-8859-1\n" .
+            "Access-Control-Allow-Origin: * \n" .
+            "Cache-Control: no-cache, no-store, must-revalidate\n" .
+            "Pragma: no-cache\n" .
+            "Expires: 0\n\n";
+      $result = get_map();
+    }
+  }
+  
+  $result = 1 - $result; # UNIX: zero is success, non-zero is failure.
+  debug( "exit result = $result" );
+  exit $result;
+}
+
+
+
+# Parse URL parameters into variables.
+
+sub parse_url {
+  use CGI qw/ untaint /;     # Load Safe untainting CGI routines.
+  $CGI::DISABLE_UPLOADS = 1; # Disable uploads.
+  $CGI::POST_MAX = 1024;     # Limit posts to 1024 bytes.
+  my $query = new CGI;       # Parse QUERY_STRING.
+  %ENV = ();                 # Unset all environment variables.
+  my @names = $query->param; # Extract names of parameters.
+  my $count = @names;
+  my $result = 0;
+  debug( "$program_name @names ($count)" );
+
+  for ( my $parameter = 0; $parameter < $count; ++$parameter) {
+    $_ = $names[ $parameter ];                # $_ is tainted.
+    s/[^A-Za-z]/_/go;                         # Untaint $_.
+    my $option = $_;                          # $option is untainted.
+    $_ = $query->param( $option );            # $_ is tainted.
+    s/[^\w\-.,:\/]/_/go;                      # Untaint $_.
+    my $value = $_;                           # $value is untainted.
+    my $lowercase_option = lc( $option );
+    my $lowercase_value  = lc( $value );
+    debug( "$lowercase_option $lowercase_value" );
+
+    if ( $parsers{ $lowercase_option } ) {
+      $result = $parsers{ $lowercase_option }->( $lowercase_value );
+    } else {
+      print STDERR "\nInvalid option: '$option'\n";
+      $result = 0;
+    }
+
+    if ( ! $result ) {
+      $parameter = $count; # Finish looping.
+    }
+  }
+
+  # Set defaults if not specified (HACK):
+
+  if ( $service eq '' ) {
+    $service = 'wms';
+  }
+
+  if ( $version eq '' ) {
+    $version = '1.3.0';
+  }
+
+  if ( $request eq '' ) {
+    $request = 'getmap';
+  }
+
+  if ( $crs eq '' ) {
+    $crs = 'epsg:4326';
+  }
+
+  if ( $format eq '' ) {
+    $format = 'image/png';
+  }
+
+  if ( $styles eq '' ) {
+    $styles = 'road';
+  }
+
+  if ( $width eq '' ) {
+    $width = $height;
+  }
+
+  if ( $height eq '' ) {
+    $height = $width;
+  }
+
+  if ( $width eq '' ) {
+    $width = $maximum_size;
+    $height = $width;
+  }
+
+  $result = $result && required_options_specified();
+  return $result;
+}
+
+
+
+# Parse service option.
+
+sub parse_service_option {
+  my $value = shift;
+  my $result = parse_option( $service, $value, 'SERVICE', 'wms' );
+  return $result;
+}
+
+
+
+# Parse version option.
+
+sub parse_version_option {
+  my $value = shift;
+  my $result = parse_option( $version, $value, 'VERSION', '1.3.0' );
+  return $result;
+}
+
+
+
+# Parse request option.
+
+sub parse_request_option {
+  my $value = shift;
+  my $result = parse_option( $request, $value, 'REQUEST', 'getmap' );
+  return $result;
+}
+
+
+
+# Parse styles option.
+
+sub parse_styles_option {
+  my $value = shift;
+  my $result = parse_option( $styles, $value, 'STYLES', 'road satellite' );
+  return $result;
+}
+
+
+
+# Parse crs option.
+
+sub parse_crs_option {
+  my $value = shift;
+  my $result = parse_option( $crs, $value, 'CRS', 'epsg:4326' );
+  return $result;
+}
+
+
+
+# Parse bbox option.
+
+sub parse_bbox_option {
+  my $value = shift;
+  my $result = 0;
+
+  if ( $bbox ne '' ) {
+    print STDERR "\nRedundant BBOX option: '$value'\n";
+  } else {
+    $bbox = $value;
+    my @bounds = split( /,/, $bbox );
+    my $bounds_count = @bounds;
+
+    if ( $bounds_count != 4 ) {
+      print STDERR "\nInvalid bbox option: '$value'\n";
+    } elsif ( ! in_range( $bounds[ 0 ], -180.0, 180.0 ) ) {
+      print STDERR "\nInvalid bbox option: '$bounds[ 0 ]'\n";
+    } elsif ( ! in_range( $bounds[ 1 ], -90.0, 90.0 ) ) {
+      print STDERR "\nInvalid bbox option: '$bounds[ 1 ]'\n";
+    } elsif ( ! in_range( $bounds[ 2 ], $bounds[ 0 ], 180.0 ) ) {
+      print STDERR "\nInvalid bbox option: '$bounds[ 2 ]'\n";
+    } elsif ( ! in_range( $bounds[ 3 ], $bounds[ 1 ], 90.0 ) ) {
+      print STDERR "\nInvalid bbox option: '$bounds[ 3 ]'\n";
+    } else {
+      $result = 1;
+    }
+  }
+
+  return $result;
+}
+
+
+
+# Parse width option.
+
+sub parse_width_option {
+  my $value = shift;
+  my $result = 0;
+
+  if ( $width ne '' ) {
+    print STDERR "\nRedundant WIDTH option.\n";
+  } else {
+    $result = in_range( $value, $minimum_size, $maximum_size );
+
+    if ( $result ) {
+      $width = $value;
+    } else {
+      print STDERR "\nInvalid WIDTH option.\n";
+    }
+  }
+
+  return $result;
+}
+
+
+
+# Parse height option.
+
+sub parse_height_option {
+  my $value = shift;
+  my $result = 0;
+
+  if ( $height ne '' ) {
+    print STDERR "\nRedundant HEIGHT option.\n";
+  } else {
+    $result = in_range( $value, $minimum_size, $maximum_size );
+
+    if ( $result ) {
+      $height = $value;
+    } else {
+      print STDERR "\nInvalid HEIGHT option.\n";
+    }
+  }
+
+  return $result;
+}
+
+
+
+# Parse format option.
+
+sub parse_format_option {
+  my $value = shift;
+  my $result = parse_option( $format, $value, 'FORMAT', 'image/png' );
+  return $result;
+}
+
+
+
+# Parse with_header option.
+
+sub parse_with_header_option {
+  my $value = shift;
+  my $result = parse_option( $with_header, $value, 'WITH_HEADER', '0 1' );
+  return $result;
+}
+
+
+
+# Check that all required 'options' have been specified:
+
+sub required_options_specified {
+  my $result = 0; # default failure
+
+  if ( $service eq '' ) {
+    print STDERR "\nMissing option: 'SERVICE'\n";
+  } elsif ( $version eq '' ) {
+    print STDERR "\nMissing option: 'VERSION'\n";
+  } elsif ( $request eq '' ) {
+    print STDERR "\nMissing option: 'REQUEST'\n";
+  } elsif ( $request eq 'getmap' ) {
+
+    if ( $bbox eq '' ) {
+      print STDERR "\nMissing option: 'BBOX'\n";
+    } elsif ( $width eq '' ) {
+      print STDERR "\nMissing option: 'WIDTH'\n";
+    } elsif ( $height eq '' ) {
+      print STDERR "\nMissing option: 'HEIGHT'\n";
+    } else {
+      $result = 1;
+    }
+  }
+
+  return $result;
+}
+
+
+
+# Get static map and output it (and possibly header line with image bounds)
+# to stdout:
+
+sub get_map {
+  my $result = 0;
+  my @bounds = split( /,/, $bbox );
+  my $lonmin = $bounds[ 0];
+  my $latmin = $bounds[ 1 ];
+  my $lonmax = $bounds[ 2 ];
+  my $latmax = $bounds[ 3 ];
+  my $pid = $use_file_cache ? "" : "_$$";
+  my $style_service = $styles eq 'satellite' ? 'AerialWithLabels' : 'Road';
+  my $lc_style_service = lc( $style_service );
+  my $map_image_file_name_template =
+    "$data_directory/map_%s_image_%d_%d_%0.4f_%0.4f_%0.4f_%0.4f$pid.png";
+  my $map_image_file_name =
+    sprintf( $map_image_file_name_template,
+             $lc_style_service,
+             $width, $height, $lonmin, $latmin, $lonmax, $latmax );
+  my $map_header_file_name = '';
+
+  if ( $with_header eq '1' ) {
+    $map_header_file_name = $map_image_file_name;
+    $map_header_file_name =~ s/\.png/.txt/;
+  }
+
+  my $command = '';
+
+  if ( $use_file_cache && -f $map_image_file_name ) {
+    $result = 1;
+  } else {
+    $command =
+      "$curl -o $map_image_file_name " .
+      "'" .
+      "https://dev.virtualearth.net/REST/v1/Imagery/Map/$style_service?" .
+      'key=AunQlG1DpWe9w4lVsaVyXkiCq7axeLgKI8m8DXdK7CfnswhRxwRocfdg5SSR-sJc' .
+      "&format=png&mapSize=$width,$height" .
+      "&mapArea=$latmin,$lonmin,$latmax,$lonmax" .
+      "'";
+    $result = execute_command( $command );
+
+    # Optionally retrieve, parse and overwrite header file:
+
+    if ( $result && $map_header_file_name ne '' ) {
+      $command =~ s/\.png/.txt/g;
+      $command = substr( $command, 0, length( $command ) - 1 ); # Trim quote.
+      $command .= "&MapMetadata=1'";
+      $result = execute_command( $command );
+
+      if ( $result ) {
+        $result = 0;
+
+        if ( open my $map_xml_metadata_file, '<', $map_header_file_name ) {
+          my $xml_content = <$map_xml_metadata_file>;
+          close $map_xml_metadata_file;
+
+          # Parse XML content for retrieved image lon-lat bbox:
+
+          my $tag = ',"bbox":[';
+          my $first = index( $xml_content, $tag );
+
+          if ( $first > 0 ) {
+            $first += length( $tag );
+            my $last = index( $xml_content, ']' );
+
+            if ( $last > $first ) {
+              my $bbox_length = $last - $first;
+              my $image_bbox = substr( $xml_content, $first, $bbox_length );
+              my @image_bounds = split( /,/, $image_bbox );
+              my $parts_count = @image_bounds;
+
+              if ( $parts_count == 4 ) {
+                my $image_lat_min = $image_bounds[ 0 ];
+                my $image_lon_min = $image_bounds[ 1 ];
+                my $image_lat_max = $image_bounds[ 2 ];
+                my $image_lon_max = $image_bounds[ 3 ];
+
+                $result =
+                  in_range( $image_lon_min, -180.0, 180.0 ) &&
+                  in_range( $image_lon_max, $image_lon_min, 180.0 ) &&
+                  in_range( $image_lat_min, -90.0, 90.0 ) &&
+                  in_range( $image_lat_max, $image_lat_min, 90.0 );
+
+                if ( $result ) {
+
+                  # HACK: open() for writing fails (why?). /bin/echo works.
+
+                  $command =
+                    '/bin/echo ' .
+                    "'$image_lon_min $image_lat_min " .
+                    "$image_lon_max $image_lat_max'" .
+                    " > $map_header_file_name";
+
+                  $result = execute_command( $command );
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+  }
+
+  if ( $result ) {
+    $command = "/bin/cat $map_header_file_name $map_image_file_name";
+    $result = execute_command( $command );
+  }
+
+  if ( ! $use_file_cache ) {
+
+    if ( ! $debugging ) {
+      # HACK: unlink fails (why?)!
+      #unlink( $map_image_file_name );
+      #unlink( $map_header_file_name );
+      $command = "/bin/rm $map_header_file_name $map_image_file_name";
+      execute_command( $command );
+    }
+  }
+
+  return $result;
+}
+
+
+
+############################### HELPER ROUTINES ##############################
+
+
+
+# debug( message );
+
+sub debug {
+  my $message = shift;
+
+  if ( $debugging ) {
+    print STDERR "\n$message\n";
+####print STDOUT "\n$message\n";
+  }
+}
+
+
+
+# my $ok = in_range( $value, $minimum, $maximum );
+
+sub in_range {
+  my ( $value, $minimum, $maximum ) = @_;
+  my $result = $value >= $minimum && $value <= $maximum;
+  return $result;
+}
+
+
+
+# Execute command and echo its output to STDOUT. E.g., execute_command( 'ls' );
+
+sub execute_command {
+  my $command = shift;
+  my $result = 0;
+  my $the_pipe = 0;
+
+  # Untaint command (match expression is arbitrary as far as -T is concerned):
+
+  if ( $command =~ m#^(/[\w-]+/[\w -/.,':?=&>]+)$# ) {
+    $command = $1; # Re-assign first match, which is enough to satisfy -T.
+    debug( "$0 executing command = $command" );
+    %ENV = (); # Unset all environment variables prior to popen.
+    # Complicated, supposedly safer way to open a readable pipe to command:
+    my $pid = open( the_pipe, "-|" );
+
+    if ( ! defined( $pid ) ) {
+      die "Couldn't open pipe to subprocess";
+    } elsif ( $pid ) { # Parent process.
+
+      while ( <the_pipe> ) {
+        print;
+      }
+
+      close( the_pipe ) or die $!;
+      $result = ! $?;
+      debug( "close() return value: $?" );
+    } else { # Child process.
+      exec( $command ) or die "can't exec program: $!";
+    }
+  } else {
+    print STDERR "\n$0: '$command' contains invalid characters.\n";
+  }
+
+  debug("execute_command() returning result = $result" );
+  return $result;
+}
+
+
+
+# my $result = parse_option( $option, $value, $option_name, $valid_values );
+# my $result = parse_option( $variable, $value, 'SERVICE', 'nwis' );
+
+sub parse_option {
+  my ( $option, $value, $option_name, $valid_values ) = @_;
+  my $result = 0;
+
+  if ( $option ne '' ) {
+    print STDERR "\nRedundant $option_name option: '$value'\n";
+  } else {
+    $result = index( " $valid_values ", " $value " ) != -1;
+
+    if ( $result ) {
+      $_[ 0 ] = $value;
+    } else {
+      print STDERR "\nInvalid $option_name option: '$value'\n";
+    }
+  }
+
+  return $result;
+}
+
+
+

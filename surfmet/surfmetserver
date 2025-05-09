@@ -1,0 +1,1818 @@
+#!/usr/bin/perl -wT
+
+##############################################################################
+# PURPOSE: surfmetserver - Serve SURF_MET station data, subsetted by date/time
+#          range, variable, and longitude-latitude box, in ASCII, XDR, original,
+#          NetCDF-COARDS, and NetCDF-IOAPI formats for use by other programs
+#          (e.g., via wget).
+#
+# NOTES:   Server is WCS-compliant:
+#          https://www.opengeospatial.org/standards/wcs
+#          https://datafed.net/xs/OpenGIS/wcs/1.0.0/
+#          and modeled after a similar webserver application:
+#          https://webapps.datafed.net/ogc_EPA.wsfl
+#
+#          Accesses a remote WCS server:
+#          https://webapps.datafed.net/SURF_MET.ogc?
+#          and launches the C program SiteSubset which streams the data
+#          back on STDOUT.
+#
+#          Example:
+#
+#          wget -q -T 0 -O - 'https://rtpmeta.epa.gov/portal/surfmetserver?\
+#                    SERVICE=wcs&\
+#                    VERSION=1.0.0&\
+#                    REQUEST=GetCoverage&\
+#                    COVERAGE=t&\
+#                    TIME=2005-08-26T00:00:00Z/2005-08-30T23:59:59Z&\
+#                    BBOX=-90,30,-85,35,0,0&\
+#                    FORMAT=ascii'
+#
+# HISTORY: 2014-02-06 plessel.todd@epa.gov 1-919-541-5500
+#
+# STATUS:  reviewed, tested.
+##############################################################################
+
+use strict;
+package main;
+$| = 1; # Turn off output buffering so messages appear in correct order.
+alarm( 3600 ); # Kill process after 1 hour. Legitimate usage could be an hour!
+# Restrict PATH and ENV. (But before popen, ENV is cleared!)
+delete @ENV{ 'PATH', 'IFS', 'CDPATH', 'ENV', 'BASH_ENV' };
+
+############################## TUNABLE CONSTANTS #############################
+
+
+my $debugging = 0; # 1 = print debug messages to STDERR logs/error_log
+
+# Server where this program is installed:
+
+my $server_path = 'https://YOUR_WEBSERVER_HOST/cgi-bin';
+my $bindir      = '/rsig/current/code/bin/Linux.x86_64';
+my $subsetter   = "$bindir/SiteSubset";
+my $xdrconvert  = "$bindir/XDRConvert";
+my $compressor  = "$bindir/gzip -c -1";
+
+# External server to forward to via wget command:
+
+#my $wget = "$bindir/wget -q -t 1 -T 0 -O -";
+my $wget = '/usr/bin/curl -k -g --silent --max-time 3600 --retry 0 --tcp-nodelay';
+
+# Old service got moved in Jan 2017:
+# my $wget_command =
+#  "$wget '" .
+#  'https://webapps.datafed.net/ogc_PSWC.wsfl?' .
+#  'SERVICE=WCS&REQUEST=GetCoverage&VERSION=1.0.0&CRS=EPSG:4326&' .
+#  'WIDTH=-1&HEIGHT=-1&DEPTH=-1&FORMAT=CSV&' .
+#  'COVERAGE=SURF_MET.';
+##t&TIME=2005-08-26T20:00:00Z/2005-08-27T01:59:59Z/PT1H&BBOX=-90,30,-88,32,0,0';
+
+my $wget_command =
+  "$wget '" .
+  'https://webapps.datafed.net/SURF_MET.ogc?' .
+  'SERVICE=WCS&REQUEST=GetCoverage&VERSION=1.0.0&CRS=EPSG:4326&' .
+  'WIDTH=-1&HEIGHT=-1&DEPTH=-1&FORMAT=CSV&' .
+  'COVERAGE=';
+#T&TIME=2005-08-26T20:00:00Z/2005-08-27T01:59:59Z/PT1H&BBOX=-90,30,-88,32,0,0';
+
+my $temp_file_name = "/data/tmp/surfmetserver_temp.$$";
+
+my $metadata_content = '
+DataFed SURFMET global surface meteorology measured data accessed using RSIG.
+DataFed:
+https://datafedwiki.wustl.edu/
+https://wiki.esipfed.org/index.php/SURF_MET
+https://wiki.esipfed.org/index.php/SURF_MET_WIND
+https://webapps.datafed.net/SURF_MET.ogc?
+RSIG: https://www.epa.gov/rsig
+';
+
+
+my $metadata_content_original = '
+Data processing was done using the RSIG program surfmetserver which is used to
+query the external webservice to retrieve the data and subset (by variable,
+lon-lat box and time range) and reorganize/reformat and filter the data.
+The web service query to retrieve the data is shown below.
+';
+
+
+my $metadata_content_processed = '
+Data processing was done using the RSIG programs surfmetserver, SiteSubset and
+XDRConvert.
+SiteSubset and surfmetserver are used to subset (by variable, lon-lat box and
+time range) and reorganize/reformat and filter the data.
+XDRConvert is optionally used to regrid, aggregate and reformat the data
+to other file formats.
+The web service query to retrieve the data
+and the RSIG command used to process them are shown below.
+';
+
+# Query string parsing routine dispatch table:
+
+my %parsers = (
+  'service'          => \&parse_service_option,
+  'version'          => \&parse_version_option,
+  'request'          => \&parse_request_option,
+  'coverage'         => \&parse_coverage_option,
+  'time'             => \&parse_time_option,
+  'bbox'             => \&parse_bbox_option,
+  'format'           => \&parse_format_option,
+  'compress'         => \&parse_compress_option,
+  'regrid'           => \&parse_regrid_option,
+  'regrid_aggregate' => \&parse_regrid_aggregate_option,
+  'lambert'          => \&parse_lambert_option,
+  'stereographic'    => \&parse_stereographic_option,
+  'mercator'         => \&parse_mercator_option,
+  'lonlat'           => \&parse_lonlat_option,
+  'ellipsoid'        => \&parse_ellipsoid_option,
+  'grid'             => \&parse_grid_option,
+  'levels'           => \&parse_levels_option
+);
+
+# Webserver content types for each output format:
+
+my %content_types = (
+  'ascii'         => 'text/plain',
+  'xdr'           => 'application/octet-stream',
+  'netcdf-coards' => 'application/netcdf',
+  'netcdf-ioapi'  => 'application/netcdf',
+  'original'      => 'application/octet-stream'
+);
+
+# Full URL path to this program:
+
+my @pathed_program_parts = split( /\//, $0 );
+my $program_name = $pathed_program_parts[ @pathed_program_parts - 1 ];
+my $program = "$server_path/$program_name";
+
+
+################################## VARIABLES #################################
+
+
+# Parsed from the URL query string:
+
+my $service       = ''; # wcs.
+my $version       = ''; # 1.0.0.
+my $request       = ''; # getcapabilities or describecoverage or getcoverage.
+my $coverage      = ''; # temperature, etc.
+my $format        = ''; # xdr, ascii, netcdf-coards, netcdf-ioapi.
+my $compress      = ''; # 1 = | gzip -c otherwise don't compress (default).
+my $time          = ''; # E.g., 2005-08-29t00:00:00z/2005-08-30t23:59:59z.
+my $bbox          = ''; # E.g., -90,30,-85,35,0,0.
+my $regrid        = ''; # E.g., nearest, mean, weighted.
+my $regrid_aggregate = ''; # E.g., none, all, daily.
+my $lambert       = ''; # E.g., 33,45,-97,40.
+my $stereographic = ''; # E.g., -98,90,45.
+my $mercator      = ''; # E.g., -98.
+my $lonlat        = '';
+my $ellipsoid     = ''; # E.g., 6370997,6370997.
+my $grid          = ''; # E.g., 268,259,-420000,-1716000,12000,12000.
+my $levels        = ''; # E.g,22,2,10000,1.0,...,0.0,9.81,287.04,50,290,100000.
+
+# Derived from the above parsed values:
+
+my $starting_timestamp = 0; # yyyymmddhh, e.g., 2005082600.
+my $ending_timestamp   = 0; # yyyymmddhh, e.g., 2005082900.
+my $hours              = 0; # E.g., 5 days = 5 x 24 = 120.
+my $command    = ''; # Complete subset command to run.
+my $query_command = ''; # WCS query to DataFed for SURFMET data.
+
+my @metadata = (
+  {
+    'name' => 'pressure',
+    'parameter' => 'ALT',
+    'units' => 'hPa',
+    'description' => 'Air pressure.',
+    'scale' => 1.33322387 # mm-Hg to hPa.
+  },
+  {
+    'name' => 'extinction',
+    'parameter' => 'Bext',
+    'units' => '-',
+    'description' => 'Light-scattering extinction coefficient.'
+  },
+  {
+    'name' => 'cloud_height',
+    'parameter' => 'CIL',
+    'units' => 'm',
+    'description' => 'Cloud ceiling height.',
+    'scale' => 100.0 * 0.3048 # 100 * ft * ft->m.
+  },
+  {
+    'name' => 'cloud_coverage',
+    'parameter' => 'COV',
+    'units' => 'oktas',
+    'description' => 'Cloud coverage.'
+  },
+  {
+    'name' => 'wind',
+    'parameter' => 'Wind',
+    'units' => 'm/s',
+    'description' => 'Wind vector east and north components.',
+    'scale' => 0.514444 # knots to m/s.
+  },
+  {
+    'name' => 'humidity_filtered_extinction',
+    'parameter' => 'FBext',
+    'units' => '-',
+    'description' =>
+      'Humidity-filtered light-scattering extinction coefficient.'
+  },
+  {
+    'name' => 'wind_gust_speed',
+    'parameter' => 'GST',
+    'units' => 'm/s',
+    'description' => 'Wind gust speed.',
+    'scale' => 0.514444 # knots to m/s.
+  },
+  {
+    'name' => 'relative_humidity',
+    'parameter' => 'RH',
+    'units' => '%',
+    'description' => 'Relative humidity.'
+  },
+  {
+    'name' => 'rh_corrected_extinction',
+    'parameter' => 'RHBext',
+    'units' => '-',
+    'description' =>
+      'Relative humidity corrected light scattering extinction coefficient.'
+  },
+  {
+    'name' => 'sea_level_pressure',
+    'parameter' => 'SLP',
+    'units' => 'mm',
+    'description' => 'Sea level pressure.',
+    'scale' => 1.33322387 # mm-Hg to hPa.
+  },
+  {
+    'name' => 'wind_speed',
+    'parameter' => 'SPD',
+    'units' => 'm/s',
+    'description' => 'Wind speed.',
+    'scale' => 0.514444 # knots to m/s.
+  },
+  {
+    'name' => 'temperature',
+    'parameter' => 'T',
+    'units' => 'C',
+    'description' => 'Air temperature.',
+    'offset' => -32.0, # Add first.
+    'scale' => 5.0 / 9.0 # Then multiply.
+  },
+  {
+    'name' => 'dew_point',
+    'parameter' => 'TD',
+    'units' => 'C',
+    'description' => 'Dew point temperature.',
+    'offset' => -32.0, # Add first.
+    'scale' => 5.0 / 9.0 # Then multiply.
+  },
+  {
+    'name' => 'visibility',
+    'parameter' => 'VIS',
+    'units' => 'm',
+    'description' => 'Visibility.',
+    'scale' => 1609.34 # Miles to meters.
+  }
+);
+
+################################## ROUTINES ##################################
+
+
+main();
+
+
+sub main {
+  my $result = 0;
+
+  if ( ! parse_url() ) {
+    print "Content-type: text/plain; charset=iso-8859-1\n\n"; # For webserver
+  } elsif ( $request eq 'getcapabilities' ) {
+    print "Content-type: text/xml; charset=iso-8859-1\n\n"; # For webserver
+    print_capabilities();
+    $result = 1;
+  } elsif ( $request eq 'describecoverage' ) {
+    print "Content-type: text/xml; charset=iso-8859-1\n\n"; # For webserver
+    print_coverage_description();
+    $result = 1;
+  } elsif ( $request eq 'getcoverage' ) {
+    print "Content-type: $content_types{ $format }; charset=iso-8859-1\n\n";
+    compute_time_range();
+    $result = query_external_wcs(); # Creates $temp_file_name.
+
+    if ( $result ) { # Run subsetter on temporary file (on local host):
+
+      if ( $format eq 'original' ) {
+        $result = execute_command( "/bin/gtar -zcO $temp_file_name" );
+      } else {
+        construct_command();
+        $result = execute_command( $command );
+      }
+
+      if ( ! $debugging ) {
+        unlink( $temp_file_name ); # Remove temporary file.
+      }
+    }
+  } elsif ( $request eq 'getmetadata' ) {
+    print "Content-type: $content_types{ $format }; charset=iso-8859-1\n\n";
+    compute_time_range();
+    $result = query_external_wcs(); # Creates $temp_file_name.
+
+    if ( $result ) { # Run subsetter on temporary file (on local host):
+      construct_command();
+      print $metadata_content;
+
+      if ( $format eq 'original' ) {
+        print $metadata_content_original;
+        print "\n$query_command\n > $temp_file_name\n\n";
+      } else {
+        print $metadata_content_processed;
+        print "\n$query_command\n > $temp_file_name\n\n$command\n\n";
+        $result = 1;
+      }
+
+      if ( ! $debugging ) {
+        unlink( $temp_file_name ); # Remove temporary file.
+      }
+    }
+  }
+
+  $result = 1 - $result; # UNIX: zero is success, non-zero is failure.
+  debug( "exit result = $result" );
+  exit $result;
+}
+
+
+
+# Print web server capabilities metadata.
+
+sub print_capabilities {
+  print '
+<WCS_Capabilities version="1.0.0" xmlns="https://www.opengis.net/wcs" xmlns:gml="https://www.opengis.net/gml" xmlns:xlink="https://www.w3.org/1999/xlink">
+    <Service>
+        <metadataLink xlink:type="simple" xlink:href="https://wiki.esipfed.org/index.php/SURF_MET" metadataType="other" />
+        <description><![CDATA[SURF_MET is a dataset gathered by WMO. Currently, there are about 10,000+ SURF_MET stations worldwide. Data delivered through Plymoth State Weather Center.]]></description>
+        <name>DataFed.SURF_MET</name>
+        <label>SURF_MET DataFed Web Coverage Server 1.0.0</label>
+        <keywords>
+            <keyword>Domain:Meteorology</keyword>
+            <keyword>Dataset:SURF_MET</keyword>
+            <keyword>Platform:Network</keyword>
+            <keyword>Instrument:Unknown</keyword>
+            <keyword>Method:Point</keyword>
+            <keyword>DataType:Point</keyword>
+            <keyword>Distributor:DataFed</keyword>
+            <keyword>Originator:PSWC</keyword>
+            <keyword>TimeRes:Hour</keyword>
+            <keyword>TopicCategory:climatologyMeteorologyAtmosphere</keyword>
+        </keywords>
+        <responsibleParty>
+            <organisationName>DATAFED</organisationName>
+            <positionName>Distributor</positionName>
+            <contactInfo>
+                <phone>
+                    <voice>314-935-6099</voice>
+                    <facsimile>NONE</facsimile>
+                </phone>
+                <address>
+                    <deliveryPoint>1 Brookings Dr.</deliveryPoint>
+                    <city>St. Louis</city>
+                    <administrativeArea>MO</administrativeArea>
+                    <postalCode>63130</postalCode>
+                    <country>USA</country>
+                    <electronicMailAddress>rhusar@wustl.edu</electronicMailAddress>
+                </address>
+                <onlineResource xlink:type="simple" xlink:href="https://wiki.esipfed.org/index.php/SURF_MET" />
+            </contactInfo>
+        </responsibleParty>
+        <fees>NONE</fees>
+        <accessConstraints>NONE</accessConstraints>
+    </Service>
+    <Capability>
+        <Request>
+            <GetCapabilities>
+                <DCPType>
+                    <HTTP>
+                        <Get>
+                            <OnlineResource xlink:type="simple" xlink:href="https://webapps.datafed.net/SURF_MET.ogc?" />
+                        </Get>
+                        <Post>
+                            <OnlineResource xlink:type="simple" xlink:href="https://webapps.datafed.net/SURF_MET.ogc" />
+                        </Post>
+                    </HTTP>
+                </DCPType>
+            </GetCapabilities>
+            <DescribeCoverage>
+                <DCPType>
+                    <HTTP>
+                        <Get>
+                            <OnlineResource xlink:type="simple" xlink:href="https://webapps.datafed.net/SURF_MET.ogc?" />
+                        </Get>
+                        <Post>
+                            <OnlineResource xlink:type="simple" xlink:href="https://webapps.datafed.net/SURF_MET.ogc" />
+                        </Post>
+                    </HTTP>
+                </DCPType>
+            </DescribeCoverage>
+            <GetCoverage>
+                <DCPType>
+                    <HTTP>
+                        <Get>
+                            <OnlineResource xlink:type="simple" xlink:href="https://webapps.datafed.net/SURF_MET.ogc?" />
+                        </Get>
+                        <Post>
+                            <OnlineResource xlink:type="simple" xlink:href="https://webapps.datafed.net/SURF_MET.ogc" />
+                        </Post>
+                    </HTTP>
+                </DCPType>
+            </GetCoverage>
+        </Request>
+        <Exception>
+            <Format>text/xml; charset="utf-8"</Format>
+        </Exception>
+    </Capability>
+    <ContentMetadata version="1.0.0">';
+  print "\n";
+
+  my $variable_count = @metadata;
+
+  for ( my $variable = 0; $variable < $variable_count; ++$variable ) {
+    my $name = $metadata[ $variable ]->{ name };
+
+    if ( $name ne '?' ) {
+      my $units = $metadata[ $variable ]->{ units };
+      my $description = $metadata[ $variable ]->{ description };
+      print "        <CoverageOfferingBrief>\n";
+      print "            <name>$name</name>\n";
+      print "            <label>$name($units)</label>\n";
+      print "            <description>$description</description>\n";
+      print '            <lonLatEnvelope srsName="WGS84(DD)">';
+      print "\n";
+      print "                <gml:pos>-180 -90</gml:pos>\n";
+      print "                <gml:pos>180 90</gml:pos>\n";
+      print "            </lonLatEnvelope>\n";
+      print "        </CoverageOfferingBrief>\n";
+      print "            <keywords>\n";
+      print "                <keyword>Domain:Meteorology</keyword>\n";
+      print "                <keyword>Dataset:SURF_MET</keyword>\n";
+      print "                <keyword>Platform:Network</keyword>\n";
+      print "                <keyword>Instrument:Unknown</keyword>\n";
+      print "                <keyword>Method:Point</keyword>\n";
+      print "                <keyword>DataType:Point</keyword>\n";
+      print "                <keyword>Distributor:DataFed</keyword>\n";
+      print "                <keyword>Originator:PSWC</keyword>\n";
+      print "                <keyword>TimeRes:Hour</keyword>\n";
+      print "                <keyword>Vertical:Surface</keyword>\n";
+      print "                <keyword>TopicCategory:climatologyMeteorologyAtmosphere</keyword>\n";
+      print "                <keyword>Parameter:$name</keyword>\n";
+      print "                <keyword>Units:$units</keyword>\n";
+      print "                <type>TBD</type>\n";
+      print "            </keywords>\n";
+    }
+  }
+
+  print "    </ContentMetadata>\n";
+  print "</WCS_Capabilities>\n";
+}
+
+
+
+# Print web server coverage description metadata.
+
+sub print_coverage_description {
+  print '<?xml version="1.0" encoding="UTF-8" ?>';
+  print '<CoverageDescription version="1.0.0" ';
+  print 'xmlns="https://www.opengeospatial.org/standards/wcs" ';
+  print 'xmlns:gml="https://www.opengis.net/gml" ';
+  print 'xmlns:xlink="https://www.w3.org/1999/xlink">';
+  print "\n";
+
+  my $variable_count = @metadata;
+
+  for ( my $variable = 0; $variable < $variable_count; ++$variable ) {
+    my $name = $metadata[ $variable ]->{ name };
+
+    if ( $name ne '?' ) {
+      my $units = $metadata[ $variable ]->{ units };
+      my $description = $metadata[ $variable ]->{ description };
+
+      if ( $coverage eq '' || $coverage eq $name ) {
+        print "    <CoverageOffering>\n";
+        print "        <name>$name</name>\n";
+        print "        <label>$name($units)</label>\n";
+        print "        <description>$description</description>\n";
+        print "        <domainSet>\n";
+        print "            <spatialDomain>\n";
+        print '                <gml:Envelope srsName="WGS84(DD)">';
+        print "\n";
+        print "                    <gml:pos>-180 -90</gml:pos>\n";
+        print "                    <gml:pos>180 90</gml:pos>\n";
+        print "                </gml:Envelope>\n";
+        print "            </spatialDomain>\n";
+        print "            <temporalDomain>\n";
+        print "                <timePeriod>\n";
+        print "                    <beginPosition>19980730";
+        print "T00:00:00Z</beginPosition>\n";
+        print "                    <timeResolution>PT1Y</timeResolution>\n";
+        print "                </timePeriod>\n";
+        print "            </temporalDomain>\n";
+        print "        </domainSet>\n";
+        print "        <rangeSet>\n";
+        print "            <RangeSet>\n";
+        print "                <name>$name</name>\n";
+        print "                <label>$name($units)</label>\n";
+        print "                <description>$description</description>";
+        print '
+                <nullValues>
+                    <singleValue>-99</singleValue>
+                </nullValues>
+            </RangeSet>
+        </rangeSet>
+        <supportedCRSs>
+            <requestResponseCRSs>CRS:84</requestResponseCRSs>
+            <nativeCRSs>CRS:84</nativeCRSs>
+        </supportedCRSs>
+        <supportedFormats>
+            <formats>ASCII</formats>
+        </supportedFormats>
+        <supportedInterpolations>
+            <interpolationMethod>mean mode</interpolationMethod>
+        </supportedInterpolations>
+    </CoverageOffering>
+';
+
+      }
+    }
+  }
+
+  print "</CoverageDescription>\n";
+}
+
+
+# Parse URL parameters into variables.
+
+sub parse_url {
+  use CGI qw/ untaint /;     # Load Safe untainting CGI routines.
+  $CGI::DISABLE_UPLOADS = 1; # Disable uploads.
+  $CGI::POST_MAX = 1024;     # Limit posts to 1024 bytes.
+  my $query = new CGI;       # Parse QUERY_STRING.
+  %ENV = ();                 # Unset all environment variables.
+  my @names = $query->param; # Extract names of parameters.
+  my $count = @names;
+  my $result = 0;
+  debug( "-------------- BEGIN surfmetserver -----------" );
+  debug( "@names\n$count" );
+
+  for ( my $parameter = 0; $parameter < $count; ++$parameter) {
+    $_ = $names[ $parameter ];                # $_ is tainted.
+    s/[^A-Za-z]/_/go;                         # Untaint $_.
+    my $option = $_;                          # $option is untainted.
+    $_ = $query->param( $option );            # $_ is tainted.
+    s/[^\w\-.,:\/]/_/go;                      # Untaint $_.
+    my $value = $_;                           # $value is untainted.
+    my $lowercase_option = lc( $option );
+    my $lowercase_value  = lc( $value );
+    debug( "$lowercase_option $lowercase_value" );
+
+    if ( $parsers{ $lowercase_option } ) {
+      $result = $parsers{ $lowercase_option }->( $lowercase_value );
+    } else {
+      print STDERR "\nInvalid option $parameter\n";
+      $result = 0;
+    }
+
+    if ( ! $result ) {
+      $parameter = $count; # Finish looping.
+    }
+  }
+
+  $result = $result && required_options_specified();
+  return $result;
+}
+
+
+
+# Parse service option.
+
+sub parse_service_option {
+  my $value = shift;
+  my $result = parse_option( $service, $value, 'SERVICE', 'wcs' );
+  return $result;
+}
+
+
+
+# Parse version option.
+
+sub parse_version_option {
+  my $value = shift;
+  my $result = parse_option( $version, $value, 'VERSION', '1.0.0' );
+  return $result;
+}
+
+
+
+# Parse request option.
+
+sub parse_request_option {
+  my $value = shift;
+  my $result =
+    parse_option( $request, $value, 'REQUEST',
+                  'getcoverage getcapabilities describecoverage getmetadata' );
+  return $result;
+}
+
+
+
+# Parse coverage option.
+
+sub parse_coverage_option {
+  my $value = shift;
+  my $result = 0;
+
+  if ( $coverage ne '' ) {
+    print STDERR "\nRedundant COVERAGE option\n";
+  } else {
+    my $variable_count = @metadata;
+
+    for ( my $variable = 0; $coverage eq '' && $variable < $variable_count;
+          ++$variable ) {
+      my $name = $metadata[ $variable ]->{ name };
+
+      if ( $name ne '?' ) {
+
+        if ( $name eq $value ) {
+          $coverage = $name;
+          $result = 1;
+        }
+      }
+    }
+
+    if ( ! $result ) {
+      print STDERR "\nInvalid COVERAGE option\n";
+    }
+  }
+
+  return $result;
+}
+
+
+
+# Parse format option:
+
+sub parse_format_option {
+  my $value = shift;
+  my $result = parse_option( $format, $value, 'FORMAT',
+                             'xdr ascii netcdf-coards netcdf-ioapi original' );
+  return $result;
+}
+
+
+
+# Parse time option.
+
+sub parse_time_option {
+  my $value = shift;
+  my $result = 0;
+
+  if ( $time ne '' ) {
+    print STDERR "\nRedundant TIME option\n";
+  } else {
+    $time = $value;
+    my $is_valid = is_valid_time( $time );
+
+    if ( ! $is_valid ) {
+      print STDERR "\nInvalid TIME option\n";
+    } else {
+      $result = 1;
+    }
+  }
+
+  return $result;
+}
+
+
+
+# Parse bbox option.
+
+sub parse_bbox_option {
+  my $value = shift;
+  my $result = 0;
+
+  if ( $bbox ne '' ) {
+    print STDERR "\nRedundant BBOX option\n";
+  } else {
+    $bbox = $value;
+    my @bounds = split( /,/, $bbox );
+    my $bounds_count = @bounds;
+
+    if ( $bounds_count != 4 && $bounds_count != 6 ) {
+      print STDERR "\nInvalid BBOX option (requires 4 or 6 numbers).\n";
+    } elsif ( ! in_range( $bounds[ 0 ], -180.0, 180.0 ) ) {
+      print STDERR "\nInvalid BBOX option (1st number)\n";
+    } elsif ( ! in_range( $bounds[ 1 ], -90.0, 90.0 ) ) {
+      print STDERR "\nInvalid BBOX option (2nd number)\n";
+    } elsif ( ! in_range( $bounds[ 2 ], $bounds[ 0 ], 180.0 ) ) {
+      print STDERR "\nInvalid BBOX option (3rd number)\n";
+    } elsif ( ! in_range( $bounds[ 3 ], $bounds[ 1 ], 90.0 ) ) {
+      print STDERR "\nInvalid BBOX option (4th number)\n";
+    } else {
+      $result = 1;
+    }
+  }
+
+  return $result;
+}
+
+
+
+# Parse compress option.
+
+sub parse_compress_option {
+  my $value = shift;
+  my $result = 0;
+
+  if ( $compress ne '' ) {
+    print STDERR "\nRedundant COMPRESS option\n";
+  } else {
+    $compress = $value;
+    my $is_valid = $compress == 0 || $compress == 1;
+
+    if ( ! $is_valid ) {
+      print STDERR "\nInvalid COMPRESS option (requires 0 or 1)\n";
+    } else {
+      $result = 1;
+    }
+  }
+
+  return $result;
+}
+
+
+
+# Parse regrid option:
+
+sub parse_regrid_option {
+  my $value = shift;
+  my $result = parse_option( $regrid, $value, 'REGRID',
+                             'nearest mean weighted' );
+  return $result;
+}
+
+
+
+# Parse regrid_aggregate option:
+
+sub parse_regrid_aggregate_option {
+  my $value = shift;
+  my $result = parse_option( $regrid_aggregate, $value, 'REGRID_AGGREGATE',
+                             'none all daily' );
+  return $result;
+}
+
+
+
+# Parse lambert option.
+
+sub parse_lambert_option {
+  my $value = shift;
+  my $result = 0;
+
+  if ( $lambert ne '' ) {
+    print STDERR "\nRedundant LAMBERT option\n";
+  } else {
+    $lambert = $value;
+    my @values = split( /,/, $value );
+    my $count = @values;
+
+    if ( $count != 4 ) {
+      print STDERR "\nInvalid LAMBERT option (requires 4 numbers)\n";
+    } elsif ( ! in_range( $values[ 0 ], -89.0, 89.0 ) ) {
+      print STDERR "\nInvalid LAMBERT option (1st number)\n";
+    } elsif ( ! in_range( $values[ 1 ], -89.0, 89.0 ) ) {
+      print STDERR "\nInvalid LAMBERT option (2nd number)\n";
+    } elsif ( ! in_range( $values[ 2 ], -180.0, 180.0 ) ) {
+      print STDERR "\nInvalid LAMBERT option: (3rd number)'\n";
+    } elsif ( ! in_range( $values[ 3 ], -89.0, 89.0 ) ) {
+      print STDERR "\nInvalid LAMBERT option:  (4th number)\n";
+    } elsif ( $values[ 0 ] > $values[ 1 ] ) {
+      print STDERR "\nInvalid LAMBERT option: (require 1st > 2nd number)\n";
+    } elsif ( $values[ 0 ] > 0.0 && $values[ 1 ] < 0.0 ) {
+      print STDERR "\nInvalid LAMBERT option: (require 1st and 2nd same sign)\n";
+    } elsif ( $values[ 0 ] < 0.0 && $values[ 1 ] > 0.0 ) {
+      print STDERR "\nInvalid LAMBERT option: (require 1st and 2nd same sign)\n";
+    } else {
+      $result = 1;
+    }
+  }
+
+  return $result;
+}
+
+
+
+# Parse stereographic option.
+
+sub parse_stereographic_option {
+  my $value = shift;
+  my $result = 0;
+
+  if ( $stereographic ne '' ) {
+    print STDERR "\nRedundant STEREOGRAPHIC option\n";
+  } else {
+    $stereographic = $value;
+    my @values = split( /,/, $value );
+    my $count = @values;
+
+    if ( $count != 3 ) {
+      print STDERR "\nInvalid STEREOGRAPHIC option (require 3 numbers)\n";
+    } elsif ( ! in_range( $values[ 0 ], -180.0, 180.0 ) ) {
+      print STDERR "\nInvalid STEREOGRAPHIC option: (require 1st in [-180, 180])\n";
+    } elsif ( ! in_range( $values[ 1 ], -90.0, 90.0 ) ) {
+      print STDERR "\nInvalid STEREOGRAPHIC option: (require 2nd in [-90, 90])\n";
+    } elsif ( ! in_range( $values[ 2 ], -90.0, 90.0 ) ) {
+      print STDERR "\nInvalid STEREOGRAPHIC option: (require 3rd in [-90, 90])\n";
+    } else {
+      $result = 1;
+    }
+  }
+
+  return $result;
+}
+
+
+
+# Parse mercator option.
+
+sub parse_mercator_option {
+  my $value = shift;
+  my $result = 0;
+
+  if ( $mercator ne '' ) {
+    print STDERR "\nRedundant MERCATOR option\n";
+  } else {
+    $mercator = $value;
+    my @values = split( /,/, $value );
+    my $count = @values;
+
+    if ( $count != 1 ) {
+      print STDERR "\nInvalid MERCATOR option (require 1 number)\n";
+    } elsif ( ! in_range( $values[ 0 ], -180.0, 180.0 ) ) {
+      print STDERR "\nInvalid MERCATOR option (require number in [-180, 180])\n";
+    } else {
+      $result = 1;
+    }
+  }
+
+  return $result;
+}
+
+
+
+# Parse lonlat option.
+
+sub parse_lonlat_option {
+  my $value = shift;
+  my $result = 0;
+
+  if ( $lonlat ne '' ) {
+    print STDERR "\nRedundant LONLAT option\n";
+  } else {
+    $lonlat = 1;
+    $result = 1;
+  }
+
+  return $result;
+}
+
+
+
+# Parse ellipsoid option.
+
+sub parse_ellipsoid_option {
+  my $value = shift;
+  my $result = 0;
+
+  if ( $ellipsoid ne '' ) {
+    print STDERR "\nRedundant ELLIPSOID option\n";
+  } else {
+    $ellipsoid = $value;
+    my @values = split( /,/, $value );
+    my $count = @values;
+
+    if ( $count != 1 && $count != 2 ) {
+      print STDERR "\nInvalid ELLIPSOID option (require 1 or 2 numbers)\n";
+    } elsif ( ! in_range( $values[ 0 ], 1.0, 1e10 ) ) {
+      print STDERR "\nInvalid ELLIPSOID option (1st number)\n";
+    } elsif ( $count == 2 ) {
+
+      if ( ! in_range( $values[ 1 ], $values[ 0 ], 1e10 ) ) {
+        print STDERR "\nInvalid ELLIPSOID option: (2nd number)\n";
+      } else {
+        $result = 1;
+      }
+    } else {
+      $result = 1;
+    }
+  }
+
+  return $result;
+}
+
+
+
+# Parse grid option.
+
+sub parse_grid_option {
+  my $value = shift;
+  my $result = 0;
+
+  if ( $grid ne '' ) {
+    print STDERR "\nRedundant GRID option\n";
+  } else {
+    $grid = $value;
+    my @values = split( /,/, $value );
+    my $count = @values;
+
+    if ( $count != 6 ) {
+      print STDERR "\nInvalid GRID option (require 6 numbers)\n";
+    } elsif ( $values[ 0 ] < 1 ) {
+      print STDERR "\nInvalid GRID option (1st number)\n";
+    } elsif ( $values[ 1 ] < 1 ) {
+      print STDERR "\nInvalid GRID option (2nd number)\n";
+    } elsif ( ! in_range( $values[ 2 ], -1e10, 1e10 ) ) {
+      print STDERR "\nInvalid GRID option (3rd number)\n";
+    } elsif ( ! in_range( $values[ 3 ], -1e10, 1e10 ) ) {
+      print STDERR "\nInvalid GRID option (4th number)\n";
+    } elsif ( ! in_range( $values[ 4 ], 0.01, 1e10 ) ) {
+      print STDERR "\nInvalid GRID option (5th number)\n";
+    } elsif ( ! in_range( $values[ 5 ], 0.01, 1e10 ) ) {
+      print STDERR "\nInvalid GRID option (6th number)\n";
+    } else {
+      $result = 1;
+    }
+  }
+
+  return $result;
+}
+
+
+
+# Parse levels option.
+
+sub parse_levels_option {
+  my $value = shift;
+  my $result = 0;
+
+  if ( $levels ne '' ) {
+    print STDERR "\nRedundant LEVELS option\n";
+  } else {
+    $levels = $value;
+    my @values = split( /,/, $value );
+    my $count = @values;
+
+    if ( $count != 3 + $values[ 0 ] + 1 + 5 ) {
+      print STDERR "\nInvalid LEVELS option (count)\n";
+    } elsif ( ! in_range( $values[ 0 ], 1, 100 ) ) {
+      print STDERR "\nInvalid LEVELS option (1st number)\n";
+    } elsif ( ! in_range( $values[ 1 ], 1, 7 ) ) {
+      print STDERR "\nInvalid LEVELS option (2nd number)\n";
+    } elsif ( ! in_range( $values[ 2 ], 0.0, 1e8 ) ) {
+      print STDERR "\nInvalid LEVELS option (3rd number)\n";
+    } else {
+
+      # Ensure level values are ordered decreasing if sigma-p else increasing:
+
+      my $end = $count - 5;
+      my $minimum = 0.0;
+      my $maximum = $lonlat ne '' ? 100000.0 : 1.0;
+      my $ok = 0;
+
+      for ( my $index = 3; $index < $end; ++$index ) {
+        my $level_value = $values[ $index ];
+        $ok = in_range( $level_value, $minimum, $maximum );
+
+        if ( ! $ok ) {
+          print STDERR "\nInvalid LEVELS option (number $index)\n";
+          $index = $count;
+        } elsif ( $lonlat ne '' ) {
+          $minimum = $level_value;
+        } else {
+          $maximum = $level_value;
+        }
+      }
+
+      # Check last parameter constants:
+
+      if ( $ok == 1 ) {
+        my $index = $count - 5;
+
+        if ( ! in_range( $values[ $index ], 0.01, 1e2 ) ) {
+          print STDERR "\nInvalid LEVELS option\n";
+        } elsif ( ! in_range( $values[ $index + 1 ], 0.01, 1e4 ) ) {
+          print STDERR "\nInvalid LEVELS option\n";
+        } elsif ( ! in_range( $values[ $index + 2 ], 0.01, 1e4 ) ) {
+          print STDERR "\nInvalid LEVELS option\n";
+        } elsif ( ! in_range( $values[ $index + 3 ], 0.01, 1e4 ) ) {
+          print STDERR "\nInvalid LEVELS option\n";
+        } elsif ( ! in_range( $values[ $index + 4 ], 0.01, 1e6 ) ) {
+          print STDERR "\nInvalid LEVELS option\n";
+        } else {
+          $result = 1;
+        }
+      }
+    }
+  }
+
+  return $result;
+}
+
+
+
+# Check that all required 'options' have been specified:
+
+sub required_options_specified {
+  my $result = 0;
+
+  if ( $service eq '' ) {
+    print STDERR "\nMissing option: 'SERVICE'\n";
+  } elsif ( $version eq '' ) {
+    print STDERR "\nMissing option: 'VERSION'\n";
+  } elsif ( $request eq '' ) {
+    print STDERR "\nMissing option: 'REQUEST'\n";
+  } elsif ( $request eq 'getcoverage' || $request eq 'getmetadata' ) {
+
+    if ( $coverage eq '' ) {
+      print STDERR "\nMissing option: 'COVERAGE'\n";
+    } elsif ( $format eq '' ) {
+      print STDERR "\nMissing option: 'FORMAT'\n";
+    } elsif ( $time eq '' ) {
+      print STDERR "\nMissing option: 'TIME'\n";
+    } elsif ( $bbox eq '' ) {
+      print STDERR "\nMissing option: 'BBOX'\n";
+    } else {
+      my $regrid_count = 0;
+      $regrid_count += $regrid ne '';
+      $regrid_count += $ellipsoid ne '';
+      $regrid_count += $grid ne '';
+      my $projection_count = 0;
+      $projection_count += $lambert ne '';
+      $projection_count += $stereographic ne '';
+      $projection_count += $mercator ne '';
+      $projection_count += $lonlat ne '';
+
+      $result =
+        $regrid_count == 0 && $projection_count == 0 ||
+        $regrid_count == 3 && $projection_count == 1;
+
+      if ( ! $result ) {
+        print STDERR "\nInvalid options: 'REGRID/";
+        print STDERR "LAMBERT/STEREOGRAPHIC/MERCATOR/LONLAT/";
+        print STDERR "GRID/ELLIPSOID'\n";
+      }
+    }
+  } else {
+    $result = 1;
+  }
+
+  return $result;
+}
+
+
+
+# Compute starting_timestamp, ending_timestamp and hours.
+# inputs:  $time = '2005-08-26t00:00:00z/2005-08-30t23:59:59z'
+# outputs: $starting_timestamp = 2005082600
+#          $ending_timestamp   = 2005083023
+#          $hours = 120
+
+sub compute_time_range {
+  my $yyyy1 = substr( $time, 0, 4 );
+  my $mm1   = substr( $time, 5, 2 );
+  my $dd1   = substr( $time, 8, 2 );
+  my $hh1   = substr( $time, 11, 2 );
+  my $i     = index( $time, '/' );
+
+  $starting_timestamp = integer_timestamp( $yyyy1, $mm1, $dd1, $hh1 );
+  $ending_timestamp   = $starting_timestamp;
+  $hours = 1;
+
+  if ( $i != -1 ) {
+    ++$i;
+    my $yyyy2 = substr( $time, $i + 0, 4 );
+    my $mm2   = substr( $time, $i + 5, 2 );
+    my $dd2   = substr( $time, $i + 8, 2 );
+    my $hh2   = substr( $time, $i + 11, 2 );
+    $ending_timestamp = integer_timestamp( $yyyy2, $mm2, $dd2, $hh2 );
+    my $yyyy  = $yyyy1;
+    my $mm    = $mm1;
+    my $dd    = $dd1;
+    my $hh    = $hh1;
+
+    while ( integer_timestamp( $yyyy, $mm, $dd, $hh ) !=
+            integer_timestamp( $yyyy2, $mm2, $dd2, $hh2 ) ) {
+      increment_timestamp( $yyyy, $mm, $dd, $hh );
+      ++$hours;
+    }
+  }
+}
+
+
+
+# Construct command.
+
+sub construct_command {
+  my $domain = " -domain $bbox ";
+  $domain =~ tr/,/ /;
+  my $my_format = $format;
+  my $my_xdrconvert = '';
+  my $my_compressor = '';
+
+  if ( $regrid ne '' || $format eq 'netcdf-coards' ) {
+    my $xdrconvert_format = $format;
+    my @format_parts = split( /-/, $format );
+    my $format_parts_count = @format_parts;
+
+    if ( $format_parts_count == 2 ) {
+      $xdrconvert_format = $format_parts[ 1 ];
+    }
+
+    my $regrid_args = '';
+
+    if ( $regrid ne '' ) {
+      my $projection_args =
+        $lambert ne '' ? "-lambert $lambert "
+        : $stereographic ne '' ? "-stereographic $stereographic "
+        : $mercator ne '' ? "-mercator $mercator "
+        : "-lonlat ";
+
+      $projection_args =~ tr/,/ /;
+      my @ellipsoid_args = split( /,/, $ellipsoid );
+      my $ellipsoid_args_count = @ellipsoid_args;
+      my $major_semiaxis = $ellipsoid_args[ 0 ];
+      my $minor_semiaxis =
+        $ellipsoid_args_count == 1 ? $major_semiaxis : $ellipsoid_args[ 1 ];
+      my $grid_args = "-grid $grid ";
+      $grid_args =~ tr/,/ /;
+
+      my $regrid_aggregate_option = '';
+
+      if ( $regrid_aggregate eq 'daily' ) {
+        $regrid_aggregate_option = '-aggregate 24';
+      } elsif ( $regrid_aggregate eq 'all' ) {
+        $regrid_aggregate_option = "-aggregate $hours";
+      }
+
+      $regrid_args =
+        "-regrid $regrid " .
+        $projection_args .
+        "-ellipsoid $major_semiaxis $minor_semiaxis " .
+        $grid_args .
+        $regrid_aggregate_option;
+    }
+
+    $my_format = 'xdr';
+    $my_xdrconvert = " | $xdrconvert $regrid_args -$xdrconvert_format";
+  }
+
+  if ( $compress ne '' && $compress == 1 ) {
+    $my_compressor = " | $compressor";
+  }
+
+  $command =
+    "$subsetter" .
+    " -data $temp_file_name" .
+    " -$my_format" .
+    " -desc https://webapps.datafed.net/ogc_PSWC.wsfl,reformat_surfmet_obs,SiteSubset" .
+    " -timestamp $starting_timestamp -hours $hours" .
+    $domain .
+    "$my_xdrconvert$my_compressor";
+}
+
+
+
+# my $variable = find_variable( lc( $coverage ) );
+
+sub find_variable {
+  my $name = shift;
+  my $count = @metadata;
+  my $index = 0;
+
+  while ( $index < $count && $metadata[ $index ]->{ name } ne $name ) {
+    ++$index;
+  }
+
+  return $index;
+}
+
+
+
+# Convert string station name to an integer id < LONGLONG_MAX.
+# my $id = sid_to_id( $sid );
+
+sub sid_to_id {
+  my $sid = shift;
+  $sid =~ s/[-_@().]//;  # Delete insignificant characters.
+  $sid =~ s/^USGS//;     # Delete USGS prefix to yield 15-digit integer.
+  my $length = length( $sid );
+  my $result = '';
+
+  for ( my $i = 0; $i < $length; ++$i ) {
+    my $c = substr( $sid, $i, 1 );
+
+    if ( $c =~ /[0-9]/ ) { # Is digit:
+      $result .= $c;
+    } elsif ( $c =~ /[a-z,A-Z]/ ) { # If alpha-numeric:
+      $c =~ tr/[a-z]/[A-Z]/; # Capitalize all letters.
+      my $value = ord( $c ) - ord( 'A' ) + 1;
+      $result .= $value;
+    }
+  }
+
+  $length = length( $result );
+
+  if ( $length > 19 ) { # If too long, truncate but end with last 4 digits:
+    $result = substr( $result, 0, 15 ) . substr( $result, $length - 4, 4 );
+  }
+
+  if ( $result gt '9223372036854775807' ) { # Ensure it is a long long.
+    $result = '8' . substr( $result, 1, 18 ); # Change 1st digit.
+  }
+
+  return $result;
+}
+
+
+
+# Query the external WCS and write reformatted rows to a temporary file.
+# my $result = query_external_wcs();
+
+sub query_external_wcs {
+  my $result    = 0;
+  my $index     = find_variable( lc( $coverage ) );
+  my $name      = $metadata[ $index ]->{ name };
+  my $units     = $metadata[ $index ]->{ units };
+  my $parameter = $metadata[ $index ]->{ parameter };
+  my $is_wind   = ( $parameter eq 'Wind' );
+  my $offset    = 0.0;
+  my $scale     = 1.0;
+
+  if ( $metadata[ $index ]->{ offset } ) {
+    $offset = $metadata[ $index ]->{ offset };
+  }
+
+  if ( $metadata[ $index ]->{ scale } ) {
+    $scale = $metadata[ $index ]->{ scale };
+  }
+
+  # Query the external WCS and read resulting rows:
+
+  my $ext_time = uc( $time ) . '/PT1H';
+  my @bounds = split( /,/, $bbox );
+  my $bounds_count = @bounds;
+  my $bbox00 = $bbox;
+
+  if ( $bounds_count != 6 ) {
+    $bbox00 .= ',0,0';
+  }
+
+  my $wcs_command = $wget_command . "$parameter&TIME=$ext_time&BBOX=$bbox00'";
+  my $the_pipe = 0;
+
+  if ( $is_wind ) { # UGLY HACK to switch webservice for Wind:
+    $wcs_command =~ s/SURF_MET.ogc/SURF_MET_WIND.ogc/g;
+    $wcs_command =~ s/COVERAGE=DIR/COVERAGE=Wind/g;
+  }
+
+  # Untaint command (match expression is arbitrary as far as -T is concerned):
+
+  if ( $wcs_command =~ m#^(/[\w-]+/[\w -/.,':?=&]+)$# ) {
+    $wcs_command = $1; # Re-assign first match, which is enough to satisfy -T.
+    $query_command = $wcs_command;
+    debug( "$0 executing command = $wcs_command" );
+    %ENV = (); # Unset all environment variables prior to popen.
+    # Complicated, supposedly safer way to open a readable pipe to command:
+    my $pid = open( the_pipe, "-|" );
+
+    if ( ! defined( $pid ) ) {
+      die "Couldn't open pipe to subprocess";
+    } elsif ( $pid ) { # Parent process.
+
+      debug( "reading result rows and processing into $temp_file_name..." );
+
+      # Read and process each resulting line (that looks like this):
+      # "KWAL",37.93,-75.48,2008-12-31T23:00:00,33.57143
+      # into a row that looks like:
+      # 001123112,  37.9300, -75.4800,2008,366,23.5, 0.87302, KWAL
+      # or for Wind:
+      # loc_code,lat,lon,elev,datetime,mag,dir
+      # "KBFM",30.63,-88.07,8,2005-08-26T20:00:00,6.692914,40
+
+
+      my $line = <the_pipe>; # Read and ignore first header line.
+
+      if ( $line ) {
+        $line = <the_pipe>;    # Read first data line.
+        my @previous_row = parse_line( $line, $offset, $scale, $is_wind );
+
+        if ( @previous_row ) {
+          my $temp_file = create_temp_file( $temp_file_name, $name, $units );
+
+          if ( $temp_file >= 0 ) {
+            my $coincident_row_count = 1;
+
+            while ( $line = <the_pipe> ) {
+              my @row = parse_line( $line, $offset, $scale, $is_wind );
+              my $same_station_and_time =
+                $row[ 0 ] == $previous_row[ 0 ] &&
+                $row[ 1 ] == $previous_row[ 1 ] &&
+                $row[ 2 ] == $previous_row[ 2 ] &&
+                $row[ 3 ] == $previous_row[ 3 ] &&
+                $row[ 4 ] == $previous_row[ 4 ] &&
+                $row[ 5 ] == $previous_row[ 5 ];
+
+              # Compute mean of coincident non-missing values:
+
+              if ( $same_station_and_time ) {
+
+                if ( $row[ 6 ] > -9999.0 &&
+                     ( $is_wind == 0 || $row[ 7 ] > -9999.0 ) ) {
+
+                  if ( $previous_row[ 6 ] > -9999.0 &&
+                       ( $is_wind == 0 || $row[ 7 ] > -9999.0 ) ) { # Mean:
+                    $coincident_row_count += 1;
+                    $previous_row[ 6 ] =
+                      ( ( $coincident_row_count - 1 ) * $previous_row[ 6 ] +
+                         $row[ 6 ] )
+                      / $coincident_row_count;
+
+                    if ( $is_wind ) {
+                      $previous_row[ 7 ] =
+                        ( ( $coincident_row_count - 1 ) * $previous_row[ 7 ] +
+                           $row[ 7 ] )
+                        / $coincident_row_count;
+                    }
+                  } else { # Replace previous missing value with non-missing:
+                    $previous_row[ 6 ] = $row[ 6 ];
+
+                    if ( $is_wind ) {
+                      $previous_row[ 7 ] = $row[ 7 ];
+                    }
+                  }
+                }
+
+              } else {
+                write_row( $temp_file, $is_wind, @previous_row );
+                @previous_row = @row;
+                $coincident_row_count = 1;
+              }
+            }
+
+            write_row( $temp_file, $is_wind, @previous_row );
+            close( temp_file );
+            $result = 1;
+          }
+        }
+
+        close( the_pipe ) or die $!;
+        $result = ! $?;
+      }
+    } else { # Child process.
+      exec( $wcs_command ) or die "can't exec program: $!";
+    }
+  } else {
+    print STDERR "\n$0: '$wcs_command' contains invalid characters.\n";
+  }
+
+  return $result;
+}
+
+
+
+# my $temp_file = create_temp_file( $temp_file_name, $coverage, $units );
+
+sub create_temp_file {
+  my $temp_file_name = shift;
+  my $variable       = shift;
+  my $units          = shift;
+  my $temp_file = 0;
+  open( temp_file, ">$temp_file_name" );
+
+  if ( $temp_file >= 0 ) {
+
+    if ( $variable eq 'wind' ) {
+      print temp_file
+        "SITE,LATITUDE,LONGITUDE,YEAR,JUL_DAY,UTC_HR,wind_u,wind_v,$units,SITE_NAME\n";
+    } else {
+      print temp_file
+        "SITE,LATITUDE,LONGITUDE,YEAR,JUL_DAY,UTC_HR,$variable,$units,SITE_NAME\n";
+    }
+  }
+
+  return $temp_file;
+}
+
+
+
+# my @row = parse_line( $line, $offset, $scale );
+# Read and process a line that looks like this:
+# "KWAL",37.93,-75.48,2008-12-31T23:00:00,33.57143
+# or with elevation (8 below):
+# "KBFM",30.63,-88.07,8,2005-08-26T20:00:00,90.71429
+# into a row that looks like:
+# 001123112,  37.9300, -75.4800,2008,366,23.5, 0.87302, KWAL
+# Or for Wind:
+# loc_code,lat,lon,elev,datetime,mag,dir
+# "KBFM",30.63,-88.07,8,2005-08-26T20:00:00,6.692914,40
+
+sub parse_line {
+  my $line = shift;
+  $line =~ s/\r//g; # Remove double-quotes (").
+  my $offset = shift;
+  my $scale = shift;
+  my $is_wind = shift;
+  my @row = split( /,/, $line );
+  my $row_columns = @row;
+  my $last_column = $row_columns - 1;
+  my $station   = $row[ 0 ];
+  $station =~ s/"//g;   # Remove double-quotes (").
+  $station =~ s/CC/81/; # Canada 'CC' becomes 81.
+  $_ = $station;
+  s/[^0-9,a-z,A-Z]/0/go; # Map all non-digits/letters to 0.
+  $station = $_;
+  my $id = sid_to_id( $station );
+  my $latitude  = $row[ 1 ];
+  my $longitude = $row[ 2 ];
+  my $timestamp = $row[ $last_column - 1 - $is_wind ];
+  my $yyyy = 0;
+  my $ddd  = 0;
+  my $hour = 0;
+  convert_timestamp( $timestamp, $yyyy, $ddd, $hour );
+  my $value = -9999.0;
+  my $value2 = -9999.0;
+  my @result = ();
+
+  if ( $is_wind  ) {
+    $value = $row[ $last_column - 1 ];
+    $value =~ s/\r//g; # Remove '\r'.
+    $value =~ s/\n//g; # Remove '\n'.
+
+    if ( $value eq '' ) {
+      $value = -9999.0;
+    }
+
+    $value2 = $row[ $last_column ];
+    $value2 =~ s/\r//g; # Remove '\r'.
+    $value2 =~ s/\n//g; # Remove '\n'.
+
+    if ( $value2 eq '' ) {
+      $value2 = -9999.0;
+    }
+
+    if ( $value > -9999.0 && $value2 > -9999.0 ) { # Convert mag,dir to u,v:
+      $value = ( $value + $offset ) * $scale;
+      wind_uv( $value, $value2 );
+    }
+
+    @result =
+      ($id, $latitude, $longitude, $yyyy, $ddd, $hour, $value,$value2,$station);
+
+  } elsif ( $row[ $last_column ] ) {
+    $value = $row[ $last_column ];
+    $value =~ s/\r//g; # Remove '\r'.
+    $value =~ s/\n//g; # Remove '\n'.
+
+    if ( $value eq '' ) {
+      $value = -9999.0;
+    } else {
+      $value = ( $value + $offset ) * $scale;
+    }
+
+    @result =
+      ( $id, $latitude, $longitude, $yyyy, $ddd, $hour, $value, $station );
+  }
+
+  return @result;
+}
+
+
+
+# Convert vector magnitude and direction to u, v components:
+
+sub wind_uv {
+  my ( $magnitude, $direction ) = @_;
+
+  if ( $magnitude == 0.0 ) {
+    $_[ 0 ] = 0.0;
+    $_[ 1 ] = 0.0;
+  } else {
+    $direction = 270.0 - $direction; # Convert bearing angle to trig angle.
+    my $angle_degrees =
+      ( $direction < 0.0   ? $direction + 360.0
+      : $direction > 360.0 ? $direction - 360.0
+      : $direction );
+    my $pi = 3.14159265358979323846264338327950288;
+    my $angle_radians = $angle_degrees * ( $pi / 180.0 );
+    my $u = cos( $angle_radians );
+    my $v = sin( $angle_radians );
+    my $wind_u = $magnitude * $u;
+    my $wind_v = $magnitude * $v;
+    $_[ 0 ] = $wind_u;
+    $_[ 1 ] = $wind_v;
+  }
+}
+
+
+
+# write_row( $temp_file, @previous_row );
+
+sub write_row {
+  my $temp_file   = shift;
+  my $is_wind     = shift;
+  my $id          = shift;
+  my $latitude    = shift;
+  my $longitude   = shift;
+  my $year        = shift;
+  my $day_of_year = shift;
+  my $hour        = shift;
+  my $measurement = shift;
+  my $measurement2 = -9999.0;
+
+  if ( $is_wind ) {
+    $measurement2 = shift;
+  }
+
+  my $station     = shift;
+
+  if ( $is_wind ) {
+    printf temp_file "%20d,%10.5f,%10.5f,%04d,%03d,%04.1f,%20.8f,%20.8f,%44s\n",
+           $id, $latitude, $longitude, $year, $day_of_year, $hour + 0.5,
+           $measurement, $measurement2, $station;
+  } else {
+    printf temp_file "%20d,%10.5f,%10.5f,%04d,%03d,%04.1f,%20.8f,%44s\n",
+           $id, $latitude, $longitude, $year, $day_of_year, $hour + 0.5,
+           $measurement, $station;
+  }
+}
+
+
+
+############################### HELPER ROUTINES ##############################
+
+
+
+# debug( $message );
+
+sub debug {
+  my $message = shift;
+
+  if ( $debugging ) {
+    print STDERR "\n$message\n";
+####print STDOUT "\n$message\n";
+  }
+}
+
+
+
+# Execute command and echo its output to STDOUT. E.g., execute_command( 'ls' );
+
+sub execute_command {
+  my $command = shift;
+  my $result = 0;
+  my $the_pipe = 0;
+
+  # Untaint command (match expression is arbitrary as far as -T is concerned):
+
+  if ( $command =~ m#^(/[\w-]+/[\w -/.,:'@|]+)$# ) {
+    $command = $1; # Re-assign first match, which is enough to satisfy -T.
+    debug( "$0 executing command = $command" );
+    %ENV = (); # Unset all environment variables prior to popen.
+    # Complicated, supposedly safer way to open a readable pipe to command:
+    my $pid = open( the_pipe, "-|" );
+
+    if ( ! defined( $pid ) ) {
+      die "Couldn't open pipe to subprocess";
+    } elsif ( $pid ) { # Parent process.
+
+      while ( <the_pipe> ) {
+        print;
+      }
+
+      close( the_pipe ) or die $!;
+      $result = ! $?;
+    } else { # Child process.
+      exec( $command ) or die "can't exec program: $!";
+    }
+  } else {
+    print STDERR "\n$0: '$command' contains invalid characters.\n";
+  }
+
+  return $result;
+}
+
+
+
+# my $result = parse_option( $option, $value, $option_name, $valid_values );
+# my $result = parse_option( $coverage, $value, 'COVERAGE', 'ozone pm25' );
+
+sub parse_option {
+  my ( $option, $value, $option_name, $valid_values ) = @_;
+  my $result = 0;
+
+  if ( $option ne '' ) {
+    print STDERR "\nRedundant $option_name option: '$value'\n";
+  } else {
+    $result = index( " $valid_values ", " $value " ) != -1;
+
+    if ( $result ) {
+      $_[ 0 ] = $value;
+    } else {
+      print STDERR "\nInvalid $option_name option: '$value'\n";
+    }
+  }
+
+  return $result;
+}
+
+
+
+# my $ok = in_range( $value, $minimum, $maximum );
+
+sub in_range {
+  my ( $value, $minimum, $maximum ) = @_;
+  my $result = $value >= $minimum && $value <= $maximum;
+  return $result;
+}
+
+
+
+# my $is_valid = is_valid_time( '2005-08-26t20:00:00z/2005-08-27t23:59:59z' );
+
+sub is_valid_time {
+  my $time = shift;
+  my $result = 0;
+  my $length = length( $time );
+
+  if ( $length == 41 ) {
+    $result = is_valid_time( substr( $time, 0, 20 ) );
+    $result = $result && substr( $time, 20, 1 ) eq '/';
+    $result = $result && is_valid_time( substr( $time, 21, 20 ) );
+    $result = $result && substr( $time, 0, 20 ) le substr( $time, 21, 20 );
+  } elsif ( $length == 20 ) {
+    my $year   = substr( $time, 0, 4 );
+    my $month  = substr( $time, 5, 2 );
+    my $day    = substr( $time, 8, 2 );
+    my $hour   = substr( $time, 11, 2 );
+    my $minute = substr( $time, 14, 2 );
+    my $second = substr( $time, 17, 2 );
+    $result = in_range( $year, 1900, 3000 );
+    $result = $result && in_range( $month, 1, 12 );
+    $result = $result && in_range( $day, 1, days_in_month( $year, $month ) );
+    $result = $result && in_range( $hour, 0, 23 );
+    $result = $result && in_range( $minute, 0, 59 );
+    $result = $result && in_range( $second, 0, 59 );
+    $result = $result && substr( $time, 4, 1 ) eq '-';
+    $result = $result && substr( $time, 7, 1 ) eq '-';
+    $result = $result && substr( $time, 10, 1 ) eq 't';
+    $result = $result && substr( $time, 13, 1 ) eq ':';
+    $result = $result && substr( $time, 16, 1 ) eq ':';
+    $result = $result && substr( $time, 19, 1 ) eq 'z';
+  }
+
+  return $result;
+}
+
+
+
+# convert_timestamp( $timestamp, $yyyy, $ddd, $hour );
+
+sub convert_timestamp {
+  my ( $timestamp, $yyyy, $ddd, $hour ) = @_;
+  my $timestamp_length = length( $timestamp );
+  my $month = 0;
+  my $day   = 0;
+  $yyyy = 0;
+  $ddd  = 0;
+  $hour = 0;
+
+  if ( $timestamp_length >= 10 ) {
+    $yyyy  = substr( $timestamp, 0, 4 );
+    $month = substr( $timestamp, 5, 2 );
+    $day   = substr( $timestamp, 8, 2 );
+
+    if ( $timestamp_length >= 13 ) {
+      $hour = substr( $timestamp, 11, 2 );
+    }
+
+    my $t = sprintf( "%04d-%02d-%02dt%02d:00:00z", $yyyy, $month, $day, $hour);
+
+    if ( is_valid_time( $t ) ) {
+
+      for ( my $mo = 1; $mo < $month; ++$mo ) {
+        $ddd += days_in_month( $yyyy, $mo );
+      }
+
+      $ddd += $day;
+    }
+  }
+
+  $_[ 1 ] = $yyyy;
+  $_[ 2 ] = $ddd;
+  $_[ 3 ] = $hour;
+}
+
+
+
+# increment_timestamp( $yyyy, $mm, $dd, $hh );
+
+sub increment_timestamp {
+  my ( $yyyy, $mm, $dd, $hh ) = @_;
+  my $hours_per_day   = 23;
+  my $months_per_year = 12;
+  my $days_this_month = days_in_month( $yyyy, $mm );
+  ++$hh;
+
+  if ( $hh > $hours_per_day ) {
+    $hh = 0;
+    ++$dd;
+
+    if ( $dd > $days_this_month ) {
+      $dd = 1;
+      ++$mm;
+
+      if ( $mm > $months_per_year ) {
+        $mm = 1;
+        ++$yyyy;
+      }
+    }
+  }
+
+  $_[ 0 ] = $yyyy;
+  $_[ 1 ] = $mm;
+  $_[ 2 ] = $dd;
+  $_[ 3 ] = $hh;
+}
+
+
+
+# my $yyyymmddhh = integer_timestamp( $yyyy, $mm, $dd, $hh );
+
+sub integer_timestamp {
+  my ( $yyyy, $mm, $dd, $hh ) = @_;
+  my $result = int( $yyyy * 1000000 + $mm * 10000 + $dd * 100 + $hh );
+  return $result;
+}
+
+
+
+# my $timestamp = incremented_timestamp( "2006-07-03T12:00:00Z" );
+
+sub incremented_timestamp {
+  my $timestamp = shift;
+  my $yyyy  = substr( $timestamp, 0, 4 );
+  my $mm    = substr( $timestamp, 5, 2 );
+  my $dd    = substr( $timestamp, 8, 2 );
+  my $hh    = substr( $timestamp, 11, 2 );
+  my $mmss  = substr( $timestamp, 13, 6 );
+  increment_timestamp( $yyyy, $mm, $dd, $hh );
+  my $result = sprintf( "%04d-%02d-%02dT%02d%sZ", $yyyy, $mm, $dd, $hh, $mmss );
+  return $result;
+}
+
+
+
+# my $leap = is_leap_year( $year );
+
+sub is_leap_year {
+  my $year = shift;
+  my $result = $year % 4 == 0 && ( $year % 100 != 0 || $year % 400 == 0 );
+  return $result;
+}
+
+
+
+# my $days = days_in_month( $year, $month );
+
+sub days_in_month {
+  my $year  = shift;
+  my $month = shift;
+
+  # 30 days hath September, April, June and November...
+
+  my @days_per_month = ( 31, 28, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31 );
+  my $result = $days_per_month[ $month - 1 ];
+
+  if ( $month == 2 ) {
+
+    if ( is_leap_year( $year ) ) {
+      ++$result;
+    }
+  }
+
+  return $result;
+}
+
+
+
+

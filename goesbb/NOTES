@@ -1,0 +1,110 @@
+
+2007-10-09
+
+Heidi,
+
+I talked with Fred about a week ago about the potential to bring daily
+biomass burning emissions data into RSIG.  The only organization I know
+that is producing a daily product on a routine basis in NOAA/NESDIS.
+While we know there are uncertainties associated with the emissions,
+this data set can be a valuable addition to RSIG. We have an informal
+requested into NESDIS for this to be an operational product and will be
+putting in a formal request.
+
+One of the potential applications within RSIG based on the data sets
+(current and planned) is to develop an application for looking a biomass
+impacts on PM2.5.  To start can you have someone pull these files down
+to RTP and bring them into RSIG as another data layer.  Would it also be
+possible to modify the RSIG data architecture diagrams to reflect the
+inclusion of this data set?   Once the product moves to an operational
+environment at NESDIS we can work with them to figure out the best way
+to get the data on a daily basis.
+
+Also another data set we should be working to get is the MOPITT CO data
+set from Langley's DAAC.  We can talk about this at a future RSIG call.
+
+Fred - Do you have any additional comments/thoughts?
+
+Thanks,
+Jim
+
+
+
+Jim,
+
+Please find attached two papers (one submitted to RSE and one to be
+submitted to AE) and ftp link for the near real time data for daily
+pull.
+
+ftp://ftp.orbit.nesdis.noaa.gov/pub/smcd/xzhang/PM25
+
+Thank you so much for your assistance in all this.  I really appreciate
+your efforts.
+
+Regards,
+
+Shobha
+--
+----------------------------------------------------------
+Shobha Kondragunta, Ph.D
+Physical Research Scientist
+NOAA/NESDIS/Center for Satellite Applications and Research
+5200 Auth Road, Camp Springs, MD 20746
+Tel.: 301-763-8136 X 151 Fax: 301-763-8108
+http://www.orbit.nesdis.noaa.gov/star/Kondragunta_S.php
+Shobha.Kondragunta@noaa.gov
+
+
+================(10/11/06)
+  1. Hourly emission data
+The near real time PM2.5 emissions released from biomass burning are produced.
+Particularly, the emission in the previous date is calculated for every half hour and aggregated to hourly data.
+The results are kept in two files. The jpg image file provides daily cumulative emissions,
+which gives a visualization of the spatial pattern in emissions.
+The ASCII file includes hourly data with the following items:
+
+Year day longitude latitude PM2.5_h1 PM2.5_h2 PM2.5_h3 PM2.5_h4 PM2.5_h5 PM2.5_h6 PM2.5_h7
+PM2.5_h8 PM2.5_h9 PM2.5_h10 PM2.5_h11 PM2.5_h12 PM2.5_h13 PM2.5_h14 PM2.5_h15 PM2.5_h16 PM2.5_h17
+PM2.5_h18 PM2.5_h19 PM2.5_h20 PM2.5_h21 PM2.5_h22 PM2.5_h23 PM2.5_h24 Eco
+
+The PM2.5_h1-- PM2.5_h24 indicates hourly emission (kg).
+Eco is the ecosystem type.
+
+Regarding the file name, here are the examples:
+f2006270_emis_hourly----ASCII file for emission data. The first four digits in the file name are the year (2006), 
+and the following three digits are the day of year (270). In other words, the file name indicates the date of emission data.
+
+f2006270_emis_lalon.jpg----a jpg image. The digits are the same as above.
+
+  2. Parameters in the model of  PM2.5 emissions
+Fuel loading is developed from MODIS vegetation properties at a spatial resolution of 1km. The MODIS data 
+include vegetation continuous fields (percent cover), land cover type, and vegetation leaf index.
+Fuel moisture is derived from weekly AVHRR vegetation condition index, which controls combustion factor 
+and emission factor.
+GOES fire size data are used as a proxy of burned area. Specifically, based on available GOES fire size data, 
+we generate a set of reprehensive curves of the diurnal fire sizes using a Fourier model for various ecosystems. 
+The reprehensive curves are used to assimilate the fire size for each burned pixel detected from GOES fire product. 
+Thus, the fire size is used as a proxy of burned area for estimating biomass burning emissions.
+  
+----------------------------------------------------------
+
+06/20/2008 10:41:24 AM
+
+Heidi,
+ 
+
+You might have seen my e-mail to Shobha where NOAA/NESDIS plans to make the GOES BB emission product operational.  This will likely take place over the next month or so, and as a result NCDC will begin to archive the product.  So sometime in late July or August I would like to make a trip to NCDC and talk with them about hosting the sub-setting routine on their servers for this product.  This will be a good test case because NOAA will have NO2 total column products from OMI and GOME-2 that will likely reside at NCDC along with the GOES AOD product and others in the future.
+
+ 
+
+In the mean time can we update GOES files on the RSIG system so we have an updated archive?  These files are small so I hope this isn't a problem.  I think the location is for the files is ftp://ftp.orbit.nesdis.noaa.gov/pub/smcd/xzhang/PM25/.  It would be good to have these update for the demo next Tuesday, so we can show emission estimates from this product for the Eastern NC/VA fires this month.  Please let me know if this is doable?
+ 
+
+Thanks,
+
+Jim 
+
+ 
+-----------------------------------------------------------
+
+

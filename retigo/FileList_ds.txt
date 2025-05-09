@@ -1,0 +1,15 @@
+2008-11-05_northcarolina_raleigh_966f1.csv none none retigo_example.csv null null null
+2010-04-02_northcarolina_durham_033b7.csv none none mobiledata_retigo.csv high advanced pm25,ultrafine,pmbc,other
+2010-04-02_northcarolina_durham_2e0d8.csv none none test123.csv null null null
+2012-08-17_northcarolina_chapelhill_75045.csv gmap none ramses_02.csv high advanced pm25,pm10,ultrafine,pmbc,co,co2,no2,other
+2012-09-04_northcarolina_durham_4ea7f.csv gmap none ramses_12.csv high advanced pm25,pm10,ultrafine,pmbc,co,co2,no2,other
+2012-09-20_northcarolina_chapelhill_0f81e.csv gmap none ramses_22.csv high advanced pm25,pm10,ultrafine,pmbc,co,co2,no2,other
+2014-02-21_southcarolina_mountpleasant_6b2f2.csv testing none mobile_charleston_retigo_test.txt null null co,no2
+2016-08-12_lat_-9999_lon_-9999_1e695.csv none none rtgo0004.csv null null null
+2016-11-29_washington_seattle_adabd.csv chid seattle_chinatown_chid_air_toxics_study 112916_pscaa_bc_cid.csv medium emerging pmbc
+2016-12-08_lat_-122.326444_lon_-122.326444_9dc34.csv chid seattle_chinatown_highway_air_toxics 12082016_pscaa_ufpc_cid.csv medium emerging ultrafine,pmbc
+2016-12-08_washington_seattle_295b5.csv chid seattle_chinatown_highway_air_toxics 12082016_pscaa_bc_cid.csv medium emerging ultrafine,pmbc
+2016-12-08_washington_seattle_665b8.csv chid seattle_chinatown_highway_air_toxics 12082016_pscaa_ufpc_cid.csv medium emerging ultrafine,pmbc
+2019-06-03_texas_lubbock_c97f3.csv none lubbock_pm _june3.csv_.csv medium mixture pm25,pm10
+2024-07-08_colorado_boulder_2c0f7.csv cu_boulder_pbl none ypodz2_2024_07_08.csv low emerging pm25,pm10,co,co2,o3,other
+2024-08-26_colorado_boulder_692d9.csv cu-pbl pbl_aqiq ypodtest_2024_08_26.csv low mixture pm25,pm10,ultrafine,co2,o3,other

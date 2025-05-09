@@ -1,0 +1,1100 @@
+
+Q1. Do we only handle L2 files?
+
+At this point, YES
+
+Q2. Below are the L2 file ‘types’.
+Please decode the letters. Presumably they specify the variables contained?
+
+2nd and 4th letter are key for this purpose. Last number is just a version control number.
+
+_L2_rfuh5
+
+Formaldehyde and horizontal
+
+_L2_rfus5
+
+Formaldehyde and synthetic (direct)
+
+
+_L2_rnvh3
+
+NO2 and horizontal
+
+_L2_rnvs3
+
+NO2 and sythetic (direct)
+
+_L2_rnvss
+
+(?) does this exists
+
+_L2_rout2
+
+Ozone and theoretical (direct)
+
+_L2_rsus1
+
+SO2 and synthetic (direct)
+
+_L2Tot_rnvs0
+
+No2 and synthetic, v0
+
+_L2Tot_rnvs1
+
+No2 and synthetic, v1
+
+_L2Tot_rout0
+
+ozone and theoretical, v0
+
+_L2Trop_rnvh1
+
+No2 and horizontal, v1
+
+
+Below are sample columns.
+Q3. Are columns consistent across file types?
+
+No. There are overlap but not always
+
+Q4. Which columns do we want to handle in pandoraserver?
+
+Will answer on call or in follow up
+
+Q5. Are units consistent?
+
+Yes, across p-1-X. (1.7 is different from 1.8, but I’m guessing will be constant after 1.8)
+
+Q6. Are ‘missing values’ consistent?
+
+Should be, I would think
+
+Q7. For each column we want to process, what are its valid range?
+
+
+===============================================================================
+
+File name: Pandora147s1_BronxNY_L2Tot_rnvs0p1-7.txt
+File generation date: 20200621T093155Z
+Data description: Level 2 total columns file
+Data file version: rnvs0p1-7
+Data product status: Nitrogen dioxide data are disused
+Local principal investigator: Jim Szykman
+Network principal investigator: Alexander Cede
+Instrument type: Pandora
+Instrument number: 147
+Spectrometer number: 1
+Processing software version used: BlickP v1.7.16
+Full location name: New York Botanical Garden NYSDEC (USEPA AQS ID 36-005-0133)
+Short location name: BronxNY
+Country of location: USA
+Location latitude [deg]: 40.8679
+Location longitude [deg]: -73.8781
+Location altitude [m]: 31
+Data start time: 20190910T144614Z
+Data end time: 20191228T195136Z
+Data caveats: None
+---------------------------------------------------------------------------------------
+Column 1: UT date and time for center of measurement, yyyymmddThhmmssZ (ISO 8601)
+Column 2: Fractional days since 1-Jan-2000 UT midnight for center of measurement
+Column 3: Effective duration of measurement in seconds
+Column 4: Solar zenith angle for center of measurement in degree
+Column 5: Solar azimuth for center of measurement in degree, 0=north, increases clockwise
+Column 6: Lunar zenith angle for center of measurement in degree
+Column 7: Lunar azimuth for center of measurement in degree, 0=north, increases clockwise
+Column 8: Nitrogen dioxide total vertical column amount [Dobson Units], -9e99=retrieval not successful
+Column 9: Uncertainty of nitrogen dioxide total vertical column amount [Dobson Units] based on measured uncertainty, -8=retrieval not successful, -1=cross section is zero in this wavelength range, -3=spectral fitting was done, but no uncertainty could be retrieved
+Column 10: Direct nitrogen dioxide air mass factor
+Column 11: Diffuse correction applied before fitting at effective fitting wavelength for nitrogen dioxide [%], 0=no diffuse correction applied or fitting not successful, >0=measured diffuse correction, <0=(negative value of) calculated diffuse correction
+Column 12: L2 data quality flag for nitrogen dioxide: 0=assured high quality, 1=assured medium quality, 2=assured low quality, 10=not-assured high quality, 11=not-assured medium quality, 12=not-assured low quality, 20=unusable high quality, 21=unusable medium quality, 22=unusable low quality
+Column 13: Sum over 2^i using those i, for which the corresponding L2 data quality parameter for nitrogen dioxide exceeds the DQ1 limit, 0=L2Fit data quality above 0, 1=Uncertainty too high, 2=Signal to noise ratio too low, 3=Air mass factor too large
+Column 14: Sum over 2^i using those i, for which the corresponding L2 data quality parameter for nitrogen dioxide exceeds the DQ2 limit (same parameters as for DQ1)
+Column 15: Fitting result index: 0,1,2=no error or warning, 3,4=warning, >4=error
+Column 16: Normalized rms of spectral fitting residuals weighted with measured uncertainty, -9=fitting not successful or no uncertainty given
+Column 17: Expected normalized rms of weighted spectral fitting residuals based on measured uncertainty, -9=fitting not successful or no uncertainty given
+Column 18: Expected normalized rms of weighted spectral fitting residuals based on instrumental uncertainty, -9=fitting not successful or no uncertainty given
+Column 19: Mean value of measured data inside fitting window [same units as measurements]
+Column 20: Climatological station pressure [mbar]
+Column 21: Data processing type index
+Column 22: Calibration file version
+Column 23: Calibration file validity starting date
+Column 24: Level 2 Fit data quality flag: 0=assured high quality, 1=assured medium quality, 2=assured low quality, 10=not-assured high quality, 11=not-assured medium quality, 12=not-assured low quality
+Column 25: Sum over 2^i using those i, for which the corresponding L2Fit data quality parameter exceeds the DQ1 limit, 0=L1 data quality above 0, 1=Spectral fitting was not successful, 2=Weighted rms of spectral fitting too large, 3=Wavelength shift too large
+Column 26: Sum over 2^i using those i, for which the corresponding L2Fit data quality parameter exceeds the DQ2 limit (same parameters as for DQ1)
+Column 27: Level 1 data quality flag: 0=assured high quality, 1=assured medium quality, 2=assured low quality, 10=not-assured high quality, 11=not-assured medium quality, 12=not-assured low quality
+Column 28: Sum over 2^i using those i, for which the corresponding L1 data quality parameter exceeds the DQ1 limit, 0=Saturated data, 1=Too few dark counts measurements, 2=No temperature given or effective temperature too different from the reference temperature, 3=Dark count too high, 4=Unsuccessful dark background fitting, 5=Absolute value of estimated average residual stray light level too high, 6=Although attempted, no wavelength change could be retrieved, 7=Absolute value of retrieved wavelength shift too large, 8=Retrieved wavelength shift differs too much from the shift predicted by the effective temperature
+Column 29: Sum over 2^i using those i, for which the corresponding L1 data quality parameter exceeds the DQ2 limit (same parameters as for DQ1)
+Column 30: Wavelength effective temperature [∞C], 999=no effective temperature given
+Column 31: Estimated average residual stray light level [%] (only valid for stray light correction methods 2 and higher)
+Column 32: Retrieved wavelength shift from level 1 data [nm], -9=no wavelength change determination
+Column 33: Retrieved wavelength shift from spectral fitting [nm], -9=no wavelength change fitting
+Column 34: Integration time [ms]
+Column 35: Number of dark count cycles
+Column 36: Effective position of filterwheel #1, 0=filterwheel not used, 1-9 are valid positions
+Column 37: Effective position of filterwheel #2, 0=filterwheel not used, 1-9 are valid positions
+---------------------------------------------------------------------------------------
+20190910T144614Z 7192.61545 19.93 45.76 133.25 158.97 14.03 1.2157e+00 3.7291e-02 1.431 0.00e+00 11 3 0 0 2.104e-03 1.691e-03 2.157e-03 3.2585e-04 1013 2 1 20190910 11 4 0 10 0 0 22.71 0.44 -0.00896 0.00066 3984.7 5 1 4
+20190910T144711Z 7192.61611 21.79 45.63 133.53 158.93 14.60 1.2144e+00 3.6325e-02 1.428 0.00e+00 11 3 0 0 2.142e-03 1.728e-03 1.984e-03 3.5086e-04 1013 2 1 20190910 11 4 0 10 0 0 22.71 0.41 -0.00347 -0.00136 3630.6 6 1 4
+...
+20191228T194946Z 7301.82623 33.14 75.63 220.46 63.26 190.40 2.6357e-01 3.1346e-03 3.945 0.00e+00 10 0 0 0 9.058e-04 4.258e-04 2.281e-04 1.4232e-02 1011 2 1 20190910 10 0 0 10 0 0 22.90 0.43 -0.02249 -0.02126 112.7 67 1 4
+20191228T195136Z 7301.82750 32.36 75.85 220.82 63.32 190.86 2.5067e-01 1.6918e-03 4.004 0.00e+00 10 0 0 0 8.790e-04 2.361e-04 2.080e-04 1.7087e-02 1011 2 1 20190910 10 0 0 10 0 0 22.90 0.43 -0.02421 -0.02148 89.9 84 1 4
+
+===============================================================================
+
+File name: Pandora147s1_BronxNY_L2Tot_rnvs1p1-7.txt
+File generation date: 20200621T093155Z
+Data description: Level 2 total columns file
+Data file version: rnvs1p1-7
+Data product status: Nitrogen dioxide data are official
+Local principal investigator: Jim Szykman
+Network principal investigator: Alexander Cede
+Instrument type: Pandora
+Instrument number: 147
+Spectrometer number: 1
+Processing software version used: BlickP v1.7.16
+Full location name: New York Botanical Garden NYSDEC (USEPA AQS ID 36-005-0133)
+Short location name: BronxNY
+Country of location: USA
+Location latitude [deg]: 40.8679
+Location longitude [deg]: -73.8781
+Location altitude [m]: 31
+Data start time: 20190910T144614Z
+Data end time: 20191228T195136Z
+Data caveats: None
+---------------------------------------------------------------------------------------
+Column 1: UT date and time for center of measurement, yyyymmddThhmmssZ (ISO 8601)
+Column 2: Fractional days since 1-Jan-2000 UT midnight for center of measurement
+Column 3: Effective duration of measurement in seconds
+Column 4: Solar zenith angle for center of measurement in degree
+Column 5: Solar azimuth for center of measurement in degree, 0=north, increases clockwise
+Column 6: Lunar zenith angle for center of measurement in degree
+Column 7: Lunar azimuth for center of measurement in degree, 0=north, increases clockwise
+Column 8: Nitrogen dioxide total vertical column amount [Dobson Units], -9e99=retrieval not successful
+Column 9: Uncertainty of nitrogen dioxide total vertical column amount [Dobson Units] based on measured uncertainty, -8=retrieval not successful, -1=cross section is zero in this wavelength range, -3=spectral fitting was done, but no uncertainty could be retrieved
+Column 10: Direct nitrogen dioxide air mass factor
+Column 11: Diffuse correction applied before fitting at effective fitting wavelength for nitrogen dioxide [%], 0=no diffuse correction applied or fitting not successful, >0=measured diffuse correction, <0=(negative value of) calculated diffuse correction
+Column 12: L2 data quality flag for nitrogen dioxide: 0=assured high quality, 1=assured medium quality, 2=assured low quality, 10=not-assured high quality, 11=not-assured medium quality, 12=not-assured low quality, 20=unusable high quality, 21=unusable medium quality, 22=unusable low quality
+Column 13: Sum over 2^i using those i, for which the corresponding L2 data quality parameter for nitrogen dioxide exceeds the DQ1 limit, 0=L2Fit data quality above 0, 1=Uncertainty too high, 2=Signal to noise ratio too low, 3=Air mass factor too large
+Column 14: Sum over 2^i using those i, for which the corresponding L2 data quality parameter for nitrogen dioxide exceeds the DQ2 limit (same parameters as for DQ1)
+Column 15: Fitting result index: 0,1,2=no error or warning, 3,4=warning, >4=error
+Column 16: Normalized rms of spectral fitting residuals weighted with measured uncertainty, -9=fitting not successful or no uncertainty given
+Column 17: Expected normalized rms of weighted spectral fitting residuals based on measured uncertainty, -9=fitting not successful or no uncertainty given
+Column 18: Expected normalized rms of weighted spectral fitting residuals based on instrumental uncertainty, -9=fitting not successful or no uncertainty given
+Column 19: Mean value of measured data inside fitting window [same units as measurements]
+Column 20: Climatological station pressure [mbar]
+Column 21: Data processing type index
+Column 22: Calibration file version
+Column 23: Calibration file validity starting date
+Column 24: Level 2 Fit data quality flag: 0=assured high quality, 1=assured medium quality, 2=assured low quality, 10=not-assured high quality, 11=not-assured medium quality, 12=not-assured low quality
+Column 25: Sum over 2^i using those i, for which the corresponding L2Fit data quality parameter exceeds the DQ1 limit, 0=L1 data quality above 0, 1=Spectral fitting was not successful, 2=Weighted rms of spectral fitting too large, 3=Wavelength shift too large
+Column 26: Sum over 2^i using those i, for which the corresponding L2Fit data quality parameter exceeds the DQ2 limit (same parameters as for DQ1)
+Column 27: Level 1 data quality flag: 0=assured high quality, 1=assured medium quality, 2=assured low quality, 10=not-assured high quality, 11=not-assured medium quality, 12=not-assured low quality
+Column 28: Sum over 2^i using those i, for which the corresponding L1 data quality parameter exceeds the DQ1 limit, 0=Saturated data, 1=Too few dark counts measurements, 2=No temperature given or effective temperature too different from the reference temperature, 3=Dark count too high, 4=Unsuccessful dark background fitting, 5=Absolute value of estimated average residual stray light level too high, 6=Although attempted, no wavelength change could be retrieved, 7=Absolute value of retrieved wavelength shift too large, 8=Retrieved wavelength shift differs too much from the shift predicted by the effective temperature
+Column 29: Sum over 2^i using those i, for which the corresponding L1 data quality parameter exceeds the DQ2 limit (same parameters as for DQ1)
+Column 30: Wavelength effective temperature [∞C], 999=no effective temperature given
+Column 31: Estimated average residual stray light level [%] (only valid for stray light correction methods 2 and higher)
+Column 32: Retrieved wavelength shift from level 1 data [nm], -9=no wavelength change determination
+Column 33: Retrieved wavelength shift from spectral fitting [nm], -9=no wavelength change fitting
+Column 34: Integration time [ms]
+Column 35: Number of dark count cycles
+Column 36: Effective position of filterwheel #1, 0=filterwheel not used, 1-9 are valid positions
+Column 37: Effective position of filterwheel #2, 0=filterwheel not used, 1-9 are valid positions
+---------------------------------------------------------------------------------------
+20190910T144614Z 7192.61545 19.93 45.76 133.25 158.97 14.03 1.2157e+00 3.7291e-02 1.431 0.00e+00 12 3 3 0 2.104e-03 1.691e-03 2.157e-03 3.2585e-04 1013 2 1 20190910 12 4 4 10 0 0 22.71 0.44 -0.00896 0.00066 3984.7 5 1 4
+20190910T144711Z 7192.61611 21.79 45.63 133.53 158.93 14.60 1.2144e+00 3.6325e-02 1.428 0.00e+00 12 3 3 0 2.142e-03 1.728e-03 1.984e-03 3.5086e-04 1013 2 1 20190910 12 4 4 10 0 0 22.71 0.41 -0.00347 -0.00136 3630.6 6 1 4
+...
+20191228T194946Z 7301.82623 33.14 75.63 220.46 63.26 190.40 2.6357e-01 3.1346e-03 3.945 0.00e+00 10 0 0 0 9.058e-04 4.258e-04 2.281e-04 1.4232e-02 1011 2 1 20190910 10 0 0 10 0 0 22.90 0.43 -0.02249 -0.02126 112.7 67 1 4
+20191228T195136Z 7301.82750 32.36 75.85 220.82 63.32 190.86 2.5067e-01 1.6918e-03 4.004 0.00e+00 10 0 0 0 8.790e-04 2.361e-04 2.080e-04 1.7087e-02 1011 2 1 20190910 10 0 0 10 0 0 22.90 0.43 -0.02421 -0.02148 89.9 84 1 4
+
+===============================================================================
+
+File name: Pandora147s1_BronxNY_L2Tot_rout0p1-7.txt
+File generation date: 20200621T093155Z
+Data description: Level 2 total columns file
+Data file version: rout0p1-7
+Data product status: Ozone data are official, Sulfur dioxide data are unusable
+Local principal investigator: Jim Szykman
+Network principal investigator: Alexander Cede
+Instrument type: Pandora
+Instrument number: 147
+Spectrometer number: 1
+Processing software version used: BlickP v1.7.16
+Full location name: New York Botanical Garden NYSDEC (USEPA AQS ID 36-005-0133)
+Short location name: BronxNY
+Country of location: USA
+Location latitude [deg]: 40.8679
+Location longitude [deg]: -73.8781
+Location altitude [m]: 31
+Data start time: 20190910T192048Z
+Data end time: 20191228T195229Z
+Data caveats: None
+---------------------------------------------------------------------------------------
+Column 1: UT date and time for center of measurement, yyyymmddThhmmssZ (ISO 8601)
+Column 2: Fractional days since 1-Jan-2000 UT midnight for center of measurement
+Column 3: Effective duration of measurement in seconds
+Column 4: Solar zenith angle for center of measurement in degree
+Column 5: Solar azimuth for center of measurement in degree, 0=north, increases clockwise
+Column 6: Lunar zenith angle for center of measurement in degree
+Column 7: Lunar azimuth for center of measurement in degree, 0=north, increases clockwise
+Column 8: Ozone total vertical column amount [Dobson Units], -9e99=retrieval not successful
+Column 9: Uncertainty of ozone total vertical column amount [Dobson Units] based on measured uncertainty, -8=retrieval not successful, -1=cross section is zero in this wavelength range, -3=spectral fitting was done, but no uncertainty could be retrieved
+Column 10: Direct ozone air mass factor
+Column 11: Diffuse correction applied before fitting at effective fitting wavelength for ozone [%], 0=no diffuse correction applied or fitting not successful, >0=measured diffuse correction, <0=(negative value of) calculated diffuse correction
+Column 12: L2 data quality flag for ozone: 0=assured high quality, 1=assured medium quality, 2=assured low quality, 10=not-assured high quality, 11=not-assured medium quality, 12=not-assured low quality, 20=unusable high quality, 21=unusable medium quality, 22=unusable low quality
+Column 13: Sum over 2^i using those i, for which the corresponding L2 data quality parameter for ozone exceeds the DQ1 limit, 0=L2Fit data quality above 0, 1=Uncertainty too high, 2=Signal to noise ratio too low, 3=Air mass factor too large
+Column 14: Sum over 2^i using those i, for which the corresponding L2 data quality parameter for ozone exceeds the DQ2 limit (same parameters as for DQ1)
+Column 15: Sulfur dioxide total vertical column amount [Dobson Units], -9e99=retrieval not successful
+Column 16: Uncertainty of sulfur dioxide total vertical column amount [Dobson Units] based on measured uncertainty, -8=retrieval not successful, -1=cross section is zero in this wavelength range, -3=spectral fitting was done, but no uncertainty could be retrieved
+Column 17: Direct sulfur dioxide air mass factor
+Column 18: Diffuse correction applied before fitting at effective fitting wavelength for sulfur dioxide [%], 0=no diffuse correction applied or fitting not successful, >0=measured diffuse correction, <0=(negative value of) calculated diffuse correction
+Column 19: L2 data quality flag for sulfur dioxide: 0=assured high quality, 1=assured medium quality, 2=assured low quality, 10=not-assured high quality, 11=not-assured medium quality, 12=not-assured low quality, 20=unusable high quality, 21=unusable medium quality, 22=unusable low quality
+Column 20: Sum over 2^i using those i, for which the corresponding L2 data quality parameter for sulfur dioxide exceeds the DQ1 limit, 0=L2Fit data quality above 0, 1=Uncertainty too high, 2=Signal to noise ratio too low, 3=Air mass factor too large
+Column 21: Sum over 2^i using those i, for which the corresponding L2 data quality parameter for sulfur dioxide exceeds the DQ2 limit (same parameters as for DQ1)
+Column 22: Fitting result index: 0,1,2=no error or warning, 3,4=warning, >4=error
+Column 23: Normalized rms of spectral fitting residuals weighted with measured uncertainty, -9=fitting not successful or no uncertainty given
+Column 24: Expected normalized rms of weighted spectral fitting residuals based on measured uncertainty, -9=fitting not successful or no uncertainty given
+Column 25: Expected normalized rms of weighted spectral fitting residuals based on instrumental uncertainty, -9=fitting not successful or no uncertainty given
+Column 26: Mean value of measured data inside fitting window [same units as measurements]
+Column 27: Climatological station pressure [mbar]
+Column 28: Data processing type index
+Column 29: Calibration file version
+Column 30: Calibration file validity starting date
+Column 31: Level 2 Fit data quality flag: 0=assured high quality, 1=assured medium quality, 2=assured low quality, 10=not-assured high quality, 11=not-assured medium quality, 12=not-assured low quality
+Column 32: Sum over 2^i using those i, for which the corresponding L2Fit data quality parameter exceeds the DQ1 limit, 0=L1 data quality above 0, 1=Spectral fitting was not successful, 2=Weighted rms of spectral fitting too large, 3=Wavelength shift too large
+Column 33: Sum over 2^i using those i, for which the corresponding L2Fit data quality parameter exceeds the DQ2 limit (same parameters as for DQ1)
+Column 34: Level 1 data quality flag: 0=assured high quality, 1=assured medium quality, 2=assured low quality, 10=not-assured high quality, 11=not-assured medium quality, 12=not-assured low quality
+Column 35: Sum over 2^i using those i, for which the corresponding L1 data quality parameter exceeds the DQ1 limit, 0=Saturated data, 1=Too few dark counts measurements, 2=No temperature given or effective temperature too different from the reference temperature, 3=Dark count too high, 4=Unsuccessful dark background fitting, 5=Absolute value of estimated average residual stray light level too high, 6=Although attempted, no wavelength change could be retrieved, 7=Absolute value of retrieved wavelength shift too large, 8=Retrieved wavelength shift differs too much from the shift predicted by the effective temperature
+Column 36: Sum over 2^i using those i, for which the corresponding L1 data quality parameter exceeds the DQ2 limit (same parameters as for DQ1)
+Column 37: Wavelength effective temperature [∞C], 999=no effective temperature given
+Column 38: Estimated average residual stray light level [%] (only valid for stray light correction methods 2 and higher)
+Column 39: Retrieved wavelength shift from level 1 data [nm], -9=no wavelength change determination
+Column 40: Retrieved wavelength shift from spectral fitting [nm], -9=no wavelength change fitting
+Column 41: Integration time [ms]
+Column 42: Number of dark count cycles
+Column 43: Effective position of filterwheel #1, 0=filterwheel not used, 1-9 are valid positions
+Column 44: Effective position of filterwheel #2, 0=filterwheel not used, 1-9 are valid positions
+---------------------------------------------------------------------------------------
+20190910T192048Z 7192.80612 31.10 48.99 232.76 116.99 93.91 2.8853e+02 5.9812e+00 1.517 0.00e+00 12 2 2 -5.4220e-01 7.8423e-01 1.522 0.00e+00 22 2 2 0 6.534e-03 7.020e-03 2.347e-03 3.8372e-04 1013 2 1 20190910 10 0 0 10 0 0 22.71 0.41 0.00326 0.02146 3886.9 8 1 5
+20190911T141218Z 7193.59188 31.70 51.01 124.50 154.02 328.41 2.8323e+02 3.1061e+00 1.581 0.00e+00 11 2 0 -1.4418e+00 4.5099e-01 1.587 0.00e+00 22 2 2 0 6.034e-03 3.599e-03 2.481e-03 3.4667e-04 1013 2 1 20190910 10 0 0 10 0 0 22.80 0.18 0.01221 0.02000 3961.3 8 1 5
+...
+20191228T195040Z 7301.82686 48.86 75.74 220.64 63.29 190.63 3.1877e+02 7.0842e-01 3.858 0.00e+00 10 0 0 3.5347e-01 2.1059e-01 4.004 0.00e+00 21 2 0 0 4.341e-03 1.598e-03 1.165e-03 8.3049e-04 1011 2 1 20190910 10 0 0 10 0 0 22.90 0.22 -0.02033 -0.03183 826.8 14 1 5
+20191228T195229Z 7301.82812 48.45 75.96 221.00 63.35 191.09 3.1925e+02 6.8142e-01 3.912 0.00e+00 10 0 0 1.1359e-01 2.0562e-01 4.064 0.00e+00 21 2 0 0 4.433e-03 1.540e-03 1.119e-03 9.0184e-04 1011 2 1 20190910 10 0 0 10 0 0 22.90 0.19 -0.01905 -0.05532 745.4 15 1 5
+
+===============================================================================
+File name: Pandora180s1_BronxNY_L2_rfuh5p1-8.txt
+File generation date: 20230104T051351.3Z
+Data description: Level 2 file (columns and more)
+Data file version: rfuh5p1-8
+Data product status: Formaldehyde data are unvalidated
+Local principal investigator: Luke Valin
+Network principal investigator: Alexander Cede
+DOI: 10.48596/pgn.rfuh5p1-8.BronxNY.P180s1
+Instrument type: Pandora
+Instrument number: 180
+Spectrometer number: 1
+Processing software version used: BlickP v1.8.24
+Full location name: New York Botanical Garden NYSDEC (USEPA AQS ID 36-005-0133)
+Short location name: BronxNY
+Country of location: USA
+Location latitude [deg]: 40.8679
+Location longitude [deg]: -73.8781
+Location altitude [m]: 31
+Data start time: 20210312T220743.
+Data end time: NONE
+Data caveats: None
+---------------------------------------------------------------------------------------
+Column 1: UT date and time for measurement center, yyyymmddThhmmssZ (ISO 8601)
+Column 2: Fractional days since 1-Jan-2000 UT midnight for measurement center
+Column 3: Effective duration of measurement [s]
+Column 4: Solar zenith angle for measurement center [deg]
+Column 5: Solar azimuth for measurement center [deg], 0=north, increases clockwise
+Column 6: Lunar zenith angle for measurement center [deg]
+Column 7: Lunar azimuth for measurement center [deg], 0=north, increases clockwise
+Column 8: Pointing zenith angle for measurement center [deg]
+Column 9: Pointing azimuth for measurement center [deg], 0=north, increases clockwise
+Column 10: rms of unweighted fitting residuals, -9=fitting not successful
+Column 11: Normalized rms of fitting residuals weighted with independent uncertainty, -9=fitting not successful or no uncertainty given
+Column 12: Expected rms of unweighted fitting residuals based on independent uncertainty, -9=fitting not successful or no uncertainty given
+Column 13: Expected normalized rms of weighted fitting residuals based on independent uncertainty, -9=fitting not successful or no uncertainty given
+Column 14: Climatological station pressure [mbar]
+Column 15: Climatological station temperature [K]
+Column 16: Climatological effective O2 height [km]
+Column 17: Climatological effective O2O2 height [km]
+Column 18: Climatological surface O2 concentration [mol/m3]
+Column 19: Climatological surface O2O2 concentration [mol2/m6]
+Column 20: Climatological total O2 column [mol/m2]
+Column 21: Climatological total O2O2 column [mol2/m5]
+Column 22: Data processing type index
+Column 23: Calibration file version
+Column 24: Calibration file validity starting date
+Column 25: Mean value of measured data inside fitting window [same units as measurements]
+Column 26: Wavelength effective temperature [∞C], 999=no effective temperature given
+Column 27: Estimated average residual stray light level [%] (only valid for stray light correction methods 2 and higher)
+Column 28: Retrieved wavelength shift from L1 data [nm], -9=no wavelength change determination
+Column 29: Retrieved total wavelength shift [nm], -9=no wavelength change fitting
+Column 30: Retrieved resolution change [%], -999=no resolution change fitting
+Column 31: Integration time [ms]
+Column 32: Number of bright count cycles
+Column 33: Effective position of filterwheel #1, 0=filterwheel not used, 1-9 are valid positions
+Column 34: Effective position of filterwheel #2, 0=filterwheel not used, 1-9 are valid positions
+Column 35: Atmospheric variability [%], 999=no atmospheric variability was determined
+Column 36: L1 data quality flag, 0=assured high quality, 1=assured medium quality, 2=assured low quality, 10=not-assured high quality, 11=not-assured medium quality, 12=not-assured low quality
+Column 37: Sum over 2^i using those i, for which the corresponding L1 data quality parameter exceeds the DQ1 limit, 0=Saturated data, 1=Too few dark counts measurements, 2=No temperature given or effective temperature too different from the reference temperature, 3=Dark count too high, 4=Unsuccessful dark background fitting, 5=The dark count differs significantly from the dark map for too many pixels, 6=Absolute value of estimated average residual stray light level too high, 7=Although attempted, no wavelength change could be retrieved, 8=Absolute value of retrieved wavelength shift too large, 9=Retrieved wavelength shift differs too much from the shift predicted by the effective temperature
+Column 38: Sum over 2^i using those i, for which the corresponding L1 data quality parameter exceeds the DQ2 limit (same parameters as for DQ1)
+Column 39: L2Fit data quality flag, 0=assured high quality, 1=assured medium quality, 2=assured low quality, 10=not-assured high quality, 11=not-assured medium quality, 12=not-assured low quality
+Column 40: Sum over 2^i using those i, for which the corresponding L2Fit data quality parameter exceeds the DQ1 limit, 0=L1 data quality above 0, 1=Spectral fitting was not successful, 2=Wavelength shift too large, 3=Normalized rms of fitting residuals weighted with independent uncertainty too large
+Column 41: Sum over 2^i using those i, for which the corresponding L2Fit data quality parameter exceeds the DQ2 limit (same parameters as for DQ1)
+Column 42: L2 data quality flag for formaldehyde, 0=assured high quality, 1=assured medium quality, 2=assured low quality, 10=not-assured high quality, 11=not-assured medium quality, 12=not-assured low quality, 20=unusable high quality, 21=unusable medium quality, 22=unusable low quality
+Column 43: Sum over 2^i using those i, for which the corresponding L2 data quality parameter for formaldehyde exceeds the DQ1 limit, 0=L2Fit data quality above 0, 1=Retrieval error, 2=Air mass factor too large, 3=Atmospheric variability too large
+Column 44: Sum over 2^i using those i, for which the corresponding L2 data quality parameter for formaldehyde exceeds the DQ2 limit (same parameters as for DQ1)
+Column 45: Formaldehyde surface concentration [mol/m3], -9e99=retrieval not successful
+Column 46: Independent uncertainty of formaldehyde surface concentration [mol/m3], -6=no surface concentration was retrieved since the maximum viewing zenith angle was below 87deg, -7=uncertainty could not be retrieved since slant column uncertainties were missing
+Column 47: Formaldehyde surface concentration index, 1=Fully mixed case from extrapolation to horizon, 2=Fully mixed case from largest pointing zenith angle, 3=Heterogeneous case from extrapolation to horizon, 4=Heterogeneous case from largest pointing zenith angle, -6=no surface concentration was retrieved since the maximum viewing zenith angle was below 87deg
+Column 48: Formaldehyde heterogeneity flag, 0=well mixed conditions, 1=heterogeneous conditions, -6=no surface concentration was retrieved since the maximum viewing zenith angle was below 87deg
+Column 49: Formaldehyde tropospheric vertical column amount [moles per square meter], -9e99=retrieval not successful
+Column 50: Independent uncertainty of formaldehyde tropospheric vertical column amount [moles per square meter], -4=tropospheric column was estimated from direct sun measurements using effective temperature, -5=tropospheric column was estimated from direct sun measurements using stratospheric climatology, -7=uncertainty could not be retrieved since slant column uncertainties were missing
+Column 51: Maximum horizontal distance for formaldehyde tropospheric column [km]
+Column 52: Maximum vertical distance for formaldehyde tropospheric column [km]
+Column 53: Top height of formaldehyde layer 1 [km], -6=no profile was retrieved since the maximum viewing zenith angle was below 87deg
+Column 54: Partial formaldehyde vertical column amount in layer 1 [moles per square meter], -9e99=retrieval not successful
+From Column 55: Optional results for higher layers in the same sequence as for layer 1 (2 columns per layer)
+---------------------------------------------------------------------------------------
+20210312T220743.3Z 7741.922029 14.55 81.18 258.27 89.30 255.45 89.00 0.00 4.762e-03 4.616e-03 4.225e-03 4.087e-03 1011 284 7.28 4.10 8.973e+00 8.051e+01 6.530e+04 3.299e+05 6 2 20210302 5.0441e-06 23.85 0.27 0.00071 0.00294 -999.00 1211.600 12 1 1 97.79 10 0 0 12 8 8 12 1 1 -6.4631e-08 1.9708e-08 1 0 -1.1084e-04 2.8343e-05 17.09 4.58 0.32 -0.0000e+00 0.56 -0.0000e+00 1.02 -0.0000e+00 1.31 -1.5111e-06 1.43 -1.6336e-06 1.97 -6.0084e-05 2.34 -2.8176e-05 2.41 -2.4732e-06 2.57 -1.6698e-05 3.36 -0.0000e+00 3.42 -2.6750e-07
+20210312T221816.0Z 7741.929352 16.00 83.14 260.05 91.16 257.16 89.00 0.00 6.408e-03 6.169e-03 5.724e-03 5.568e-03 1011 284 7.28 4.10 8.973e+00 8.051e+01 6.530e+04 3.299e+05 6 2 20210302 4.5740e-06 23.86 0.29 -0.00048 -0.00296 -999.00 4000.000 4 1 2 999.00 11 8 0 12 9 8 12 9 9 1.2064e-07 2.5300e-07 2 0 2.3990e-05 4.7219e-05 14.67 3.93 0.40 7.7361e-06 0.72 6.1789e-06 1.02 7.0533e-06 1.06 4.4297e-08 1.28 0.0000e+00 1.69 0.0000e+00 1.81 1.0258e-06 1.86 0.0000e+00 1.92 1.0689e-07 2.56 1.2174e-07 2.62 1.7228e-06
+...
+20230201T213520.9Z 8432.899548 23.45 84.45 241.84 57.94 80.45 87.00 250.00 5.559e-03 5.315e-03 2.331e-03 2.201e-03 1010 283 7.25 4.07 8.979e+00 8.063e+01 6.510e+04 3.285e+05 6 2 20210302 7.7113e-06 24.11 0.29 0.06447 0.06565 -999.00 98.930 237 1 1 13.52 10 0 0 12 8 8 12 1 1 -1.5844e-07 8.5528e-09 3 1 -2.6983e-04 5.1249e-05 12.34 3.31 1.78 -0.0000e+00 2.11 -0.0000e+00 2.15 -0.0000e+00 2.15 -4.1149e-06 2.22 -0.0000e+00 2.27 -0.0000e+00 2.30 -0.0000e+00 2.37 -0.0000e+00 2.39 -2.6571e-04 2.44 -0.0000e+00 2.49 -0.0000e+00 2.51 -0.0000e+00 2.54 -0.0000e+00
+20230201T214656.3Z 8432.907596 24.96 86.40 243.82 55.83 82.06 87.00 250.00 2.618e-03 2.535e-03 2.460e-03 2.387e-03 1010 283 7.25 4.07 8.979e+00 8.063e+01 6.510e+04 3.285e+05 6 2 20210302 5.4099e-06 24.11 0.16 0.05769 0.05643 -999.00 3118.640 8 1 2 53.80 11 8 0 12 9 8 12 1 1 3.0289e-07 2.7249e-07 2 0 9.8685e-05 5.0075e-05 14.41 3.86 0.71 5.5247e-06 2.02 0.0000e+00 2.09 3.1662e-07 2.13 2.2072e-06 2.17 6.8624e-07 2.27 2.4483e-06 2.34 3.4366e-05 2.38 1.3983e-05 5.75 3.6933e-05 6.32 2.2202e-06
+
+
+===============================================================================
+File name: Pandora180s1_BronxNY_L2_rfus5p1-8.txt
+File generation date: 20230104T051351.1Z
+Data description: Level 2 file (columns and more)
+Data file version: rfus5p1-8
+Data product status: Formaldehyde data are unvalidated
+Local principal investigator: Luke Valin
+Network principal investigator: Alexander Cede
+DOI: 10.48596/pgn.rfus5p1-8.BronxNY.P180s1
+Instrument type: Pandora
+Instrument number: 180
+Spectrometer number: 1
+Processing software version used: BlickP v1.8.24
+Full location name: New York Botanical Garden NYSDEC (USEPA AQS ID 36-005-0133)
+Short location name: BronxNY
+Country of location: USA
+Location latitude [deg]: 40.8679
+Location longitude [deg]: -73.8781
+Location altitude [m]: 31
+Data start time: 20210304T154639.
+Data end time: NONE
+Data caveats: None
+---------------------------------------------------------------------------------------
+Column 1: UT date and time for measurement center, yyyymmddThhmmssZ (ISO 8601)
+Column 2: Fractional days since 1-Jan-2000 UT midnight for measurement center
+Column 3: Effective duration of measurement [s]
+Column 4: Solar zenith angle for measurement center [deg]
+Column 5: Solar azimuth for measurement center [deg], 0=north, increases clockwise
+Column 6: Lunar zenith angle for measurement center [deg]
+Column 7: Lunar azimuth for measurement center [deg], 0=north, increases clockwise
+Column 8: rms of unweighted fitting residuals, -9=fitting not successful
+Column 9: Normalized rms of fitting residuals weighted with independent uncertainty, -9=fitting not successful or no uncertainty given
+Column 10: Expected rms of unweighted fitting residuals based on independent uncertainty, -9=fitting not successful or no uncertainty given
+Column 11: Expected normalized rms of weighted fitting residuals based on independent uncertainty, -9=fitting not successful or no uncertainty given
+Column 12: Climatological station pressure [mbar]
+Column 13: Data processing type index
+Column 14: Calibration file version
+Column 15: Calibration file validity starting date
+Column 16: Mean value of measured data inside fitting window [same units as measurements]
+Column 17: Wavelength effective temperature [∞C], 999=no effective temperature given
+Column 18: Estimated average residual stray light level [%] (only valid for stray light correction methods 2 and higher)
+Column 19: Retrieved wavelength shift from L1 data [nm], -9=no wavelength change determination
+Column 20: Retrieved total wavelength shift [nm], -9=no wavelength change fitting
+Column 21: Retrieved resolution change [%], -999=no resolution change fitting
+Column 22: Integration time [ms]
+Column 23: Number of bright count cycles
+Column 24: Effective position of filterwheel #1, 0=filterwheel not used, 1-9 are valid positions
+Column 25: Effective position of filterwheel #2, 0=filterwheel not used, 1-9 are valid positions
+Column 26: Atmospheric variability [%], 999=no atmospheric variability was determined
+Column 27: Estimated aerosol optical depth at starting wavelength of fitting window
+Column 28: Estimated aerosol optical depth at center wavelength of fitting window
+Column 29: Estimated aerosol optical depth at ending wavelength of fitting window
+Column 30: L1 data quality flag, 0=assured high quality, 1=assured medium quality, 2=assured low quality, 10=not-assured high quality, 11=not-assured medium quality, 12=not-assured low quality
+Column 31: Sum over 2^i using those i, for which the corresponding L1 data quality parameter exceeds the DQ1 limit, 0=Saturated data, 1=Too few dark counts measurements, 2=No temperature given or effective temperature too different from the reference temperature, 3=Dark count too high, 4=Unsuccessful dark background fitting, 5=The dark count differs significantly from the dark map for too many pixels, 6=Absolute value of estimated average residual stray light level too high, 7=Although attempted, no wavelength change could be retrieved, 8=Absolute value of retrieved wavelength shift too large, 9=Retrieved wavelength shift differs too much from the shift predicted by the effective temperature
+Column 32: Sum over 2^i using those i, for which the corresponding L1 data quality parameter exceeds the DQ2 limit (same parameters as for DQ1)
+Column 33: L2Fit data quality flag, 0=assured high quality, 1=assured medium quality, 2=assured low quality, 10=not-assured high quality, 11=not-assured medium quality, 12=not-assured low quality
+Column 34: Sum over 2^i using those i, for which the corresponding L2Fit data quality parameter exceeds the DQ1 limit, 0=L1 data quality above 0, 1=Spectral fitting was not successful, 2=Wavelength shift too large, 3=Normalized rms of fitting residuals weighted with independent uncertainty too large
+Column 35: Sum over 2^i using those i, for which the corresponding L2Fit data quality parameter exceeds the DQ2 limit (same parameters as for DQ1)
+Column 36: L2 data quality flag for formaldehyde, 0=assured high quality, 1=assured medium quality, 2=assured low quality, 10=not-assured high quality, 11=not-assured medium quality, 12=not-assured low quality, 20=unusable high quality, 21=unusable medium quality, 22=unusable low quality
+Column 37: Sum over 2^i using those i, for which the corresponding L2 data quality parameter for formaldehyde exceeds the DQ1 limit, 0=L2Fit data quality above 0, 1=Retrieval error, 2=Air mass factor too large, 3=Atmospheric variability too large
+Column 38: Sum over 2^i using those i, for which the corresponding L2 data quality parameter for formaldehyde exceeds the DQ2 limit (same parameters as for DQ1)
+Column 39: Formaldehyde total vertical column amount [moles per square meter], -9e99=retrieval not successful
+Column 40: Independent uncertainty of formaldehyde total vertical column amount [moles per square meter], -1=cross section is zero in this wavelength range, -3=spectral fitting was done, but no independent uncertainty could be retrieved, -5=no independent uncertainty input was given, -9=spectral fitting was not successful
+Column 41: Structured uncertainty of formaldehyde total vertical column amount [moles per square meter], -1=cross section is zero in this wavelength range, -7=not given since method "MEAS" was chosen, -9=spectral fitting was not successful
+Column 42: Common uncertainty of formaldehyde total vertical column amount [moles per square meter], -1=cross section is zero in this wavelength range, -6=no common uncertainty input was given, -7=not given since method "MEAS" was chosen, -9=spectral fitting was not successful
+Column 43: Total uncertainty of formaldehyde total vertical column amount [moles per square meter], -1=cross section is zero in this wavelength range, -3=spectral fitting was done, but no independent uncertainty could be retrieved, -5=no independent uncertainty input was given, -6=no common uncertainty input was given, -7=not given since method "MEAS" was chosen, -8=not given, since not all components are given
+Column 44: rms-based uncertainty of formaldehyde total vertical column amount [moles per square meter], -1=cross section is zero in this wavelength range, -3=spectral fitting was done, but no independent uncertainty could be retrieved, -9=spectral fitting was not successful
+Column 45: Formaldehyde effective temperature [K]
+Column 46: Independent uncertainty of formaldehyde effective temperature [K] , -1=temperature fitting was requested, but cross section is zero in this wavelength range, -2=no temperature fitting was requested and output for effective temperature and common uncertainty of it is based on f-code, -3=spectral fitting was done, but no independent uncertainty could be retrieved, -4=temperature fitting was requested, but differential optical depth is too small to retrieve temperature, -5=spectral fitting was done without using the independent uncertainty input, -6=no independent uncertainty input was given, -9=spectral fitting was not successful
+Column 47: Structured uncertainty of formaldehyde effective temperature [K] , -1=temperature fitting was requested, but cross section is zero in this wavelength range, -4=temperature fitting was requested, but differential optical depth is too small to retrieve temperature, -9=spectral fitting was not successful
+Column 48: Common uncertainty of formaldehyde effective temperature [K] , -1=temperature fitting was requested, but cross section is zero in this wavelength range, -2=no temperature fitting was requested and output for effective temperature and common uncertainty of it is based on f-code, -3=spectral fitting was done, but no independent uncertainty could be retrieved, -4=temperature fitting was requested, but differential optical depth is too small to retrieve temperature, -6=no independent uncertainty input was given, -9=spectral fitting was not successful
+Column 49: Total uncertainty of formaldehyde effective temperature [K] , -1=temperature fitting was requested, but cross section is zero in this wavelength range, -2=no temperature fitting was requested and output for effective temperature and common uncertainty of it is based on f-code, -3=spectral fitting was done, but no independent uncertainty could be retrieved, -4=temperature fitting was requested, but differential optical depth is too small to retrieve temperature, -5=spectral fitting was done without using the independent uncertainty input, -6=no independent uncertainty or common uncertainty input was given, -9=spectral fitting was not successful
+Column 50: Direct formaldehyde air mass factor
+Column 51: Uncertainty of direct formaldehyde air mass factor, -7=uncertainty could not be retrieved since slant column uncertainties were missing
+Column 52: Diffuse correction applied before fitting at effective fitting wavelength for formaldehyde [%], 0=no diffuse correction applied or fitting not successful, >0=measured diffuse correction, <0=(negative value of) calculated diffuse correction
+---------------------------------------------------------------------------------------
+20210304T154639.1Z 7733.657397 30.16 50.55 153.70 103.41 257.41 2.549e-03 2.401e-03 2.100e-03 1.942e-03 1011 2 2 20210302 4.5437e-04 24.05 0.33 -0.00112 -0.00046 0.06 3350.080 9 1 5 99.98 4.039 4.029 4.001 10 0 0 12 8 8 12 9 9 1.1537e-06 1.1222e-04 1.0718e-05 2.4804e-05 1.1543e-04 1.4348e-04 276.27 -2.00 20.00 -2.00 20.00 1.573 0.000 0.00e+00
+20210304T155107.2Z 7733.660500 30.44 50.18 155.07 104.21 258.06 1.093e-03 1.031e-03 8.942e-04 8.420e-04 1011 2 2 20210302 1.8446e-03 24.04 0.24 -0.00175 -0.00041 0.07 1383.550 22 1 5 99.75 3.201 3.168 3.125 10 0 0 12 8 8 12 9 9 3.8198e-05 4.9004e-05 7.1893e-06 2.5016e-05 5.5487e-05 6.2259e-05 276.27 -2.00 20.00 -2.00 20.00 1.561 0.000 0.00e+00
+...
+20230201T212937.1Z 8432.895568 35.30 83.50 240.85 58.98 79.66 5.889e-03 1.884e-03 3.830e-03 1.206e-03 1010 2 2 20210302 1.1113e-03 24.10 0.51 0.06475 0.06398 0.47 1211.330 28 1 5 75.26 0.134 0.125 0.117 12 1 1 12 9 9 12 13 9 -6.4003e-05 1.6824e-05 1.0869e-05 4.5579e-06 2.0541e-05 5.5956e-05 275.14 -2.00 20.00 -2.00 20.00 8.564 0.049 0.00e+00
+20230201T214013.6Z 8432.902935 49.15 85.27 242.68 57.05 81.12 3.646e-02 5.514e-03 1.953e-02 2.968e-03 1010 2 2 20210302 2.4449e-04 24.11 1.92 0.06145 0.06151 1.94 2890.790 17 1 5 34.33 0.104 0.100 0.093 10 0 0 12 8 8 12 5 5 -5.9234e-04 3.7777e-05 3.8627e-05 3.4086e-06 5.4137e-05 2.5218e-04 275.14 -2.00 20.00 -2.00 20.00 11.480 0.118 0.00e+00
+
+
+===============================================================================
+
+File name: Pandora180s1_BronxNY_L2_rnvh3p1-8.txt
+File generation date: 20230104T051355.2Z
+Data description: Level 2 file (columns and more)
+Data file version: rnvh3p1-8
+Data product status: Nitrogen dioxide data are official, Water vapor data are unvalidated
+Local principal investigator: Luke Valin
+Network principal investigator: Alexander Cede
+DOI: 10.48596/pgn.rnvh3p1-8.BronxNY.P180s1
+Instrument type: Pandora
+Instrument number: 180
+Spectrometer number: 1
+Processing software version used: BlickP v1.8.24
+Full location name: New York Botanical Garden NYSDEC (USEPA AQS ID 36-005-0133)
+Short location name: BronxNY
+Country of location: USA
+Location latitude [deg]: 40.8679
+Location longitude [deg]: -73.8781
+Location altitude [m]: 31
+Data start time: 20210312T220743.
+Data end time: NONE
+Data caveats: None
+---------------------------------------------------------------------------------------
+Column 1: UT date and time for measurement center, yyyymmddThhmmssZ (ISO 8601)
+Column 2: Fractional days since 1-Jan-2000 UT midnight for measurement center
+Column 3: Effective duration of measurement [s]
+Column 4: Solar zenith angle for measurement center [deg]
+Column 5: Solar azimuth for measurement center [deg], 0=north, increases clockwise
+Column 6: Lunar zenith angle for measurement center [deg]
+Column 7: Lunar azimuth for measurement center [deg], 0=north, increases clockwise
+Column 8: Pointing zenith angle for measurement center [deg]
+Column 9: Pointing azimuth for measurement center [deg], 0=north, increases clockwise
+Column 10: rms of unweighted fitting residuals, -9=fitting not successful
+Column 11: Normalized rms of fitting residuals weighted with independent uncertainty, -9=fitting not successful or no uncertainty given
+Column 12: Expected rms of unweighted fitting residuals based on independent uncertainty, -9=fitting not successful or no uncertainty given
+Column 13: Expected normalized rms of weighted fitting residuals based on independent uncertainty, -9=fitting not successful or no uncertainty given
+Column 14: Climatological station pressure [mbar]
+Column 15: Climatological station temperature [K]
+Column 16: Climatological effective O2 height [km]
+Column 17: Climatological effective O2O2 height [km]
+Column 18: Climatological surface O2 concentration [mol/m3]
+Column 19: Climatological surface O2O2 concentration [mol2/m6]
+Column 20: Climatological total O2 column [mol/m2]
+Column 21: Climatological total O2O2 column [mol2/m5]
+Column 22: Data processing type index
+Column 23: Calibration file version
+Column 24: Calibration file validity starting date
+Column 25: Mean value of measured data inside fitting window [same units as measurements]
+Column 26: Wavelength effective temperature [∞C], 999=no effective temperature given
+Column 27: Estimated average residual stray light level [%] (only valid for stray light correction methods 2 and higher)
+Column 28: Retrieved wavelength shift from L1 data [nm], -9=no wavelength change determination
+Column 29: Retrieved total wavelength shift [nm], -9=no wavelength change fitting
+Column 30: Retrieved resolution change [%], -999=no resolution change fitting
+Column 31: Integration time [ms]
+Column 32: Number of bright count cycles
+Column 33: Effective position of filterwheel #1, 0=filterwheel not used, 1-9 are valid positions
+Column 34: Effective position of filterwheel #2, 0=filterwheel not used, 1-9 are valid positions
+Column 35: Atmospheric variability [%], 999=no atmospheric variability was determined
+Column 36: L1 data quality flag, 0=assured high quality, 1=assured medium quality, 2=assured low quality, 10=not-assured high quality, 11=not-assured medium quality, 12=not-assured low quality
+Column 37: Sum over 2^i using those i, for which the corresponding L1 data quality parameter exceeds the DQ1 limit, 0=Saturated data, 1=Too few dark counts measurements, 2=No temperature given or effective temperature too different from the reference temperature, 3=Dark count too high, 4=Unsuccessful dark background fitting, 5=The dark count differs significantly from the dark map for too many pixels, 6=Absolute value of estimated average residual stray light level too high, 7=Although attempted, no wavelength change could be retrieved, 8=Absolute value of retrieved wavelength shift too large, 9=Retrieved wavelength shift differs too much from the shift predicted by the effective temperature
+Column 38: Sum over 2^i using those i, for which the corresponding L1 data quality parameter exceeds the DQ2 limit (same parameters as for DQ1)
+Column 39: L2Fit data quality flag, 0=assured high quality, 1=assured medium quality, 2=assured low quality, 10=not-assured high quality, 11=not-assured medium quality, 12=not-assured low quality
+Column 40: Sum over 2^i using those i, for which the corresponding L2Fit data quality parameter exceeds the DQ1 limit, 0=L1 data quality above 0, 1=Spectral fitting was not successful, 2=Wavelength shift too large, 3=Normalized rms of fitting residuals weighted with independent uncertainty too large
+Column 41: Sum over 2^i using those i, for which the corresponding L2Fit data quality parameter exceeds the DQ2 limit (same parameters as for DQ1)
+Column 42: L2 data quality flag for water vapor, 0=assured high quality, 1=assured medium quality, 2=assured low quality, 10=not-assured high quality, 11=not-assured medium quality, 12=not-assured low quality, 20=unusable high quality, 21=unusable medium quality, 22=unusable low quality
+Column 43: Sum over 2^i using those i, for which the corresponding L2 data quality parameter for water vapor exceeds the DQ1 limit, 0=L2Fit data quality above 0, 1=Retrieval error, 2=Air mass factor too large, 3=Atmospheric variability too large
+Column 44: Sum over 2^i using those i, for which the corresponding L2 data quality parameter for water vapor exceeds the DQ2 limit (same parameters as for DQ1)
+Column 45: Water vapor surface concentration [mol/m3], -9e99=retrieval not successful
+Column 46: Independent uncertainty of water vapor surface concentration [mol/m3], -6=no surface concentration was retrieved since the maximum viewing zenith angle was below 87deg, -7=uncertainty could not be retrieved since slant column uncertainties were missing
+Column 47: Water vapor surface concentration index, 1=Fully mixed case from extrapolation to horizon, 2=Fully mixed case from largest pointing zenith angle, 3=Heterogeneous case from extrapolation to horizon, 4=Heterogeneous case from largest pointing zenith angle, -6=no surface concentration was retrieved since the maximum viewing zenith angle was below 87deg
+Column 48: Water vapor heterogeneity flag, 0=well mixed conditions, 1=heterogeneous conditions, -6=no surface concentration was retrieved since the maximum viewing zenith angle was below 87deg
+Column 49: Water vapor tropospheric vertical column amount [moles per square meter], -9e99=retrieval not successful
+Column 50: Independent uncertainty of water vapor tropospheric vertical column amount [moles per square meter], -4=tropospheric column was estimated from direct sun measurements using effective temperature, -5=tropospheric column was estimated from direct sun measurements using stratospheric climatology, -7=uncertainty could not be retrieved since slant column uncertainties were missing
+Column 51: Maximum horizontal distance for water vapor tropospheric column [km]
+Column 52: Maximum vertical distance for water vapor tropospheric column [km]
+Column 53: L2 data quality flag for nitrogen dioxide, 0=assured high quality, 1=assured medium quality, 2=assured low quality, 10=not-assured high quality, 11=not-assured medium quality, 12=not-assured low quality, 20=unusable high quality, 21=unusable medium quality, 22=unusable low quality
+Column 54: Sum over 2^i using those i, for which the corresponding L2 data quality parameter for nitrogen dioxide exceeds the DQ1 limit, 0=L2Fit data quality above 0, 1=Retrieval error, 2=Air mass factor too large, 3=Atmospheric variability too large
+Column 55: Sum over 2^i using those i, for which the corresponding L2 data quality parameter for nitrogen dioxide exceeds the DQ2 limit (same parameters as for DQ1)
+Column 56: Nitrogen dioxide surface concentration [mol/m3], -9e99=retrieval not successful
+Column 57: Independent uncertainty of nitrogen dioxide surface concentration [mol/m3], -6=no surface concentration was retrieved since the maximum viewing zenith angle was below 87deg, -7=uncertainty could not be retrieved since slant column uncertainties were missing
+Column 58: Nitrogen dioxide surface concentration index, 1=Fully mixed case from extrapolation to horizon, 2=Fully mixed case from largest pointing zenith angle, 3=Heterogeneous case from extrapolation to horizon, 4=Heterogeneous case from largest pointing zenith angle, -6=no surface concentration was retrieved since the maximum viewing zenith angle was below 87deg
+Column 59: Nitrogen dioxide heterogeneity flag, 0=well mixed conditions, 1=heterogeneous conditions, -6=no surface concentration was retrieved since the maximum viewing zenith angle was below 87deg
+Column 60: Climatological nitrogen dioxide stratospheric column amount [moles per square meter]
+Column 61: Uncertainty of climatological nitrogen dioxide stratospheric column amount [moles per square meter]
+Column 62: Nitrogen dioxide tropospheric vertical column amount [moles per square meter], -9e99=retrieval not successful
+Column 63: Independent uncertainty of nitrogen dioxide tropospheric vertical column amount [moles per square meter], -4=tropospheric column was estimated from direct sun measurements using effective temperature, -5=tropospheric column was estimated from direct sun measurements using stratospheric climatology, -7=uncertainty could not be retrieved since slant column uncertainties were missing
+Column 64: Maximum horizontal distance for nitrogen dioxide tropospheric column [km]
+Column 65: Maximum vertical distance for nitrogen dioxide tropospheric column [km]
+Column 66: Top height of water vapor layer 1 [km], -6=no profile was retrieved since the maximum viewing zenith angle was below 87deg
+Column 67: Partial water vapor vertical column amount in layer 1 [moles per square meter], -9e99=retrieval not successful
+Column 68: Top height of nitrogen dioxide layer 1 [km], -6=no profile was retrieved since the maximum viewing zenith angle was below 87deg
+Column 69: Partial nitrogen dioxide vertical column amount in layer 1 [moles per square meter], -9e99=retrieval not successful
+From Column 70: Optional results for higher layers in the same sequence as for layer 1 (4 columns per layer)
+---------------------------------------------------------------------------------------
+20210312T220743.3Z 7741.922029 14.55 81.18 258.27 89.30 255.45 89.00 0.00 1.423e-03 1.414e-03 1.417e-03 1.402e-03 1011 284 7.28 4.10 8.973e+00 8.051e+01 6.530e+04 3.299e+05 6 2 20210302 1.4306e-05 23.85 0.27 0.00071 -0.00795 -999.00 1211.600 12 1 1 97.79 10 0 0 12 8 8 12 1 1 2.5872e-01 4.4037e-02 2 0 1.4528e+02 3.4350e+01 15.49 4.15 12 1 1 1.0457e-07 3.3013e-09 2 0 5.244e-05 4.727e-06 1.0638e-04 2.4798e-06 15.49 4.15 0.39 4.1290e+01 0.39 2.0488e-05 0.59 1.9102e+01 0.59 8.2138e-06 0.86 1.5694e+01 0.86 1.1240e-05 1.23 2.8557e+01 1.23 1.4705e-05 1.49 2.0123e+01 1.49 1.1219e-05 1.84 1.6511e+01 1.84 1.3566e-05 2.11 0.0000e+00 2.11 4.5249e-06 2.15 1.8547e-02 2.15 2.0046e-06 2.17 0.0000e+00 2.17 7.8398e-07 2.54 3.7375e+00 2.54 1.9325e-05 2.55 2.4854e-01 2.55 3.0499e-07
+20210312T223059.7Z 7741.938191 17.47 85.51 262.18 93.41 259.20 89.00 0.00 2.138e-03 2.087e-03 2.084e-03 2.052e-03 1011 284 7.28 4.10 8.973e+00 8.051e+01 6.530e+04 3.299e+05 6 2 20210302 8.1018e-06 23.86 0.30 0.00167 0.00224 -999.00 2358.830 6 1 1 98.76 10 0 0 12 8 8 12 1 1 3.4050e-01 6.2647e-02 2 0 1.5539e+02 3.7684e+01 18.66 5.00 12 1 1 1.1086e-07 4.5928e-09 2 0 5.600e-05 4.727e-06 9.4714e-05 2.5455e-06 18.66 5.00 0.49 4.3428e+01 0.49 1.2587e-05 0.73 1.0219e+01 0.73 6.0897e-06 1.04 3.7842e+01 1.04 9.6639e-06 1.44 1.5261e+01 1.44 1.7049e-05 1.67 1.6337e+01 1.67 1.2131e-05 2.07 0.0000e+00 2.07 2.1897e-05 2.08 3.3657e-03 2.08 1.1381e-06 2.10 0.0000e+00 2.10 9.8291e-07 2.11 9.5613e-01 2.11 4.9577e-07 3.17 2.8970e+01 3.17 8.3222e-06 3.40 2.3725e+00 3.40 4.3578e-06
+...
+20230201T211515.9Z 8432.885601 23.18 81.17 238.31 61.57 77.70 87.00 250.00 5.092e-04 4.975e-04 3.826e-04 3.770e-04 1010 283 7.25 4.07 8.979e+00 8.063e+01 6.510e+04 3.285e+05 6 2 20210302 9.8697e-05 24.10 0.26 0.06437 0.06502 -999.00 73.120 317 1 1 21.68 10 0 0 12 8 8 12 1 1 1.4842e-01 1.0618e-02 2 0 1.6465e+02 2.9937e+01 13.61 3.65 12 1 1 1.8631e-07 2.2223e-09 2 0 4.165e-05 4.727e-06 2.1276e-04 2.3333e-06 13.61 3.65 1.04 1.0004e+02 1.04 1.3021e-04 1.22 1.5971e+01 1.22 1.4716e-05 1.35 9.8548e+00 1.35 9.6161e-06 1.44 8.2216e+00 1.44 8.6586e-06 1.51 5.5238e+00 1.51 6.9363e-06 1.56 5.4450e+00 1.56 5.5703e-06 1.60 3.2482e+00 1.60 3.7948e-06 1.63 2.7916e+00 1.63 3.3385e-06 1.65 1.5706e+00 1.65 2.6839e-06 1.68 1.9502e+00 1.68 3.1652e-06 1.71 1.8047e+00 1.71 4.3950e-06 1.75 2.7803e+00 1.75 9.7033e-06 1.92 5.4427e+00 1.92 9.9642e-06
+20230201T213520.9Z 8432.899548 23.45 84.45 241.84 57.94 80.45 87.00 250.00 7.276e-04 6.954e-04 4.529e-04 4.422e-04 1010 283 7.25 4.07 8.979e+00 8.063e+01 6.510e+04 3.285e+05 6 2 20210302 7.4832e-05 24.11 0.29 0.06447 0.06189 -999.00 98.930 237 1 1 13.52 10 0 0 12 8 8 12 1 1 1.7615e-01 1.1078e-02 2 0 1.6797e+02 3.4159e+01 14.33 3.84 12 1 1 2.3649e-07 2.9877e-09 2 0 4.351e-05 4.727e-06 1.8564e-04 2.5573e-06 14.33 3.84 1.26 1.2478e+02 1.26 1.4941e-04 1.45 1.4417e+01 1.45 1.3152e-05 1.58 1.1631e+01 1.58 7.5759e-06 1.67 6.4777e+00 1.67 4.4760e-06 1.73 4.1045e+00 1.73 3.0200e-06 1.77 2.2959e+00 1.77 2.1199e-06 1.80 1.6287e+00 1.80 1.4166e-06 1.81 9.9853e-01 1.81 8.5981e-07 1.81 1.8187e-02 1.81 1.8303e-08 1.82 7.0181e-01 1.82 6.1325e-07 1.83 1.8519e-02 1.83 2.6756e-08 1.83 8.7755e-02 1.83 8.2451e-08 1.94 8.0810e-01 1.94 2.8715e-06
+
+===============================================================================
+
+File name: Pandora180s1_BronxNY_L2_rnvs3p1-8.txt
+File generation date: 20230104T051354.8Z
+Data description: Level 2 file (columns and more)
+Data file version: rnvs3p1-8
+Data product status: Nitrogen dioxide data are official
+Local principal investigator: Luke Valin
+Network principal investigator: Alexander Cede
+DOI: 10.48596/pgn.rnvs3p1-8.BronxNY.P180s1
+Instrument type: Pandora
+Instrument number: 180
+Spectrometer number: 1
+Processing software version used: BlickP v1.8.24
+Full location name: New York Botanical Garden NYSDEC (USEPA AQS ID 36-005-0133)
+Short location name: BronxNY
+Country of location: USA
+Location latitude [deg]: 40.8679
+Location longitude [deg]: -73.8781
+Location altitude [m]: 31
+Data start time: 20210302T121353.
+Data end time: NONE
+Data caveats: None
+---------------------------------------------------------------------------------------
+Column 1: UT date and time for measurement center, yyyymmddThhmmssZ (ISO 8601)
+Column 2: Fractional days since 1-Jan-2000 UT midnight for measurement center
+Column 3: Effective duration of measurement [s]
+Column 4: Solar zenith angle for measurement center [deg]
+Column 5: Solar azimuth for measurement center [deg], 0=north, increases clockwise
+Column 6: Lunar zenith angle for measurement center [deg]
+Column 7: Lunar azimuth for measurement center [deg], 0=north, increases clockwise
+Column 8: rms of unweighted fitting residuals, -9=fitting not successful
+Column 9: Normalized rms of fitting residuals weighted with independent uncertainty, -9=fitting not successful or no uncertainty given
+Column 10: Expected rms of unweighted fitting residuals based on independent uncertainty, -9=fitting not successful or no uncertainty given
+Column 11: Expected normalized rms of weighted fitting residuals based on independent uncertainty, -9=fitting not successful or no uncertainty given
+Column 12: Climatological station pressure [mbar]
+Column 13: Data processing type index
+Column 14: Calibration file version
+Column 15: Calibration file validity starting date
+Column 16: Mean value of measured data inside fitting window [same units as measurements]
+Column 17: Wavelength effective temperature [∞C], 999=no effective temperature given
+Column 18: Estimated average residual stray light level [%] (only valid for stray light correction methods 2 and higher)
+Column 19: Retrieved wavelength shift from L1 data [nm], -9=no wavelength change determination
+Column 20: Retrieved total wavelength shift [nm], -9=no wavelength change fitting
+Column 21: Retrieved resolution change [%], -999=no resolution change fitting
+Column 22: Integration time [ms]
+Column 23: Number of bright count cycles
+Column 24: Effective position of filterwheel #1, 0=filterwheel not used, 1-9 are valid positions
+Column 25: Effective position of filterwheel #2, 0=filterwheel not used, 1-9 are valid positions
+Column 26: Atmospheric variability [%], 999=no atmospheric variability was determined
+Column 27: Estimated aerosol optical depth at starting wavelength of fitting window
+Column 28: Estimated aerosol optical depth at center wavelength of fitting window
+Column 29: Estimated aerosol optical depth at ending wavelength of fitting window
+Column 30: L1 data quality flag, 0=assured high quality, 1=assured medium quality, 2=assured low quality, 10=not-assured high quality, 11=not-assured medium quality, 12=not-assured low quality
+Column 31: Sum over 2^i using those i, for which the corresponding L1 data quality parameter exceeds the DQ1 limit, 0=Saturated data, 1=Too few dark counts measurements, 2=No temperature given or effective temperature too different from the reference temperature, 3=Dark count too high, 4=Unsuccessful dark background fitting, 5=The dark count differs significantly from the dark map for too many pixels, 6=Absolute value of estimated average residual stray light level too high, 7=Although attempted, no wavelength change could be retrieved, 8=Absolute value of retrieved wavelength shift too large, 9=Retrieved wavelength shift differs too much from the shift predicted by the effective temperature
+Column 32: Sum over 2^i using those i, for which the corresponding L1 data quality parameter exceeds the DQ2 limit (same parameters as for DQ1)
+Column 33: L2Fit data quality flag, 0=assured high quality, 1=assured medium quality, 2=assured low quality, 10=not-assured high quality, 11=not-assured medium quality, 12=not-assured low quality
+Column 34: Sum over 2^i using those i, for which the corresponding L2Fit data quality parameter exceeds the DQ1 limit, 0=L1 data quality above 0, 1=Spectral fitting was not successful, 2=Wavelength shift too large, 3=Normalized rms of fitting residuals weighted with independent uncertainty too large
+Column 35: Sum over 2^i using those i, for which the corresponding L2Fit data quality parameter exceeds the DQ2 limit (same parameters as for DQ1)
+Column 36: L2 data quality flag for nitrogen dioxide, 0=assured high quality, 1=assured medium quality, 2=assured low quality, 10=not-assured high quality, 11=not-assured medium quality, 12=not-assured low quality, 20=unusable high quality, 21=unusable medium quality, 22=unusable low quality
+Column 37: Sum over 2^i using those i, for which the corresponding L2 data quality parameter for nitrogen dioxide exceeds the DQ1 limit, 0=L2Fit data quality above 0, 1=Retrieval error, 2=Air mass factor too large, 3=Atmospheric variability too large
+Column 38: Sum over 2^i using those i, for which the corresponding L2 data quality parameter for nitrogen dioxide exceeds the DQ2 limit (same parameters as for DQ1)
+Column 39: Nitrogen dioxide total vertical column amount [moles per square meter], -9e99=retrieval not successful
+Column 40: Independent uncertainty of nitrogen dioxide total vertical column amount [moles per square meter], -1=cross section is zero in this wavelength range, -3=spectral fitting was done, but no independent uncertainty could be retrieved, -5=no independent uncertainty input was given, -9=spectral fitting was not successful
+Column 41: Structured uncertainty of nitrogen dioxide total vertical column amount [moles per square meter], -1=cross section is zero in this wavelength range, -7=not given since method "MEAS" was chosen, -9=spectral fitting was not successful
+Column 42: Common uncertainty of nitrogen dioxide total vertical column amount [moles per square meter], -1=cross section is zero in this wavelength range, -6=no common uncertainty input was given, -7=not given since method "MEAS" was chosen, -9=spectral fitting was not successful
+Column 43: Total uncertainty of nitrogen dioxide total vertical column amount [moles per square meter], -1=cross section is zero in this wavelength range, -3=spectral fitting was done, but no independent uncertainty could be retrieved, -5=no independent uncertainty input was given, -6=no common uncertainty input was given, -7=not given since method "MEAS" was chosen, -8=not given, since not all components are given
+Column 44: rms-based uncertainty of nitrogen dioxide total vertical column amount [moles per square meter], -1=cross section is zero in this wavelength range, -3=spectral fitting was done, but no independent uncertainty could be retrieved, -9=spectral fitting was not successful
+Column 45: Nitrogen dioxide effective temperature [K]
+Column 46: Independent uncertainty of nitrogen dioxide effective temperature [K] , -1=temperature fitting was requested, but cross section is zero in this wavelength range, -2=no temperature fitting was requested and output for effective temperature and common uncertainty of it is based on f-code, -3=spectral fitting was done, but no independent uncertainty could be retrieved, -4=temperature fitting was requested, but differential optical depth is too small to retrieve temperature, -5=spectral fitting was done without using the independent uncertainty input, -6=no independent uncertainty input was given, -9=spectral fitting was not successful
+Column 47: Structured uncertainty of nitrogen dioxide effective temperature [K] , -1=temperature fitting was requested, but cross section is zero in this wavelength range, -4=temperature fitting was requested, but differential optical depth is too small to retrieve temperature, -9=spectral fitting was not successful
+Column 48: Common uncertainty of nitrogen dioxide effective temperature [K] , -1=temperature fitting was requested, but cross section is zero in this wavelength range, -2=no temperature fitting was requested and output for effective temperature and common uncertainty of it is based on f-code, -3=spectral fitting was done, but no independent uncertainty could be retrieved, -4=temperature fitting was requested, but differential optical depth is too small to retrieve temperature, -6=no independent uncertainty input was given, -9=spectral fitting was not successful
+Column 49: Total uncertainty of nitrogen dioxide effective temperature [K] , -1=temperature fitting was requested, but cross section is zero in this wavelength range, -2=no temperature fitting was requested and output for effective temperature and common uncertainty of it is based on f-code, -3=spectral fitting was done, but no independent uncertainty could be retrieved, -4=temperature fitting was requested, but differential optical depth is too small to retrieve temperature, -5=spectral fitting was done without using the independent uncertainty input, -6=no independent uncertainty or common uncertainty input was given, -9=spectral fitting was not successful
+Column 50: Direct nitrogen dioxide air mass factor
+Column 51: Uncertainty of direct nitrogen dioxide air mass factor, -7=uncertainty could not be retrieved since slant column uncertainties were missing
+Column 52: Diffuse correction applied before fitting at effective fitting wavelength for nitrogen dioxide [%], 0=no diffuse correction applied or fitting not successful, >0=measured diffuse correction, <0=(negative value of) calculated diffuse correction
+Column 53: Climatological nitrogen dioxide stratospheric column amount [moles per square meter]
+Column 54: Uncertainty of climatological nitrogen dioxide stratospheric column amount [moles per square meter]
+---------------------------------------------------------------------------------------
+20210302T121353.9Z 7731.509652 19.88 82.28 106.26 76.98 248.97 3.367e-03 3.103e-03 3.034e-03 2.761e-03 1011 2 2 20210302 2.2631e-04 24.06 0.81 0.00383 -0.00523 0.33 3976.120 5 1 4 53.44 0.179 0.186 0.189 10 0 0 12 8 8 12 13 9 1.8410e-04 3.3392e-06 1.1514e-06 1.2100e-06 3.7336e-06 4.0669e-06 266.35 -2.00 16.25 -2.00 16.25 7.005 0.001 0.00e+00 3.083e-05 4.727e-06
+20210302T121455.0Z 7731.510358 19.90 82.10 106.43 77.15 249.14 3.257e-03 3.058e-03 2.873e-03 2.646e-03 1011 2 2 20210302 2.4141e-04 24.06 0.48 0.00350 -0.00057 0.63 3977.830 5 1 4 -113.27 0.186 0.193 0.196 10 0 0 12 8 8 12 1 1 1.8111e-04 3.2465e-06 1.1286e-06 1.2317e-06 3.6511e-06 4.0003e-06 266.14 -2.00 16.17 -2.00 16.17 6.858 0.001 0.00e+00 3.079e-05 4.727e-06
+...
+20230201T220323.1Z 8432.919018 47.43 89.22 246.56 52.81 84.39 4.424e-02 2.753e-02 1.866e-03 1.307e-03 1010 2 2 20210302 9.2329e-04 24.10 4.43 0.01221 -0.00846 14.84 205.290 231 1 4 49.91 0.005 0.008 0.009 10 0 0 12 10 8 12 13 13 3.0226e-04 4.8825e-07 2.6559e-05 2.7354e-07 2.6565e-05 1.3954e-05 272.11 -2.00 18.72 -2.00 18.72 31.962 0.003 0.00e+00 4.967e-05 4.727e-06
+20230201T220634.9Z 8432.921237 48.23 89.78 247.08 52.23 84.85 5.437e-02 4.333e-02 3.360e-03 2.916e-03 1010 2 2 20210302 2.5189e-04 24.10 6.83 -0.00072 -0.06887 41.44 753.410 64 1 4 98.25 0.005 0.013 0.020 10 0 0 12 12 8 12 13 13 1.7111e-04 7.3170e-07 1.9366e-05 2.0525e-07 1.9381e-05 1.2759e-05 269.93 -2.00 17.80 -2.00 17.80 34.065 0.003 0.00e+00 5.090e-05 4.727e-06
+
+===============================================================================
+
+File name: Pandora180s1_BronxNY_L2_rout2p1-8.txt
+File generation date: 20230104T051351.0Z
+Data description: Level 2 file (columns and more)
+Data file version: rout2p1-8
+Data product status: Ozone data are official
+Local principal investigator: Luke Valin
+Network principal investigator: Alexander Cede
+DOI: 10.48596/pgn.rout2p1-8.BronxNY.P180s1
+Instrument type: Pandora
+Instrument number: 180
+Spectrometer number: 1
+Processing software version used: BlickP v1.8.24
+Full location name: New York Botanical Garden NYSDEC (USEPA AQS ID 36-005-0133)
+Short location name: BronxNY
+Country of location: USA
+Location latitude [deg]: 40.8679
+Location longitude [deg]: -73.8781
+Location altitude [m]: 31
+Data start time: 20210304T154639.
+Data end time: NONE
+Data caveats: None
+---------------------------------------------------------------------------------------
+Column 1: UT date and time for measurement center, yyyymmddThhmmssZ (ISO 8601)
+Column 2: Fractional days since 1-Jan-2000 UT midnight for measurement center
+Column 3: Effective duration of measurement [s]
+Column 4: Solar zenith angle for measurement center [deg]
+Column 5: Solar azimuth for measurement center [deg], 0=north, increases clockwise
+Column 6: Lunar zenith angle for measurement center [deg]
+Column 7: Lunar azimuth for measurement center [deg], 0=north, increases clockwise
+Column 8: rms of unweighted fitting residuals, -9=fitting not successful
+Column 9: Normalized rms of fitting residuals weighted with independent uncertainty, -9=fitting not successful or no uncertainty given
+Column 10: Expected rms of unweighted fitting residuals based on independent uncertainty, -9=fitting not successful or no uncertainty given
+Column 11: Expected normalized rms of weighted fitting residuals based on independent uncertainty, -9=fitting not successful or no uncertainty given
+Column 12: Climatological station pressure [mbar]
+Column 13: Data processing type index
+Column 14: Calibration file version
+Column 15: Calibration file validity starting date
+Column 16: Mean value of measured data inside fitting window [same units as measurements]
+Column 17: Wavelength effective temperature [∞C], 999=no effective temperature given
+Column 18: Estimated average residual stray light level [%] (only valid for stray light correction methods 2 and higher)
+Column 19: Retrieved wavelength shift from L1 data [nm], -9=no wavelength change determination
+Column 20: Retrieved total wavelength shift [nm], -9=no wavelength change fitting
+Column 21: Retrieved resolution change [%], -999=no resolution change fitting
+Column 22: Integration time [ms]
+Column 23: Number of bright count cycles
+Column 24: Effective position of filterwheel #1, 0=filterwheel not used, 1-9 are valid positions
+Column 25: Effective position of filterwheel #2, 0=filterwheel not used, 1-9 are valid positions
+Column 26: Atmospheric variability [%], 999=no atmospheric variability was determined
+Column 27: Estimated aerosol optical depth at starting wavelength of fitting window
+Column 28: Estimated aerosol optical depth at center wavelength of fitting window
+Column 29: Estimated aerosol optical depth at ending wavelength of fitting window
+Column 30: L1 data quality flag, 0=assured high quality, 1=assured medium quality, 2=assured low quality, 10=not-assured high quality, 11=not-assured medium quality, 12=not-assured low quality
+Column 31: Sum over 2^i using those i, for which the corresponding L1 data quality parameter exceeds the DQ1 limit, 0=Saturated data, 1=Too few dark counts measurements, 2=No temperature given or effective temperature too different from the reference temperature, 3=Dark count too high, 4=Unsuccessful dark background fitting, 5=The dark count differs significantly from the dark map for too many pixels, 6=Absolute value of estimated average residual stray light level too high, 7=Although attempted, no wavelength change could be retrieved, 8=Absolute value of retrieved wavelength shift too large, 9=Retrieved wavelength shift differs too much from the shift predicted by the effective temperature
+Column 32: Sum over 2^i using those i, for which the corresponding L1 data quality parameter exceeds the DQ2 limit (same parameters as for DQ1)
+Column 33: L2Fit data quality flag, 0=assured high quality, 1=assured medium quality, 2=assured low quality, 10=not-assured high quality, 11=not-assured medium quality, 12=not-assured low quality
+Column 34: Sum over 2^i using those i, for which the corresponding L2Fit data quality parameter exceeds the DQ1 limit, 0=L1 data quality above 0, 1=Spectral fitting was not successful, 2=Wavelength shift too large, 3=Normalized rms of fitting residuals weighted with independent uncertainty too large
+Column 35: Sum over 2^i using those i, for which the corresponding L2Fit data quality parameter exceeds the DQ2 limit (same parameters as for DQ1)
+Column 36: L2 data quality flag for ozone, 0=assured high quality, 1=assured medium quality, 2=assured low quality, 10=not-assured high quality, 11=not-assured medium quality, 12=not-assured low quality, 20=unusable high quality, 21=unusable medium quality, 22=unusable low quality
+Column 37: Sum over 2^i using those i, for which the corresponding L2 data quality parameter for ozone exceeds the DQ1 limit, 0=L2Fit data quality above 0, 1=Retrieval error, 2=Air mass factor too large, 3=Atmospheric variability too large
+Column 38: Sum over 2^i using those i, for which the corresponding L2 data quality parameter for ozone exceeds the DQ2 limit (same parameters as for DQ1)
+Column 39: Ozone total vertical column amount [moles per square meter], -9e99=retrieval not successful
+Column 40: Independent uncertainty of ozone total vertical column amount [moles per square meter], -1=cross section is zero in this wavelength range, -3=spectral fitting was done, but no independent uncertainty could be retrieved, -5=no independent uncertainty input was given, -9=spectral fitting was not successful
+Column 41: Structured uncertainty of ozone total vertical column amount [moles per square meter], -1=cross section is zero in this wavelength range, -7=not given since method "MEAS" was chosen, -9=spectral fitting was not successful
+Column 42: Common uncertainty of ozone total vertical column amount [moles per square meter], -1=cross section is zero in this wavelength range, -6=no common uncertainty input was given, -7=not given since method "MEAS" was chosen, -9=spectral fitting was not successful
+Column 43: Total uncertainty of ozone total vertical column amount [moles per square meter], -1=cross section is zero in this wavelength range, -3=spectral fitting was done, but no independent uncertainty could be retrieved, -5=no independent uncertainty input was given, -6=no common uncertainty input was given, -7=not given since method "MEAS" was chosen, -8=not given, since not all components are given
+Column 44: rms-based uncertainty of ozone total vertical column amount [moles per square meter], -1=cross section is zero in this wavelength range, -3=spectral fitting was done, but no independent uncertainty could be retrieved, -9=spectral fitting was not successful
+Column 45: Ozone effective temperature [K]
+Column 46: Independent uncertainty of ozone effective temperature [K] , -1=temperature fitting was requested, but cross section is zero in this wavelength range, -2=no temperature fitting was requested and output for effective temperature and common uncertainty of it is based on f-code, -3=spectral fitting was done, but no independent uncertainty could be retrieved, -4=temperature fitting was requested, but differential optical depth is too small to retrieve temperature, -5=spectral fitting was done without using the independent uncertainty input, -6=no independent uncertainty input was given, -9=spectral fitting was not successful
+Column 47: Structured uncertainty of ozone effective temperature [K] , -1=temperature fitting was requested, but cross section is zero in this wavelength range, -4=temperature fitting was requested, but differential optical depth is too small to retrieve temperature, -9=spectral fitting was not successful
+Column 48: Common uncertainty of ozone effective temperature [K] , -1=temperature fitting was requested, but cross section is zero in this wavelength range, -2=no temperature fitting was requested and output for effective temperature and common uncertainty of it is based on f-code, -3=spectral fitting was done, but no independent uncertainty could be retrieved, -4=temperature fitting was requested, but differential optical depth is too small to retrieve temperature, -6=no independent uncertainty input was given, -9=spectral fitting was not successful
+Column 49: Total uncertainty of ozone effective temperature [K] , -1=temperature fitting was requested, but cross section is zero in this wavelength range, -2=no temperature fitting was requested and output for effective temperature and common uncertainty of it is based on f-code, -3=spectral fitting was done, but no independent uncertainty could be retrieved, -4=temperature fitting was requested, but differential optical depth is too small to retrieve temperature, -5=spectral fitting was done without using the independent uncertainty input, -6=no independent uncertainty or common uncertainty input was given, -9=spectral fitting was not successful
+Column 50: Direct ozone air mass factor
+Column 51: Uncertainty of direct ozone air mass factor, -7=uncertainty could not be retrieved since slant column uncertainties were missing
+Column 52: Diffuse correction applied before fitting at effective fitting wavelength for ozone [%], 0=no diffuse correction applied or fitting not successful, >0=measured diffuse correction, <0=(negative value of) calculated diffuse correction
+---------------------------------------------------------------------------------------
+20210304T154639.1Z 7733.657397 30.16 50.55 153.70 103.41 257.41 3.212e-02 8.627e-03 1.928e-02 5.363e-03 1011 2 2 20210302 1.1587e-04 24.05 0.33 -0.00112 -0.00328 -999.00 3350.080 9 1 5 99.98 4.164 4.161 4.164 10 0 0 11 8 0 12 9 8 1.6391e-01 1.7204e-03 1.9386e-03 -6.0000e+00 -9.0000e+00 1.1716e-02 225.67 -2.00 3.51 -2.00 3.51 1.565 0.000 0.00e+00
+20210304T155107.2Z 7733.660500 30.44 50.18 155.07 104.21 258.06 1.471e-02 6.344e-03 6.541e-03 2.112e-03 1011 2 2 20210302 4.5503e-04 24.04 0.24 -0.00175 -0.00096 -999.00 1383.550 22 1 5 99.75 3.357 3.337 3.325 10 0 0 10 0 0 12 8 8 1.6106e-01 6.8092e-04 1.9132e-03 -6.0000e+00 -9.0000e+00 5.4074e-03 225.67 -2.00 3.51 -2.00 3.51 1.553 0.000 0.00e+00
+...
+20230201T212937.1Z 8432.895568 35.30 83.50 240.85 58.98 79.66 5.554e-01 3.045e-02 4.528e-01 2.361e-02 1010 2 2 20210302 2.4143e-05 24.10 0.51 0.06475 0.04809 -999.00 1211.330 28 1 5 75.26 -0.599 0.138 0.166 12 1 1 12 9 9 12 13 9 1.2637e-01 1.9978e-03 1.4111e-03 -6.0000e+00 -9.0000e+00 4.6266e-02 224.38 -2.00 3.51 -2.00 3.51 6.978 0.008 0.00e+00
+20230201T214013.6Z 8432.902935 49.15 85.27 242.68 57.05 81.12 8.431e-01 1.396e-01 6.020e-01 1.159e-01 1010 2 2 20210302 3.5081e-06 24.11 1.92 0.06145 0.05734 -999.00 2890.790 17 1 5 34.33 -0.560 0.083 0.128 10 0 0 12 8 8 12 5 5 1.0860e-01 8.6170e-03 1.9117e-03 -6.0000e+00 -9.0000e+00 6.0967e-02 224.38 -2.00 3.51 -2.00 3.51 8.247 0.017 0.00e+00
+
+===============================================================================
+File name: Pandora180s1_BronxNY_L2_rsus1p1-8.txt
+File generation date: 20230104T051355.0Z
+Data description: Level 2 file (columns and more)
+Data file version: rsus1p1-8
+Data product status: Sulfur dioxide data are official
+Local principal investigator: Luke Valin
+Network principal investigator: Alexander Cede
+DOI: 10.48596/pgn.rsus1p1-8.BronxNY.P180s1
+Instrument type: Pandora
+Instrument number: 180
+Spectrometer number: 1
+Processing software version used: BlickP v1.8.24
+Full location name: New York Botanical Garden NYSDEC (USEPA AQS ID 36-005-0133)
+Short location name: BronxNY
+Country of location: USA
+Location latitude [deg]: 40.8679
+Location longitude [deg]: -73.8781
+Location altitude [m]: 31
+Data start time: 20210304T154639.
+Data end time: NONE
+Data caveats: None
+---------------------------------------------------------------------------------------
+Column 1: UT date and time for measurement center, yyyymmddThhmmssZ (ISO 8601)
+Column 2: Fractional days since 1-Jan-2000 UT midnight for measurement center
+Column 3: Effective duration of measurement [s]
+Column 4: Solar zenith angle for measurement center [deg]
+Column 5: Solar azimuth for measurement center [deg], 0=north, increases clockwise
+Column 6: Lunar zenith angle for measurement center [deg]
+Column 7: Lunar azimuth for measurement center [deg], 0=north, increases clockwise
+Column 8: rms of unweighted fitting residuals, -9=fitting not successful
+Column 9: Normalized rms of fitting residuals weighted with independent uncertainty, -9=fitting not successful or no uncertainty given
+Column 10: Expected rms of unweighted fitting residuals based on independent uncertainty, -9=fitting not successful or no uncertainty given
+Column 11: Expected normalized rms of weighted fitting residuals based on independent uncertainty, -9=fitting not successful or no uncertainty given
+Column 12: Climatological station pressure [mbar]
+Column 13: Data processing type index
+Column 14: Calibration file version
+Column 15: Calibration file validity starting date
+Column 16: Mean value of measured data inside fitting window [same units as measurements]
+Column 17: Wavelength effective temperature [∞C], 999=no effective temperature given
+Column 18: Estimated average residual stray light level [%] (only valid for stray light correction methods 2 and higher)
+Column 19: Retrieved wavelength shift from L1 data [nm], -9=no wavelength change determination
+Column 20: Retrieved total wavelength shift [nm], -9=no wavelength change fitting
+Column 21: Retrieved resolution change [%], -999=no resolution change fitting
+Column 22: Integration time [ms]
+Column 23: Number of bright count cycles
+Column 24: Effective position of filterwheel #1, 0=filterwheel not used, 1-9 are valid positions
+Column 25: Effective position of filterwheel #2, 0=filterwheel not used, 1-9 are valid positions
+Column 26: Atmospheric variability [%], 999=no atmospheric variability was determined
+Column 27: Estimated aerosol optical depth at starting wavelength of fitting window
+Column 28: Estimated aerosol optical depth at center wavelength of fitting window
+Column 29: Estimated aerosol optical depth at ending wavelength of fitting window
+Column 30: L1 data quality flag, 0=assured high quality, 1=assured medium quality, 2=assured low quality, 10=not-assured high quality, 11=not-assured medium quality, 12=not-assured low quality
+Column 31: Sum over 2^i using those i, for which the corresponding L1 data quality parameter exceeds the DQ1 limit, 0=Saturated data, 1=Too few dark counts measurements, 2=No temperature given or effective temperature too different from the reference temperature, 3=Dark count too high, 4=Unsuccessful dark background fitting, 5=The dark count differs significantly from the dark map for too many pixels, 6=Absolute value of estimated average residual stray light level too high, 7=Although attempted, no wavelength change could be retrieved, 8=Absolute value of retrieved wavelength shift too large, 9=Retrieved wavelength shift differs too much from the shift predicted by the effective temperature
+Column 32: Sum over 2^i using those i, for which the corresponding L1 data quality parameter exceeds the DQ2 limit (same parameters as for DQ1)
+Column 33: L2Fit data quality flag, 0=assured high quality, 1=assured medium quality, 2=assured low quality, 10=not-assured high quality, 11=not-assured medium quality, 12=not-assured low quality
+Column 34: Sum over 2^i using those i, for which the corresponding L2Fit data quality parameter exceeds the DQ1 limit, 0=L1 data quality above 0, 1=Spectral fitting was not successful, 2=Wavelength shift too large, 3=Normalized rms of fitting residuals weighted with independent uncertainty too large
+Column 35: Sum over 2^i using those i, for which the corresponding L2Fit data quality parameter exceeds the DQ2 limit (same parameters as for DQ1)
+Column 36: L2 data quality flag for sulfur dioxide, 0=assured high quality, 1=assured medium quality, 2=assured low quality, 10=not-assured high quality, 11=not-assured medium quality, 12=not-assured low quality, 20=unusable high quality, 21=unusable medium quality, 22=unusable low quality
+Column 37: Sum over 2^i using those i, for which the corresponding L2 data quality parameter for sulfur dioxide exceeds the DQ1 limit, 0=L2Fit data quality above 0, 1=Retrieval error, 2=Air mass factor too large, 3=Atmospheric variability too large
+Column 38: Sum over 2^i using those i, for which the corresponding L2 data quality parameter for sulfur dioxide exceeds the DQ2 limit (same parameters as for DQ1)
+Column 39: Sulfur dioxide total vertical column amount [moles per square meter], -9e99=retrieval not successful
+Column 40: Independent uncertainty of sulfur dioxide total vertical column amount [moles per square meter], -1=cross section is zero in this wavelength range, -3=spectral fitting was done, but no independent uncertainty could be retrieved, -5=no independent uncertainty input was given, -9=spectral fitting was not successful
+Column 41: Structured uncertainty of sulfur dioxide total vertical column amount [moles per square meter], -1=cross section is zero in this wavelength range, -7=not given since method "MEAS" was chosen, -9=spectral fitting was not successful
+Column 42: Common uncertainty of sulfur dioxide total vertical column amount [moles per square meter], -1=cross section is zero in this wavelength range, -6=no common uncertainty input was given, -7=not given since method "MEAS" was chosen, -9=spectral fitting was not successful
+Column 43: Total uncertainty of sulfur dioxide total vertical column amount [moles per square meter], -1=cross section is zero in this wavelength range, -3=spectral fitting was done, but no independent uncertainty could be retrieved, -5=no independent uncertainty input was given, -6=no common uncertainty input was given, -7=not given since method "MEAS" was chosen, -8=not given, since not all components are given
+Column 44: rms-based uncertainty of sulfur dioxide total vertical column amount [moles per square meter], -1=cross section is zero in this wavelength range, -3=spectral fitting was done, but no independent uncertainty could be retrieved, -9=spectral fitting was not successful
+Column 45: Sulfur dioxide effective temperature [K]
+Column 46: Independent uncertainty of sulfur dioxide effective temperature [K] , -1=temperature fitting was requested, but cross section is zero in this wavelength range, -2=no temperature fitting was requested and output for effective temperature and common uncertainty of it is based on f-code, -3=spectral fitting was done, but no independent uncertainty could be retrieved, -4=temperature fitting was requested, but differential optical depth is too small to retrieve temperature, -5=spectral fitting was done without using the independent uncertainty input, -6=no independent uncertainty input was given, -9=spectral fitting was not successful
+Column 47: Structured uncertainty of sulfur dioxide effective temperature [K] , -1=temperature fitting was requested, but cross section is zero in this wavelength range, -4=temperature fitting was requested, but differential optical depth is too small to retrieve temperature, -9=spectral fitting was not successful
+Column 48: Common uncertainty of sulfur dioxide effective temperature [K] , -1=temperature fitting was requested, but cross section is zero in this wavelength range, -2=no temperature fitting was requested and output for effective temperature and common uncertainty of it is based on f-code, -3=spectral fitting was done, but no independent uncertainty could be retrieved, -4=temperature fitting was requested, but differential optical depth is too small to retrieve temperature, -6=no independent uncertainty input was given, -9=spectral fitting was not successful
+Column 49: Total uncertainty of sulfur dioxide effective temperature [K] , -1=temperature fitting was requested, but cross section is zero in this wavelength range, -2=no temperature fitting was requested and output for effective temperature and common uncertainty of it is based on f-code, -3=spectral fitting was done, but no independent uncertainty could be retrieved, -4=temperature fitting was requested, but differential optical depth is too small to retrieve temperature, -5=spectral fitting was done without using the independent uncertainty input, -6=no independent uncertainty or common uncertainty input was given, -9=spectral fitting was not successful
+Column 50: Direct sulfur dioxide air mass factor
+Column 51: Uncertainty of direct sulfur dioxide air mass factor, -7=uncertainty could not be retrieved since slant column uncertainties were missing
+Column 52: Diffuse correction applied before fitting at effective fitting wavelength for sulfur dioxide [%], 0=no diffuse correction applied or fitting not successful, >0=measured diffuse correction, <0=(negative value of) calculated diffuse correction
+---------------------------------------------------------------------------------------
+20210304T154639.1Z 7733.657397 30.16 50.55 153.70 103.41 257.41 1.899e-02 5.801e-03 1.500e-02 4.860e-03 1011 2 2 20210302 1.3468e-04 24.05 0.33 -0.00112 -0.00107 0.70 3350.080 9 1 5 99.98 3.994 4.031 4.043 10 0 0 12 8 8 12 9 9 -1.1770e-04 2.8804e-04 4.2612e-06 3.8621e-05 2.9065e-04 3.8292e-04 276.27 -2.00 20.00 -2.00 20.00 1.573 0.000 0.00e+00
+20210304T155107.2Z 7733.660500 30.44 50.18 155.07 104.21 258.06 4.878e-03 1.789e-03 5.162e-03 1.946e-03 1011 2 2 20210302 5.2977e-04 24.04 0.24 -0.00175 0.00102 -0.09 1383.550 22 1 5 99.75 3.227 3.208 3.192 10 0 0 12 8 8 12 9 9 -2.2029e-05 1.0541e-04 4.8455e-05 3.8922e-05 1.2237e-04 9.8666e-05 276.27 -2.00 20.00 -2.00 20.00 1.561 0.000 0.00e+00
+...
+20230201T212937.1Z 8432.895568 35.30 83.50 240.85 58.98 79.66 2.139e-01 1.612e-02 3.605e-01 1.734e-02 1010 2 2 20210302 3.4631e-05 24.10 0.51 0.06475 0.05322 1.04 1211.330 28 1 5 75.26 -0.772 0.107 0.154 12 1 1 12 9 9 12 13 13 -2.3108e-03 9.6916e-04 2.2203e-05 6.9831e-06 9.6944e-04 7.9101e-04 275.14 -2.00 20.00 -2.00 20.00 8.564 0.049 0.00e+00
+20230201T214013.6Z 8432.902935 49.15 85.27 242.68 57.05 81.12 5.770e-01 9.229e-02 4.049e-01 7.934e-02 1010 2 2 20210302 4.9975e-06 24.11 1.92 0.06145 -0.00377 4.70 2890.790 17 1 5 34.33 -0.580 0.013 0.092 10 0 0 12 14 8 12 5 5 -4.1208e-03 8.2187e-04 2.0677e-04 5.2817e-06 8.4750e-04 1.5972e-03 275.14 -2.00 20.00 -2.00 20.00 11.480 0.118 0.00e+00
+
+
+
+
+===============================================================================
+
+File name: Pandora135s1_ManhattanNY-CCNY_L2Trop_rnvh1p1-7.txt
+File generation date: 20230104T051343Z
+Data description: Level 2 tropospheric columns file
+Data file version: rnvh1p1-7
+Data product status: Nitrogen dioxide data are unvalidated, Water vapor data are unvalidated
+Local principal investigator: Maria Tzortziou
+Network principal investigator: Alexander Cede
+Instrument type: Pandora
+Instrument number: 135
+Spectrometer number: 1
+Processing software version used: BlickP v1.7.16
+Full location name: ManhattanNY-CCNY
+Short location name: ManhattanNY-CCNY
+Country of location: USA
+Location latitude [deg]: 40.8153
+Location longitude [deg]: -73.9505
+Location altitude [m]: 34
+Data start time: 20200930T180938Z
+Data end time: NONE
+Data caveats: None
+---------------------------------------------------------------------------------------
+Column 1: UT date and time for center of measurement, yyyymmddThhmmssZ (ISO 8601)
+Column 2: Fractional days since 1-Jan-2000 UT midnight for center of measurement
+Column 3: Effective duration of measurement in seconds
+Column 4: Solar zenith angle for center of measurement in degree
+Column 5: Solar azimuth for center of measurement in degree, 0=north, increases clockwise
+Column 6: Pointing zenith angle for center of measurement in degree
+Column 7: Pointing azimuth for center of measurement in degree, 0=north, increases clockwise
+Column 8: Water vapor surface concentration [ppb], -9e99=retrieval not successful
+Column 9: Uncertainty of water vapor surface concentration [ppb], -8=retrieval not successful
+Column 10: Water vapor tropospheric vertical column amount [Centimeter], -9e99=retrieval not successful
+Column 11: Uncertainty of water vapor tropospheric vertical column amount [Centimeter], -8=retrieval not successful
+Column 12: Water vapor surface concentration index, integer >0 (see manual), -8=retrieval not successful
+Column 13: Water vapor heterogeneity flag, 0=well mixed conditions, 1=heterogeneous conditions, -8=retrieval not successful
+Column 14: L2 data quality flag for water vapor: 0=assured high quality, 1=assured medium quality, 2=assured low quality, 10=not-assured high quality, 11=not-assured medium quality, 12=not-assured low quality, 20=unusable high quality, 21=unusable medium quality, 22=unusable low quality
+Column 15: Sum over 2^i using those i, for which the corresponding L2 data quality parameter for water vapor exceeds the DQ1 limit, 0=L2Fit data quality above 0, 1=Uncertainty too high, 2=Signal to noise ratio too low, 3=Air mass factor too large
+Column 16: Sum over 2^i using those i, for which the corresponding L2 data quality parameter for water vapor exceeds the DQ2 limit (same parameters as for DQ1)
+Column 17: Direct water vapor air mass factor
+Column 18: Nitrogen dioxide surface concentration [ppb], -9e99=retrieval not successful
+Column 19: Uncertainty of nitrogen dioxide surface concentration [ppb], -8=retrieval not successful
+Column 20: Nitrogen dioxide tropospheric vertical column amount [Dobson Units], -9e99=retrieval not successful
+Column 21: Uncertainty of nitrogen dioxide tropospheric vertical column amount [Dobson Units], -8=retrieval not successful
+Column 22: Nitrogen dioxide surface concentration index, integer >0 (see manual), -8=retrieval not successful
+Column 23: Nitrogen dioxide heterogeneity flag, 0=well mixed conditions, 1=heterogeneous conditions, -8=retrieval not successful
+Column 24: L2 data quality flag for nitrogen dioxide: 0=assured high quality, 1=assured medium quality, 2=assured low quality, 10=not-assured high quality, 11=not-assured medium quality, 12=not-assured low quality, 20=unusable high quality, 21=unusable medium quality, 22=unusable low quality
+Column 25: Sum over 2^i using those i, for which the corresponding L2 data quality parameter for nitrogen dioxide exceeds the DQ1 limit, 0=L2Fit data quality above 0, 1=Uncertainty too high, 2=Signal to noise ratio too low, 3=Air mass factor too large
+Column 26: Sum over 2^i using those i, for which the corresponding L2 data quality parameter for nitrogen dioxide exceeds the DQ2 limit (same parameters as for DQ1)
+Column 27: Direct nitrogen dioxide air mass factor
+Column 28: Maximum fitting result index: 0,1,2=no error or warning, 3,4=warning, >4=error
+Column 29: Normalized rms of spectral fitting residuals weighted with measured uncertainty, mean over all sets
+Column 30: Normalized rms of spectral fitting residuals weighted with measured uncertainty, minimum of all sets
+Column 31: Normalized rms of spectral fitting residuals weighted with measured uncertainty, maximum of all sets
+Column 32: Expected normalized rms of weighted spectral fitting residuals based on measured uncertainty, mean over all sets
+Column 33: Expected normalized rms of weighted spectral fitting residuals based on measured uncertainty, minimum of all sets
+Column 34: Expected normalized rms of weighted spectral fitting residuals based on measured uncertainty, maximum of all sets
+Column 35: Expected normalized rms of weighted spectral fitting residuals based on instrumental uncertainty, mean over all sets
+Column 36: Expected normalized rms of weighted spectral fitting residuals based on instrumental uncertainty, minimum of all sets
+Column 37: Expected normalized rms of weighted spectral fitting residuals based on instrumental uncertainty, maximum of all sets
+Column 38: Climatological station pressure [mbar]
+Column 39: Climatological station temperature [K]
+Column 40: Climatological effective O2O2 height [km]
+Column 41: Data processing type index
+Column 42: Calibration file version
+Column 43: Calibration file validity starting date
+Column 44: Level 2 Fit data quality flag, minimum of all sets: 0=assured high quality, 1=assured medium quality, 2=assured low quality, 10=not-assured high quality, 11=not-assured medium quality, 12=not-assured low quality
+Column 45: Level 2 Fit data quality flag, maximum of all sets: 0=assured high quality, 1=assured medium quality, 2=assured low quality, 10=not-assured high quality, 11=not-assured medium quality, 12=not-assured low quality
+Column 46: Sum over 2^i using those i, for which the corresponding L2Fit data quality parameter exceeds the DQ1 limit, maximum of all sets, 0=L1 data quality above 0, 1=Spectral fitting was not successful, 2=Weighted rms of spectral fitting too large, 3=Wavelength shift too large
+Column 47: Sum over 2^i using those i, for which the corresponding L2Fit data quality parameter exceeds the DQ2 limit, maximum of all sets (same parameters as for DQ1)
+Column 48: Level 1 data quality flag, minimum of all sets: 0=assured high quality, 1=assured medium quality, 2=assured low quality, 10=not-assured high quality, 11=not-assured medium quality, 12=not-assured low quality
+Column 49: Level 1 data quality flag, maximum of all sets: 0=assured high quality, 1=assured medium quality, 2=assured low quality, 10=not-assured high quality, 11=not-assured medium quality, 12=not-assured low quality
+Column 50: Sum over 2^i using those i, for which the corresponding L1 data quality parameter exceeds the DQ1 limit, maximum of all sets, 0=Saturated data, 1=Too few dark counts measurements, 2=No temperature given or effective temperature too different from the reference temperature, 3=Dark count too high, 4=Unsuccessful dark background fitting, 5=Absolute value of estimated average residual stray light level too high, 6=Although attempted, no wavelength change could be retrieved, 7=Absolute value of retrieved wavelength shift too large, 8=Retrieved wavelength shift differs too much from the shift predicted by the effective temperature
+Column 51: Sum over 2^i using those i, for which the corresponding L1 data quality parameter exceeds the DQ2 limit, maximum of all sets (same parameters as for DQ1)
+Column 52: Wavelength effective temperature [<B0>C], mean over all sets, 999=no effective temperature given
+Column 53: Estimated average residual stray light level [%], mean over all sets (only valid for stray light correction methods 2 and higher)
+Column 54: Estimated average residual stray light level [%], minimum of all sets (only valid for stray light correction methods 2 and higher)
+Column 55: Estimated average residual stray light level [%], maximum of all sets (only valid for stray light correction methods 2 and higher)
+Column 56: Retrieved wavelength shift from level 1 data [nm], mean over all sets, -9=no wavelength change determination
+Column 57: Retrieved wavelength shift from level 1 data [nm], minimum of all sets, -9=no wavelength change determination
+Column 58: Retrieved wavelength shift from level 1 data [nm], maximum of all sets, -9=no wavelength change determination
+Column 59: Retrieved wavelength shift from spectral fitting [nm], mean over all sets, -9=no wavelength change fitting
+Column 60: Retrieved wavelength shift from spectral fitting [nm], minimum of all sets, -9=no wavelength change fitting
+Column 61: Retrieved wavelength shift from spectral fitting [nm], maximum of all sets, -9=no wavelength change fitting
+Column 62: Integration time [ms], minimum of all sets
+Column 63: Integration time [ms], maximum of all sets
+Column 64: Number of dark count cycles, mean over all sets
+Column 65: Number of dark count cycles, minimum of all sets
+Column 66: Number of dark count cycles, maximum of all sets
+Column 67: Effective position of filterwheel #1, minimum of all sets, 0=filterwheel not used, 1-9 are valid positions
+Column 68: Effective position of filterwheel #1, maximum of all sets, 0=filterwheel not used, 1-9 are valid positions
+Column 69: Effective position of filterwheel #2, minimum of all sets, 0=filterwheel not used, 1-9 are valid positions
+Column 70: Effective position of filterwheel #2, maximum of all sets, 0=filterwheel not used, 1-9 are valid positions
+---------------------------------------------------------------------------------------
+20200930T180938Z 7578.75669 22.75 48.01 208.80 89.00 188.00 1.0616e+07 1.7610e+06 7.7166e-01 6.5766e-02 4 0 10 0 0 1.494 2.8518e+00 4.7157e-01 1.1785e-01 1.4974e-02 4 0 10 0 0 1.492 4 5.560e-04 2.513e-04 7.002e-04 4.057e-04 3.716e-04 4.911e-04 2.653e-04 2.180e-04 3.737e-04 1013 292 4.25 6 1 20200720 10 10 0 0 10 10 0 0 25.86 0.37 0.36 0.38 -0.05675 -0.05723 -0.05651 -0.06462 -0.06481 -0.06416 37.5 136.8 67.6 24 107 1 1 1 1
+20200930T181919Z 7578.76342 23.24 48.94 211.79 89.00 188.00 1.1113e+07 1.8875e+06 8.2290e-01 7.2942e-02 4 0 10 0 0 1.521 2.5994e+00 4.4330e-01 1.1752e-01 1.1797e-02 4 0 10 0 0 1.520 4 5.392e-04 2.511e-04 7.042e-04 3.288e-04 2.872e-04 4.218e-04 2.682e-04 2.187e-04 3.819e-04 1013 292 4.25 6 1 20200720 10 10 0 0 10 10 0 0 25.90 0.37 0.36 0.38 -0.05652 -0....skipping...
+0.10924 -0.10749 -0.11062 -0.11111 -0.10947 41.9 191.6 61.7 17 116 1 1 1 1
+...
+20230220T214307.0Z 8451.90494 23.50 81.28 247.54 88.99 186.00 9.5975e+06 2.9656e+06 7.9794e-01 6.1883e-02 3 1 11 12 0 6.465 8.9235e+00 2.6661e+00 2.8852e-01 3.9875e-02 4 1 11 12 0 6.254 4 1.102e-03 5.452e-04 1.490e-03 5.384e-04 4.200e-04 2.591e-03 4.702e-04 4.336e-04 6.325e-04 1010 284 4.08 6 1 20200720 10 10 0 0 10 10 0 0 25.58 0.35 0.33 0.39 -0.10858 -0.11003 -0.10697 -0.10331 -0.10423 -0.10258 123.7 409.7 21.4 8 27 1 1 1 1
+20230220T220314.6Z 8451.91892 23.31 84.84 250.99 89.00 186.00 9.3920e+06 3.0147e+06 7.4380e-01 8.9158e-02 3 1 12 12 8 10.532 9.7336e+00 2.9365e+00 2.5610e-01 2.6100e-02 4 1 12 12 8 9.667 4 1.409e-03 7.834e-04 1.783e-03 6.419e-04 5.663e-04 1.167e-03 6.457e-04 5.895e-04 7.741e-04 1010 284 4.08 6 1 20200720 10 10 0 0 10 10 0 0 25.58 0.35 0.31 0.38 -0.10876 -0.11002 -0.10692 -0.10503 -0.10650 -0.10219 201.6 553.3 12.0 6 16 1 1 1 1
+
+
+
+===============================================================================
+
+
+File name: Pandora166s1_PhiladelphiaPA_L2_rnvh3p1-8.txt
+File generation date: 20230104T053257.8Z
+Data description: Level 2 file (columns and more)
+Data file version: rnvh3p1-8
+Data product status: Nitrogen dioxide data are official, Water vapor data are unvalidated
+Local principal investigator: Lukas Valin
+Network principal investigator: Alexander Cede
+DOI: 10.48596/pgn.rnvh3p1-8.PhiladelphiaPA.P166s1
+Instrument type: Pandora
+Instrument number: 166
+Spectrometer number: 1
+Processing software version used: BlickP v1.8.17
+Full location name: Philadelphia, Pennsylvania; Philadelphia-Camden-Wilmington; North East Waste (NE
+Short location name: PhiladelphiaPA
+Country of location: United States
+Location latitude [deg]: 39.9919
+Location longitude [deg]: -75.0811
+Location altitude [m]: 6
+Data start time: 20210412T131931.
+Data end time: 20230103T210638.
+Data caveats: None
+---------------------------------------------------------------------------------------
+Column 1: UT date and time for measurement center, yyyymmddThhmmssZ (ISO 8601)
+Column 2: Fractional days since 1-Jan-2000 UT midnight for measurement center
+Column 3: Effective duration of measurement [s]
+Column 4: Solar zenith angle for measurement center [deg]
+Column 5: Solar azimuth for measurement center [deg], 0=north, increases clockwise
+Column 6: Lunar zenith angle for measurement center [deg]
+Column 7: Lunar azimuth for measurement center [deg], 0=north, increases clockwise
+Column 8: Pointing zenith angle for measurement center [deg]
+Column 9: Pointing azimuth for measurement center [deg], 0=north, increases clockwise
+Column 10: rms of unweighted fitting residuals, -9=fitting not successful
+Column 11: Normalized rms of fitting residuals weighted with independent uncertainty, -9=fitting not successful or no uncertainty given
+Column 12: Expected rms of unweighted fitting residuals based on independent uncertainty, -9=fitting not successful or no uncertainty given
+Column 13: Expected normalized rms of weighted fitting residuals based on independent uncertainty, -9=fitting not successful or no uncertainty given
+Column 14: Climatological station pressure [mbar]
+Column 15: Climatological station temperature [K]
+Column 16: Climatological effective O2 height [km]
+Column 17: Climatological effective O2O2 height [km]
+Column 18: Climatological surface O2 concentration [mol/m3]
+Column 19: Climatological surface O2O2 concentration [mol2/m6]
+Column 20: Climatological total O2 column [mol/m2]
+Column 21: Climatological total O2O2 column [mol2/m5]
+Column 22: Data processing type index
+Column 23: Calibration file version
+Column 24: Calibration file validity starting date
+Column 25: Mean value of measured data inside fitting window [same units as measurements]
+Column 26: Wavelength effective temperature [<B0>C], 999=no effective temperature given
+Column 27: Estimated average residual stray light level [%] (only valid for stray light correction methods 2 and higher)
+Column 28: Retrieved wavelength shift from L1 data [nm], -9=no wavelength change determination
+Column 29: Retrieved total wavelength shift [nm], -9=no wavelength change fitting
+Column 30: Retrieved resolution change [%], -999=no resolution change fitting
+Column 31: Integration time [ms]
+Column 32: Number of bright count cycles
+Column 33: Effective position of filterwheel #1, 0=filterwheel not used, 1-9 are valid positions
+Column 34: Effective position of filterwheel #2, 0=filterwheel not used, 1-9 are valid positions
+Column 35: Atmospheric variability [%], 999=no atmospheric variability was determined
+Column 36: L1 data quality flag, 0=assured high quality, 1=assured medium quality, 2=assured low quality, 10=not-assured high quality, 11=not-assured medium quality, 12=not-assured low quality
+Column 37: Sum over 2^i using those i, for which the corresponding L1 data quality parameter exceeds the DQ1 limit, 0=Saturated data, 1=Too few dark counts measurements, 2=No temperature given or effective temperature too different from the reference temperature, 3=Dark count too high, 4=Unsuccessful dark background fitting, 5=The dark count differs significantly from the dark map for too many pixels, 6=Absolute value of estimated average residual stray light level too high, 7=Although attempted, no wavelength change could be retrieved, 8=Absolute value of retrieved wavelength shift too large, 9=Retrieved wavelength shift differs too much from the shift predicted by the effective temperature
+Column 38: Sum over 2^i using those i, for which the corresponding L1 data quality parameter exceeds the DQ2 limit (same parameters as for DQ1)
+Column 39: L2Fit data quality flag, 0=assured high quality, 1=assured medium quality, 2=assured low quality, 10=not-assured high quality, 11=not-assured medium quality, 12=not-assured low quality
+Column 40: Sum over 2^i using those i, for which the corresponding L2Fit data quality parameter exceeds the DQ1 limit, 0=L1 data quality above 0, 1=Spectral fitting was not successful, 2=Wavelength shift too large, 3=Normalized rms of fitting residuals weighted with independent uncertainty too large
+Column 41: Sum over 2^i using those i, for which the corresponding L2Fit data quality parameter exceeds the DQ2 limit (same parameters as for DQ1)
+Column 42: L2 data quality flag for water vapor, 0=assured high quality, 1=assured medium quality, 2=assured low quality, 10=not-assured high quality, 11=not-assured medium quality, 12=not-assured low quality, 20=unusable high quality, 21=unusable medium quality, 22=unusable low quality
+Column 43: Sum over 2^i using those i, for which the corresponding L2 data quality parameter for water vapor exceeds the DQ1 limit, 0=L2Fit data quality above 0, 1=Retrieval error, 2=Air mass factor too large, 3=Atmospheric variability too large
+Column 44: Sum over 2^i using those i, for which the corresponding L2 data quality parameter for water vapor exceeds the DQ2 limit (same parameters as for DQ1)
+Column 45: Water vapor surface concentration [mol/m3], -9e99=retrieval not successful
+Column 46: Independent uncertainty of water vapor surface concentration [mol/m3], -6=no surface concentration was retrieved since the maximum viewing zenith angle was below 87deg, -7=uncertainty could not be retrieved since slant column uncertainties were missing
+Column 47: Water vapor surface concentration index, 1=Fully mixed case from extrapolation to horizon, 2=Fully mixed case from largest pointing zenith angle, 3=Heterogeneous case from extrapolation to horizon, 4=Heterogeneous case from largest pointing zenith angle, -6=no surface concentration was retrieved since the maximum viewing zenith angle was below 87deg
+Column 48: Water vapor heterogeneity flag, 0=well mixed conditions, 1=heterogeneous conditions, -6=no surface concentration was retrieved since the maximum viewing zenith angle was below 87deg
+Column 49: Water vapor tropospheric vertical column amount [moles per square meter], -9e99=retrieval not successful
+Column 50: Independent uncertainty of water vapor tropospheric vertical column amount [moles per square meter], -4=tropospheric column was estimated from direct sun measurements using effective temperature, -5=tropospheric column was estimated from direct sun measurements using stratospheric climatology, -7=uncertainty could not be retrieved since slant column uncertainties were missing
+Column 51: Maximum horizontal distance for water vapor tropospheric column [km]
+Column 52: Maximum vertical distance for water vapor tropospheric column [km]
+Column 53: L2 data quality flag for nitrogen dioxide, 0=assured high quality, 1=assured medium quality, 2=assured low quality, 10=not-assured high quality, 11=not-assured medium quality, 12=not-assured low quality, 20=unusable high quality, 21=unusable medium quality, 22=unusable low quality
+Column 54: Sum over 2^i using those i, for which the corresponding L2 data quality parameter for nitrogen dioxide exceeds the DQ1 limit, 0=L2Fit data quality above 0, 1=Retrieval error, 2=Air mass factor too large, 3=Atmospheric variability too large
+Column 55: Sum over 2^i using those i, for which the corresponding L2 data quality parameter for nitrogen dioxide exceeds the DQ2 limit (same parameters as for DQ1)
+Column 56: Nitrogen dioxide surface concentration [mol/m3], -9e99=retrieval not successful
+Column 57: Independent uncertainty of nitrogen dioxide surface concentration [mol/m3], -6=no surface concentration was retrieved since the maximum viewing zenith angle was below 87deg, -7=uncertainty could not be retrieved since slant column uncertainties were missing
+Column 58: Nitrogen dioxide surface concentration index, 1=Fully mixed case from extrapolation to horizon, 2=Fully mixed case from largest pointing zenith angle, 3=Heterogeneous case from extrapolation to horizon, 4=Heterogeneous case from largest pointing zenith angle, -6=no surface concentration was retrieved since the maximum viewing zenith angle was below 87deg
+Column 59: Nitrogen dioxide heterogeneity flag, 0=well mixed conditions, 1=heterogeneous conditions, -6=no surface concentration was retrieved since the maximum viewing zenith angle was below 87deg
+Column 60: Climatological nitrogen dioxide stratospheric column amount [moles per square meter]
+Column 61: Uncertainty of climatological nitrogen dioxide stratospheric column amount [moles per square meter]
+Column 62: Nitrogen dioxide tropospheric vertical column amount [moles per square meter], -9e99=retrieval not successful
+Column 63: Independent uncertainty of nitrogen dioxide tropospheric vertical column amount [moles per square meter], -4=tropospheric column was estimated from direct sun measurements using effective temperature, -5=tropospheric column was estimated from direct sun measurements using stratospheric climatology, -7=uncertainty could not be retrieved since slant column uncertainties were missing
+Column 64: Maximum horizontal distance for nitrogen dioxide tropospheric column [km]
+Column 65: Maximum vertical distance for nitrogen dioxide tropospheric column [km]
+Column 66: Top height of water vapor layer 1 [km], -6=no profile was retrieved since the maximum viewing zenith angle was below 87deg
+Column 67: Partial water vapor vertical column amount in layer 1 [moles per square meter], -9e99=retrieval not successful
+Column 68: Top height of nitrogen dioxide layer 1 [km], -6=no profile was retrieved since the maximum viewing zenith angle was below 87deg
+Column 69: Partial nitrogen dioxide vertical column amount in layer 1 [moles per square meter], -9e99=retrieval not successful
+From Column 70: Optional results for higher layers in the same sequence as for layer 1 (4 columns per layer)
+---------------------------------------------------------------------------------------
+20210412T131931.1Z 7772.555221 12.24 58.04 106.59 64.25 103.39 75.00 180.00 1.667e-03 1.631e-03 1.579e-03 1.551e-03 1018 286 7.35 4.16 8.962e+00 8.032e+01 6.583e+04 3.339e+05 6 1 20210412 4.5565e-05 19.73 1.88 0.00403 0.01707 -999.00 2538.610 10 1 1 98.87 10 0 0 12 8 8 12 1 1 1.5341e+00 1.6418e+00 1 0 3.1776e+02 4.9219e+01 9.20 2.46 12 1 1 2.1876e-07 2.7163e-08 3 0 4.058e-05 4.687e-06 2.4884e-04 4.6159e-06 9.20 2.46 0.09 2.8577e+01 0.09 1.1734e-05 0.45 6.5995e+01 0.45 1.1169e-04 0.97 8.2074e+01 0.97 9.6844e-05 1.63 1.4111e+02 1.63 2.8576e-05
+20210413T202034.3Z 7773.847620 24.69 53.79 249.44 38.42 234.29 89.00 180.00 1.105e-03 1.091e-03 9.828e-04 9.691e-04 1018 286 7.35 4.16 8.961e+00 8.030e+01 6.585e+04 3.340e+05 6 1 20210412 5.8687e-05 20.37 2.06 0.01455 0.01410 -999.00 1233.750 20 1 1 19.19 10 0 0 12 8 8 12 1 1 1.1706e+00 1.6893e-01 2 0 4.9417e+02 2.1436e+01 12.93 3.46 12 1 1 1.7864e-07 1.0519e-08 4 0 5.369e-05 4.687e-06 1.6783e-04 1.7363e-06 12.93 3.46 0.09 5.3543e+01 0.09 1.1082e-05 0.89 3.8984e+02 0.89 1.1300e-04 1.78 4.2716e+01 1.78 3.9559e-05 2.00 8.0707e+00 2.00 4.1904e-06
+...
+20230220T214747.7Z 8451.908191 24.80 81.00 247.68 75.79 240.23 87.00 152.00 1.566e-03 1.521e-03 8.583e-04 8.419e-04 1014 284 7.27 4.09 8.987e+00 8.077e+01 6.535e+04 3.305e+05 6 5 20220925 2.4876e-05 19.94 1.95 -0.00346 0.00572 -999.00 516.390 48 1 1 99.75 10 0 0 12 12 8 12 1 1 4.3156e-01 2.5722e-02 2 0 6.3313e+02 3.7018e+01 12.47 3.34 12 1 1 3.5798e-07 5.9379e-09 2 0 4.693e-05 4.687e-06 4.6506e-04 4.5900e-06 12.47 3.34 0.92 1.9649e+02 0.92 2.2207e-04 1.09 3.4308e+01 1.09 3.2602e-05 1.17 1.7027e+01 1.17 1.2454e-05 1.20 1.8598e+02 1.20 0.0000e+00 1.24 1.2609e+01 1.24 1.1751e-05 1.29 1.8878e+01 1.29 1.7908e-05 1.34 1.5925e+01 1.34 1.5206e-05 1.38 1.2075e+01 1.38 1.4484e-05 1.43 1.2758e+01 1.43 1.6221e-05 1.52 1.7490e+01 1.52 2.3758e-05 1.72 5.6290e+01 1.72 5.2941e-05 1.87 3.4181e+01 1.87 3.0451e-05 1.96 1.9125e+01 1.96 1.5215e-05
+20230220T220919.1Z 8451.923138 25.03 84.85 251.33 79.25 244.08 87.00 152.00 1.908e-03 1.836e-03 1.132e-03 1.109e-03 1014 284 7.27 4.09 8.987e+00 8.077e+01 6.535e+04 3.306e+05 6 5 20220925 1.7574e-05 19.93 1.94 -0.00274 0.00663 -999.00 926.520 27 1 1 95.79 10 0 0 12 12 12 12 1 1 3.4868e-01 3.1842e-02 2 0 4.7303e+02 6.6714e+01 11.20 3.00 12 1 1 3.4379e-07 9.0734e-09 2 0 4.950e-05 4.687e-06 3.5607e-04 6.8529e-06 11.20 3.00 0.90 9.0751e+01 0.90 2.4699e-04 1.06 1.4665e+01 1.06 3.2410e-05 1.06 4.7737e-01 1.06 6.7256e-07 1.14 3.0705e+02 1.14 0.0000e+00 1.31 1.4603e+01 1.31 1.6916e-05 1.34 2.6027e+00 1.34 2.6671e-06 1.36 2.0724e+00 1.36 2.7561e-06 1.38 1.1152e+00 1.38 1.3200e-06 1.38 3.8560e-01 1.38 5.9392e-07 1.44 4.2825e+00 1.44 6.6980e-06 1.50 3.5399e+00 1.50 5.6883e-06 1.77 1.4879e+01 1.77 2.5455e-05 2.04 1.6607e+01 2.04 1.3905e-05
+
+
+===============================================================================
+
+File name: Pandora190s1_Bangkok_L2_rnvssp1-8.txt
+File generation date: 20230104T173653.0Z
+Data description: Level 2 file (columns and more)
+Data file version: rnvssp1-8
+Data product status: Nitrogen dioxide data are disused
+Local principal investigator:
+Network principal investigator: Alexander Cede
+DOI: 10.48596/pgn.rnvssp1-8.Bangkok.P190s1
+Instrument type: Pandora
+Instrument number: 190
+Spectrometer number: 1
+Processing software version used: BlickP v1.8.24
+Full location name: Pollution Control Department
+Short location name: Bangkok
+Country of location: Thailand
+Location latitude [deg]: 13.7847
+Location longitude [deg]: 100.5400
+Location altitude [m]: 60
+Data start time: 20210520T040350.
+Data end time: NONE
+Data caveats: None
+---------------------------------------------------------------------------------------
+Column 1: UT date and time for measurement center, yyyymmddThhmmssZ (ISO 8601)
+Column 2: Fractional days since 1-Jan-2000 UT midnight for measurement center
+Column 3: Effective duration of measurement [s]
+Column 4: Solar zenith angle for measurement center [deg]
+Column 5: Solar azimuth for measurement center [deg], 0=north, increases clockwise
+Column 6: Lunar zenith angle for measurement center [deg]
+Column 7: Lunar azimuth for measurement center [deg], 0=north, increases clockwise
+Column 8: rms of unweighted fitting residuals, -9=fitting not successful
+Column 9: Normalized rms of fitting residuals weighted with independent uncertainty, -9=fitting not successful or no uncertainty given
+Column 10: Expected rms of unweighted fitting residuals based on independent uncertainty, -9=fitting not successful or no uncertainty given
+Column 11: Expected normalized rms of weighted fitting residuals based on independent uncertainty, -9=fitting not successful or no uncertainty given
+Column 12: Climatological station pressure [mbar]
+Column 13: Data processing type index
+Column 14: Calibration file version
+Column 15: Calibration file validity starting date
+Column 16: Mean value of measured data inside fitting window [same units as measurements]
+Column 17: Wavelength effective temperature [<B0>C], 999=no effective temperature given
+Column 18: Estimated average residual stray light level [%] (only valid for stray light correction methods 2 and higher)
+Column 19: Retrieved wavelength shift from L1 data [nm], -9=no wavelength change determination
+Column 20: Retrieved total wavelength shift [nm], -9=no wavelength change fitting
+Column 21: Retrieved resolution change [%], -999=no resolution change fitting
+Column 22: Integration time [ms]
+Column 23: Number of bright count cycles
+Column 24: Effective position of filterwheel #1, 0=filterwheel not used, 1-9 are valid positions
+Column 25: Effective position of filterwheel #2, 0=filterwheel not used, 1-9 are valid positions
+Column 26: Atmospheric variability [%], 999=no atmospheric variability was determined
+Column 27: Estimated aerosol optical depth at starting wavelength of fitting window
+Column 28: Estimated aerosol optical depth at center wavelength of fitting window
+Column 29: Estimated aerosol optical depth at ending wavelength of fitting window
+Column 30: L1 data quality flag, 0=assured high quality, 1=assured medium quality, 2=assured low quality, 10=not-assured high quality, 11=not-assured medium quality, 12=not-assured low quality
+Column 31: Sum over 2^i using those i, for which the corresponding L1 data quality parameter exceeds the DQ1 limit, 0=Saturated data, 1=Too few dark counts measurements, 2=No temperature given or effective temperature too different from the reference temperature, 3=Dark count too high, 4=Unsuccessful dark background fitting, 5=The dark count differs significantly from the dark map for too many pixels, 6=Absolute value of estimated average residual stray light level too high, 7=Although attempted, no wavelength change could be retrieved, 8=Absolute value of retrieved wavelength shift too large, 9=Retrieved wavelength shift differs too much from the shift predicted by the effective temperature
+Column 32: Sum over 2^i using those i, for which the corresponding L1 data quality parameter exceeds the DQ2 limit (same parameters as for DQ1)
+Column 33: L2Fit data quality flag, 0=assured high quality, 1=assured medium quality, 2=assured low quality, 10=not-assured high quality, 11=not-assured medium quality, 12=not-assured low quality
+Column 34: Sum over 2^i using those i, for which the corresponding L2Fit data quality parameter exceeds the DQ1 limit, 0=L1 data quality above 0, 1=Spectral fitting was not successful, 2=Wavelength shift too large, 3=Normalized rms of fitting residuals weighted with independent uncertainty too large
+Column 35: Sum over 2^i using those i, for which the corresponding L2Fit data quality parameter exceeds the DQ2 limit (same parameters as for DQ1)
+Column 36: L2 data quality flag for nitrogen dioxide, 0=assured high quality, 1=assured medium quality, 2=assured low quality, 10=not-assured high quality, 11=not-assured medium quality, 12=not-assured low quality, 20=unusable high quality, 21=unusable medium quality, 22=unusable low quality
+Column 37: Sum over 2^i using those i, for which the corresponding L2 data quality parameter for nitrogen dioxide exceeds the DQ1 limit, 0=L2Fit data quality above 0, 1=Retrieval error, 2=Air mass factor too large, 3=Atmospheric variability too large
+Column 38: Sum over 2^i using those i, for which the corresponding L2 data quality parameter for nitrogen dioxide exceeds the DQ2 limit (same parameters as for DQ1)
+Column 39: Nitrogen dioxide total vertical column amount [moles per square meter], -9e99=retrieval not successful
+Column 40: Independent uncertainty of nitrogen dioxide total vertical column amount [moles per square meter], -1=cross section is zero in this wavelength range, -3=spectral fitting was done, but no independent uncertainty could be retrieved, -5=no independent uncertainty input was given, -9=spectral fitting was not successful
+Column 41: Structured uncertainty of nitrogen dioxide total vertical column amount [moles per square meter], -1=cross section is zero in this wavelength range, -7=not given since method "MEAS" was chosen, -9=spectral fitting was not successful
+Column 42: Common uncertainty of nitrogen dioxide total vertical column amount [moles per square meter], -1=cross section is zero in this wavelength range, -6=no common uncertainty input was given, -7=not given since method "MEAS" was chosen, -9=spectral fitting was not successful
+Column 43: Total uncertainty of nitrogen dioxide total vertical column amount [moles per square meter], -1=cross section is zero in this wavelength range, -3=spectral fitting was done, but no independent uncertainty could be retrieved, -5=no independent uncertainty input was given, -6=no common uncertainty input was given, -7=not given since method "MEAS" was chosen, -8=not given, since not all components are given
+Column 44: rms-based uncertainty of nitrogen dioxide total vertical column amount [moles per square meter], -1=cross section is zero in this wavelength range, -3=spectral fitting was done, but no independent uncertainty could be retrieved, -9=spectral fitting was not successful
+Column 45: Nitrogen dioxide effective temperature [K]
+Column 46: Independent uncertainty of nitrogen dioxide effective temperature [K] , -1=temperature fitting was requested, but cross section is zero in this wavelength range, -2=no temperature fitting was requested and output for effective temperature and common uncertainty of it is based on f-code, -3=spectral fitting was done, but no independent uncertainty could be retrieved, -4=temperature fitting was requested, but differential optical depth is too small to retrieve temperature, -5=spectral fitting was done without using the independent uncertainty input, -6=no independent uncertainty input was given, -9=spectral fitting was not successful
+Column 47: Structured uncertainty of nitrogen dioxide effective temperature [K] , -1=temperature fitting was requested, but cross section is zero in this wavelength range, -4=temperature fitting was requested, but differential optical depth is too small to retrieve temperature, -9=spectral fitting was not successful
+Column 48: Common uncertainty of nitrogen dioxide effective temperature [K] , -1=temperature fitting was requested, but cross section is zero in this wavelength range, -2=no temperature fitting was requested and output for effective temperature and common uncertainty of it is based on f-code, -3=spectral fitting was done, but no independent uncertainty could be retrieved, -4=temperature fitting was requested, but differential optical depth is too small to retrieve temperature, -6=no independent uncertainty input was given, -9=spectral fitting was not successful
+Column 49: Total uncertainty of nitrogen dioxide effective temperature [K] , -1=temperature fitting was requested, but cross section is zero in this wavelength range, -2=no temperature fitting was requested and output for effective temperature and common uncertainty of it is based on f-code, -3=spectral fitting was done, but no independent uncertainty could be retrieved, -4=temperature fitting was requested, but differential optical depth is too small to retrieve temperature, -5=spectral fitting was done without using the independent uncertainty input, -6=no independent uncertainty or common uncertainty input was given, -9=spectral fitting was not successful
+Column 50: Direct nitrogen dioxide air mass factor
+Column 51: Uncertainty of direct nitrogen dioxide air mass factor, -7=uncertainty could not be retrieved since slant column uncertainties were missing
+Column 52: Diffuse correction applied before fitting at effective fitting wavelength for nitrogen dioxide [%], 0=no diffuse correction applied or fitting not successful, >0=measured diffuse correction, <0=(negative value of) calculated diffuse correction
+Column 53: Climatological nitrogen dioxide stratospheric column amount [moles per square meter]
+Column 54: Uncertainty of climatological nitrogen dioxide stratospheric column amount [moles per square meter]
+---------------------------------------------------------------------------------------
+20210520T040350.6Z 7810.169335 12.35 17.98 67.30 113.36 67.09 6.165e-04 6.219e-04 1.665e-04 1.647e-04 1004 2 4 20210331 1.6620e-01 24.13 2.03 0.03057 0.03439 0.19 23.420 525 1 4 72.04 0.365 0.367 0.369 10 0 0 10 0 0 12 8 8 3.1091e-04 2.1453e-06 2.0432e-06 8.1290e-06 8.6521e-06 8.1800e-06 285.78 -2.00 17.15 -2.00 17.15 1.051 0.000 0.00e+00 3.613e-05 4.202e-06
+20210520T040405.1Z 7810.169503 12.37 17.92 67.25 113.30 67.11 6.567e-04 6.575e-04 1.914e-04 1.892e-04 1004 2 4 20210331 1.3203e-01 24.13 2.04 0.03008 0.03538 0.08 23.420 525 1 4 94.70 0.452 0.455 0.457 10 0 0 10 0 0 12 8 8 2.5084e-04 2.3894e-06 2.1481e-06 7.8558e-06 8.4875e-06 8.4502e-06 283.62 -2.00 16.47 -2.00 16.47 1.051 0.000 0.00e+00 3.614e-05 4.202e-06
+...
+20230223T104142.0Z 8454.445625 49.87 80.54 257.33 38.25 260.77 3.699e-03 3.154e-03 5.313e-04 4.971e-04 1006 2 4 20210331 6.8413e-03 23.26 2.27 -0.01378 -0.01881 0.76 159.300 313 1 4 41.10 0.087 0.082 0.077 10 0 0 12 8 8 12 9 1 4.4966e-04 1.1104e-06 1.2418e-06 1.4718e-06 2.2229e-06 8.9035e-06 286.31 -2.00 17.85 -2.00 17.85 5.903 0.000 0.00e+00 4.627e-05 4.202e-06
+20230223T105234.8Z 8454.453181 50.20 83.12 258.06 40.80 261.95 2.631e+00 3.025e+00 1.538e-03 1.470e-03 1006 2 4 20210331 1.1067e-03 23.26 3.92 -0.01281 2.63646 1.62 706.900 71 1 4 57.10 4.181 3.534 -0.943 10 0 0 12 12 12 12 9 9 -4.3493e-02 3.1551e-12 4.1904e-06 1.2376e-12 4.1904e-06 5.4380e-09 228.34 -2.00 2.05 -2.00 2.05 6.489 0.001 0.00e+00 4.799e-05 4.202e-06
+
+===============================================================================
+

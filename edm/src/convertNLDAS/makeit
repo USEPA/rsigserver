@@ -1,0 +1,15 @@
+#!/bin/sh
+
+clear
+
+echo
+echo "Compiling convertNLDAS"
+gcc -m64 -Wall -D_FILE_OFFSET_BITS=64 -D_LARGEFILE_SOURCE -DNDEBUG -O -Inetcdf -o convertNLDAS convertNLDAS.c -Lnetcdf/lib/Linux.x86_64 -lnetcdf4 -lhdf5_hl -lhdf5 -lcurl -lz -ldl -lm -lc
+strip convertNLDAS
+ls -l convertNLDAS
+file  convertNLDAS
+ldd   convertNLDAS
+
+ls -Fsalt | head
+echo Done
+

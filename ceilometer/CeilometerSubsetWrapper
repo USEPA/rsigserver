@@ -1,0 +1,36 @@
+#!/bin/csh -f
+# CeilometerSubsetWrapper - runs either CeilometerSubset or Ceilometer2Subset
+# program based on content of -files listfile.
+# That is, if listfile contains a list of .nc files then run the new
+# Ceilometer2Subset program else run the old CeilometerSubset program.
+#
+# This script is invoked by /data/Apache/cgi-bin/ceilometerserver.
+#
+# In the future when there are no more old
+# /data/Ceilometer/data/*.h5 ceilometer files,
+# remove this script and
+# rename /rsig/current/code/bin/Linus.x86_64/Ceilometer2Subset
+# to     /rsig/current/code/bin/Linus.x86_64/CeilometerSubset
+# and edit ceilometerserver line:
+# set $subsetter = $directory/CeilometerSubsetWrapper
+# to
+# set $subsetter = $bindir/CeilometerSubset
+#
+# 2022-07-14 plessel.todd@epa.gov
+#
+
+set bindir = /rsig/current/code/bin/Linux.x86_64
+
+if ( "$argv[2]" != '' ) then
+  grep '\.nc' "$argv[2]" >& /dev/null
+
+  if ( $status == 0 ) then
+    $bindir/Ceilometer2Subset $*
+    exit $status
+  else
+    $bindir/CeilometerSubset $*
+    exit $status
+  endif
+endif
+
+exit 1

@@ -1,0 +1,10 @@
+#!/bin/sh
+
+# Compile VIIRSSubset:
+
+gcc -m64 -Wall -D_FILE_OFFSET_BITS=64 -D_LARGEFILE_SOURCE -DNDEBUG -O -I. -o VIIRSSubset VIIRSSubset.c ReadData.c Utilities.c -L. -lnetcdf4 -lhdf5_hl -lhdf5 -lcurl -lz -ldl -lm -lc
+strip VIIRSSubset
+ls -l VIIRSSubset
+file  VIIRSSubset
+ldd   VIIRSSubset
+

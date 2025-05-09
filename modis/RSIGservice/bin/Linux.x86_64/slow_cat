@@ -1,0 +1,51 @@
+#!/usr/local/bin/perl -w
+
+=head1 SYNOPSIS
+
+slow_cat file <...fileN>
+
+=head1 DESCRIPTION
+
+print the specified file(s) to stdout, but slowly, so that SGE can keep up.
+
+=head1 AUTHORS AND MAINTAINERS
+
+Greg Ederer
+
+=head1 ACKNOWLEDGEMENTS
+
+This software is developed by the MODAPS Team for the National
+Aeronautics and Space Administrationn, Goddard Space Flight
+Center, under contract NAS5-32373.
+
+=cut
+
+###########################################################################
+
+use strict;
+
+use FileHandle;
+#use POSIX;
+my $BLOCK_SIZE = 65536;
+
+my $sum = 0;
+foreach my $item (@ARGV)
+{
+  next unless $item && -f "$item";
+  my $fh = new FileHandle("<$item") or die "could not read $item";
+  my $buf = 0; my $nn = 0;
+  while ($nn = $fh->read($buf, $BLOCK_SIZE))
+  {
+    print STDOUT $buf;
+    $sum += $nn;
+    # sleep for 1 milliseconds (slow down the transfer so that sge doesn't
+    # choke)...
+    select(undef, undef, undef, 0.001);
+  }
+  $fh->close();
+}
+print STDERR "slow_cat transferred $sum bytes\n";
+exit(0);
+
+0;
+

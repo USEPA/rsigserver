@@ -1,0 +1,14 @@
+#!/bin/sh
+
+MY_UNAME="`uname`"
+MY_UNAME_M="`uname -m`"
+MY_PLATFORM="${MY_UNAME}.$MY_UNAME_M"
+
+# Compile CMAQSubset:
+
+gcc -m64 -Wall -D_FILE_OFFSET_BITS=64 -D_LARGEFILE_SOURCE -DNDEBUG -O -I. -o CMAQSubset CMAQSubset.c Albers.c Lambert.c Mercator.c NetCDFUtilities.c Projector.c Stereographic.c Utilities.c -Llib/$MY_PLATFORM -lnetcdf4 -lhdf5_hl -lhdf5 -lcurl -lz -ldl -lm -lc
+strip CMAQSubset
+ls -l CMAQSubset
+file  CMAQSubset
+ldd   CMAQSubset
+

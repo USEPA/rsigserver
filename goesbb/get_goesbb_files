@@ -1,0 +1,78 @@
+#!/bin/csh -f
+# get_goesbb_files - Get current GOESBB (biomass burning) files from NOAA web site.
+# http://satepsanone.nesdis.noaa.gov/pub/FIRE/BBEP-geo/
+
+set URL = 'https://satepsanone.nesdis.noaa.gov/pub/FIRE/BBEP-geo'
+set URL0 = "$URL/PREVIOUS_DAYS"
+set CURL = '/usr/bin/curl -k --silent --retry 0 -L --tcp-nodelay --max-time 300 -o -'
+set NCDUMP = '/home/tplessel/bin/Linux.x86_64/ncdump'
+
+cd /data/GOESBB
+
+@ yyyymmdd = `date -u "+%Y%m%d"`
+
+# Number of days to try to retrieve.
+
+@ days = 7
+
+while ( $days )
+  @ days -= 1
+
+  @ yyyy = $yyyymmdd / 10000
+
+  if ( ! -d data/$yyyy ) then
+    mkdir -p data/$yyyy
+  endif
+
+  foreach hh_hh ( 00_05 06_11 12_17 18_23 )
+    set data_file = "biomass_burning_${yyyymmdd}_${hh_hh}.nc"
+    set output_file = "data/$yyyy/$data_file"
+
+    # Check if the output file already exists:
+ 
+    $NCDUMP -h $output_file >& /dev/null
+
+    if ( $status != 0 ) then # Non-existent or invalid:
+
+      # Try to retrieve it from the previous day directory
+      # and then, if that fails, from the current day directory:
+
+      foreach url ( $URL0 $URL )
+        $CURL "$url/$data_file" > $output_file
+        $NCDUMP -h $output_file >& /dev/null
+
+        if ( $status != 0 ) then
+          \rm -f $output_file
+        else
+          chmod 444 $output_file # Prevent subsequent overwrites.
+##        ls -l $output_file
+          break # Don't try any remaining URL retrievals.
+        endif
+      end
+    endif
+  end
+
+  # Compute previous date:
+ 
+  @ yyyy = $yyyymmdd / 10000
+  @ mm = $yyyymmdd / 100 % 100
+  @ dd = $yyyymmdd % 100
+
+  @ dd -= 1
+
+  if ( $dd < 1 ) then
+    @ mm -= 1
+
+    if ( $mm < 1 ) then
+      @ yyyy -= 1
+      @ mm = 12
+    endif
+
+    @ dd = `echo $yyyy $mm | awk '{ yyyy = $1; mm = $2; n = split( "31 28 31 30 31 30 31 31 30 31 30 31", a, " " ); d = a[mm]; if ( mm == 2 ) { leap = ( ( yyyy % 4 == 0 ) && ( ( yyyy % 100 != 0 ) || ( yyyy % 400 == 0 ) ) ); d += leap } print d }'`
+
+  endif
+
+  @ yyyymmdd = $yyyy * 10000 + $mm * 100 + $dd
+end
+
+

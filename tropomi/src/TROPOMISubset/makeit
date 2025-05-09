@@ -1,0 +1,10 @@
+#!/bin/sh
+
+# Compile TROPOMISUbset:
+
+gcc -m64 -Wall -D_FILE_OFFSET_BITS=64 -D_LARGEFILE_SOURCE -DNDEBUG -O -I. -o TROPOMISubset TROPOMISubset.c ReadData.c Utilities.c -L. -lnetcdf4 -lhdf5_hl -lhdf5 -lcurl -lz -ldl -lm -lc
+strip TROPOMISubset
+ls -l TROPOMISubset
+file  TROPOMISubset
+ldd   TROPOMISubset
+

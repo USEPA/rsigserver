@@ -1,0 +1,198 @@
+#!/bin/csh -f
+# listfiles - List VIIRS data files for given starting YYYYMMDDHH and HOURS.
+# 2009-11-12 plessel.todd@epa.gov 919-541-5500
+
+# Parallelize the bounds_filter program instances. 1 = No concurrency.
+@ processes = 10
+set directory = '/data/VIIRS_NOAA'
+set tmpdir = '/data/tmp'
+set data_directory = "$directory/data"
+#set bounds = "$directory/bounds"
+set bounds_filter = "$directory/bounds_filter"
+set temp  = "$tmpdir/listfiles.$$"
+set temp2 = "$tmpdir/listfiles2.$$"
+set temp_file_input_template  = "$tmpdir/listfiles_input_PROCESS.$$"
+set temp_file_output_template = "$tmpdir/listfiles_output_PROCESS.$$"
+set temp_run_file = "$tmpdir/listfiles_run_file.$$"
+
+# Make tail +N work!
+setenv _POSIX2_VERSION 199209
+set _POSIX_VERSION=199209
+
+touch $temp ; \rm $temp
+
+@ ok = 0
+@ yyyymmddhh = 0
+@ hours      = 0
+
+if ( $#argv == 7 ) then
+  set product  = `echo "$1" | tr '[a-z]' '[A-Z]'`
+  @ yyyymmddhh = $2
+  @ hours      = $3
+  set lonmin   = $4
+  set latmin   = $5
+  set lonmax   = $6
+  set latmax   = $7
+  @ ok = ($yyyymmddhh >= 1990010100 && $yyyymmddhh <= 2147123123 && $hours >= 1)
+
+  if ( $ok ) then
+    @ ok = `echo $lonmin $lonmax $latmin $latmax | awk '{ if ( $1 >= -180.0 && $1 <= 180.0 && $2 >= $1 && $2 <= 180.0 && $3 >= -90.0 && $3 <= 90.0 && $4 >= $3 && $4 <= 90.0 ) print 1; else print 0 }'`
+  endif
+
+  if ( ! $ok ) then
+    echo "$0 Invalid command-line arguments $*"
+  endif
+endif
+
+if ( ! $ok ) then
+  echo
+  echo "$0 - List VIIRS data files for given PRODUCT and starting YYYYMMDDHH and HOURS and LONMIN LATMIN LONMAX LATMAX."
+  echo "usage: $0 PRODUCT YYYYMMDDHH HOURS LONMIN LATMIN LONMAX LATMAX"
+  echo "example: $0 JPSSRR-AOD 2019091500 1 -90 30 -89 31"
+  echo '/data/VIIRS_NOAA/data/JPSSRR-AOD/20190914/JRR-AOD_v2r0_j01_s201909142358511_e201909150000139_c201909150024520.nc'
+  echo '/data/VIIRS_NOAA/data/JPSSRR-AOD/20190915/JRR-AOD_v2r0_j01_s201909150000151_e201909150001396_c201909150027340.nc'
+  echo '/data/VIIRS_NOAA/data/JPSSRR-AOD/20190915/JRR-AOD_v2r0_j01_s201909150001409_e201909150003054_c201909150027330.nc'
+  echo '/data/VIIRS_NOAA/data/JPSSRR-AOD/20190915/JRR-AOD_v2r0_j01_s201909150003066_e201909150004311_c201909150024460.nc'
+  echo '/data/VIIRS_NOAA/data/JPSSRR-AOD/20190915/JRR-AOD_v2r0_j01_s201909150004324_e201909150005569_c201909150025420.nc'
+  echo '/data/VIIRS_NOAA/data/JPSSRR-AOD/20190915/JRR-AOD_v2r0_npp_s201909150004327_e201909150005569_c201909150117230.nc'
+  echo '/data/VIIRS_NOAA/data/JPSSRR-AOD/20190915/JRR-AOD_v2r0_j01_s201909150005581_e201909150007209_c201909150024290.nc'
+  echo '/data/VIIRS_NOAA/data/JPSSRR-AOD/20190915/JRR-AOD_v2r0_npp_s201909150005581_e201909150007205_c201909150117120.nc'
+  echo '...'
+  echo '/data/VIIRS_NOAA/data/JPSSRR-AOD/20190915/JRR-AOD_v2r0_j01_s201909150057093_e201909150058338_c201909150131340.nc'
+  echo '/data/VIIRS_NOAA/data/JPSSRR-AOD/20190915/JRR-AOD_v2r0_npp_s201909150058345_e201909150059587_c201909150252040.nc'
+  echo '/data/VIIRS_NOAA/data/JPSSRR-AOD/20190915/JRR-AOD_v2r0_j01_s201909150058350_e201909150059596_c201909150132440.nc'
+  echo
+  exit 1
+endif
+
+set days_per_month = ( 31 28 31 30 31 30 31 31 30 31 30 31 )
+@ yyyy =   $yyyymmddhh / 1000000
+@ mm   = ( $yyyymmddhh / 10000 ) % 100
+@ dd   = ( $yyyymmddhh / 100 ) % 100
+@ hh   =   $yyyymmddhh % 100
+
+if ( "$product" == "JPSSRR-AOD" ) then # Include previous day files that end on first day:
+  @ yyyy0 = $yyyy
+  @ mm0   = $mm
+  @ dd0   = $dd - 1
+
+  if ( $dd0 < 1 ) then
+    @ mm0 -= 1
+
+    if ( $mm0 < 1 ) then
+      @ mm0 = 12
+      @ yyyy0 -= 1
+    endif
+
+    @ days_this_month = $days_per_month[$mm0]
+
+    if ( $mm0 == 2 ) then
+      @ leap = ( $yyyy0 % 4 == 0 && ! ( $yyyy0 % 100 == 0 && ! $yyyy0 % 400 == 0 ) )
+      @ days_this_month += $leap
+    endif
+
+    @ dd0 = $days_this_month
+  endif
+
+  @ yyyymmdd  = `printf "%04d%02d%02d" $yyyy $mm $dd`
+  @ yyyymmdd0 = `printf "%04d%02d%02d" $yyyy0 $mm0 $dd0`
+  @ hh_end = $hh + $hours
+
+  if ( $hh_end > 23 ) @ hh_end = 23
+
+  @ h = $hh
+  while ( $h < $hh_end )
+    set hh0 = `printf "%02d" $h`
+    ls $data_directory/$product/$yyyymmdd0/JRR-AOD_*_*_*_e${yyyymmdd}$hh0*.nc |& grep -v 'ls: ' >> $temp
+    @ h += 1
+  end
+
+endif
+
+@ leap = ( $yyyy % 4 == 0 && ! ( $yyyy % 100 == 0 && ! $yyyy % 400 == 0 ) )
+@ days_per_year = 365 + $leap
+
+@ h = 1
+while ( $h <= $hours )
+
+  # List files matching yyyymmdd hh:
+
+  @ yyyymmdd = `printf "%04d%02d%02d" $yyyy $mm $dd`
+  set hh0 = `printf "%02d" $hh`
+
+  if ( "$product" == "JPSSRR-AOD" ) then
+    ls $data_directory/$product/$yyyymmdd/JRR-AOD_*_*_s${yyyymmdd}$hh0*.nc |& grep -v 'ls: ' >> $temp
+  else
+    ls $data_directory/$product/$yyyymmdd/${product}_*d${yyyymmdd}_t$hh0*.h5 |& grep -v 'ls: ' >> $temp
+  endif
+
+  @ hh += 1
+
+  if ( $hh == 24 ) then
+    @ hh = 0
+    @ dd += 1
+
+    @ days_this_month = $days_per_month[$mm]
+
+    if ( $mm == 2 ) then
+      @ days_this_month += $leap
+    endif
+
+    if ( $dd > $days_this_month ) then
+      @ dd = 1
+      @ mm += 1
+
+      if ( $mm > 12 ) then
+        @ mm = 1
+        @ yyyy += 1
+        @ leap = ( $yyyy % 4 == 0 && ! ( $yyyy % 100 == 0 && ! $yyyy % 400 == 0 ) )
+      endif
+    endif
+  endif
+
+  @ h += 1
+end
+
+cat $temp | sort -t _ -k 5,5 | uniq > $temp2
+mv $temp2 $temp
+
+# Filter time-based list of files by BBOX:
+
+set files = `cat $temp`
+@ file_count = `cat $temp | wc -l`
+
+if ( $processes < 2 || $file_count <= $processes ) then
+  $bounds_filter -files $temp -domain $lonmin $latmin $lonmax $latmax
+else # Run concurrent instances of bounds_filter each on a subset of files:
+  @ count_per_process = $file_count / $processes
+  @ process = 1
+  @ offset = 1
+  echo '#\!/bin/sh' > $temp_run_file
+
+  while ( $process <= $processes )
+    set temp_file_input  = `echo $temp_file_input_template  | sed "s/PROCESS/$process/"`
+    set temp_file_output = `echo $temp_file_output_template | sed "s/PROCESS/$process/"`
+
+    if ( $process == $processes ) then # Last process:
+      tail +$offset $temp > $temp_file_input
+    else
+      tail +$offset $temp | head -$count_per_process > $temp_file_input
+    endif
+
+    echo "$bounds_filter -files $temp_file_input -domain $lonmin $latmin $lonmax $latmax >& $temp_file_output &" >> $temp_run_file
+
+    @ offset += $count_per_process
+    @ process += 1
+  end
+
+  echo "wait" >> $temp_run_file
+  chmod +x $temp_run_file
+  $temp_run_file >& /dev/null
+  set temp_file_inputs  = `echo $temp_file_input_template  | sed "s/PROCESS/*/"`
+  set temp_file_outputs = `echo $temp_file_output_template | sed "s/PROCESS/*/"`
+  cat $temp_file_outputs | sort
+  rm  $temp_file_outputs $temp_file_inputs
+endif
+
+\rm $temp
+

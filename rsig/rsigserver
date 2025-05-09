@@ -1,0 +1,1662 @@
+#!/usr/bin/perl -wT
+
+##############################################################################
+# PURPOSE: rsigserver - Dispatcher for RSIG Applet and WCS and WMS requests.
+#          It partially parses and forwards the QUERY_STRING to the
+#          appropriate RSIG server script (PERL-CGI) for serve RSIG data,
+#          or images.
+#
+# NOTES:   Server is WCS-compliant:
+#          https://www.opengeospatial.org/standards/wcs
+#          https://datafed.net/xs/OpenGIS/wcs/1.0.0/
+#          and modeled after a similar webserver application:
+#          https://webapps.datafed.net/ogc_EPA.wsfl
+#
+#          Uses wget through port 80 to YOUR_WEBSERVER_HOST
+#          and which streams the data back on STDOUT.
+#
+#          Example usage:
+#
+#          wget -q -T 0 -O - 'https://ofmpub.epa.gov/rsig/rsigserver?\
+#                    SERVICE=wcs&\
+#                    VERSION=1.0.0&\
+#                    REQUEST=GetCoverage&\
+#                    COVERAGE=aqs.pm25&\
+#                    TIME=2005-08-26T00:00:00Z/2005-08-30T23:59:59Z&\
+#                    BBOX=-90,30,-85,35,0,0&\
+#                    FORMAT=ascii'
+#
+# HISTORY: 2008/03/28, plessel.todd@epa.gov, 1-919-541-5500, TSSMS=cws
+#
+# STATUS:  reviewed, tested.
+##############################################################################
+
+
+use strict;
+use Digest::SHA qw(sha1_hex);
+package main;
+$| = 1; # Turn off output buffering so messages appear in correct order.
+alarm( 3600 ); # Kill process after 1 hour. Legitimate usage could be an hour!
+# Restrict PATH and ENV. (But before popen, ENV is cleared!)
+delete @ENV{ 'PATH', 'IFS', 'CDPATH', 'ENV', 'BASH_ENV' };
+
+
+############################## TUNABLE CONSTANTS #############################
+
+
+my $debugging = 0; # 1 = print debug messages to STDERR logs/error_log.
+
+# Internal server to forward to via wget command:
+
+my $server_host_dir = 'https://YOUR_WEBSERVER_HOST/cgi-bin/';
+my $bindir = '/rsig/current/code/bin/Linux.x86_64';
+my $curl_command = '/usr/bin/curl -k --silent --max-time 3600 --retry 0 -L --tcp-nodelay ';
+
+my $sed = '/bin/sed';
+
+# Prefix to insert before RSIG web page links when serving html:
+
+my $prefix = 'https://ofmpub.epa.gov/rsig/rsigserver?';
+
+# When serving html files, search each content line for these tags and,
+# if found, insert $prefix so clicking the links will work:
+# Note tags are of the form something="
+
+my @prefix_tags = (
+  ' href="',
+  '<img src="',
+  'CODEBASE="',
+##'value="',
+  '<param name="code" value="',
+  'param name="archive" value="',
+  'src="',
+  "background-image: url('",
+  "background: url('",
+  'icon: "',
+  "icon: '",
+# For EDM videos:
+  '<param name="movie" value="',
+  '<object type="application/x-shockwave-flash" data="',
+  '<param name="src" value="',
+  'swfobject.registerObject("csSWF", "9.0.115", "',
+  '&thumb='
+);
+
+# When serving html files, search each content line for these tags and,
+# if found, filter-out those lines:
+
+my @filter_tags = (
+  'ozone_forecaster',
+  '<!--#include file='
+);
+
+# Webserver content types for each output format:
+
+my %content_types = (
+  # Servable file extensions:
+  'html'          => 'text/html',
+  'png'           => 'image/png',
+  'gif'           => 'image/gif',
+  'jpg'           => 'image/jpeg',
+  'svg'           => 'image/svg+xml',
+  'zip'           => 'application/zip',
+  'gz'            => 'application/gzip',
+  'tgz'           => 'application/octet-stream',
+  'php'           => 'application/x-php',
+  'mov'           => 'video/quicktime',
+  'wmv'           => 'video/x-ms-wmv',
+  'pdf'           => 'application/pdf',
+  'txt'           => 'text/plain',
+  'policy'        => 'text/plain',
+  'jar'           => 'application/java-archive',
+  'js'            => 'application/javascript',
+  'css'           => 'text/css',
+  'csv'           => 'text/csv',
+  'mp4'           => 'video/mp4',
+  'xlsx'          => 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+  # FORMAT values:
+  'ascii'         => 'text/plain',
+  'mcmc'          => 'text/csv',
+  'csv'           => 'text/csv',
+  'bin'           => 'application/octet-stream',
+  'xdr'           => 'application/octet-stream',
+  'hdf'           => 'application/octet-stream',
+  'netcdf-coards' => 'application/netcdf',
+  'netcdf-ioapi'  => 'application/netcdf',
+  'netcdf'        => 'application/netcdf', # Backward-compatible.
+  'json'          => 'application/json'  
+);
+
+# List of files that can be served by 'proxy server usage' mode:
+
+my @servable_files = (
+  'afterextractingjavapolicy.jpg',
+  'aqs.gif',
+  'bookmarkingrsig.jpg',
+  'calipso.gif',
+  'calipso_l2.png',
+  'compare.gif',
+  'controlpanelopenedjavahighlighted.jpg',
+  'data_filtering.png',
+  'datainventory.html',
+  'downloadabledatafiles.html',
+  'deep_blue.png',
+  'extractfile.gif',
+  'extractjavapolicyzip.jpg',
+  'gasp.gif',
+  'index.html',
+  'intersect.gif',
+  'javacontrolpanel.jpg',
+  'javamac.gif',
+  '.java.policy',
+  'javapolicy.html',
+  'running.html',
+##'javapolicy.zip',
+  'javaruntimesettings.gif',
+  'java_version.gif',
+  'modis.gif',
+  'mozaic.gif',
+  'neubrew.png',
+  'regridding.html',
+  'regrid.jpg',
+  'quickstart.pdf',
+  'rsig_quickref.gif',
+  'rsig_katrina_webvid_closeup.mov',
+  'rsig_katrina_webvid_closeup.wmv',
+  'rsig_slides2.pdf',
+  'rsig_slides.pdf',
+  'rsig_poster.pdf',
+  'RSIG_DataUsePolicy.txt',
+  'rsig_snapshot.gif',
+  'savezipfile.jpg',
+  'startmenu.jpg',
+  'troubleshooting.html',
+  'webscripts.html',
+  'rsig_message.jpg',
+
+  'rsig_resources/map_counties.bin',
+  'rsig_resources/map_na.bin',
+  'rsig_resources/map_states.bin',
+  'rsig_resources/map_timezones.bin',
+  'rsig_resources/map_world.bin',
+  'rsig_resources/images/earth_texturemap_QUARTER.jpg',
+
+  'videos.html',
+  'videos/RSIG3D_GettingStarted.mp4',
+  'videos/RSIG3D_GettingStarted.wmv',
+  'videos/RSIG3D_Wildfire.mp4',
+  'videos/RSIG3D_Wildfire.wmv',
+  'videos/RSIG_UsingWCS.mp4',
+
+  'download/RSIG2D_VERSION',
+  'download/RSIG3D_VERSION',
+  'download/RSIG3D_VERSION.png',
+  'download/RSIG3D_Win64.zip',
+  'download/RSIG3D_Win32_Tropomi5.zip',
+  'download/RSIG3D_Mac_Tropomi5.zip',
+  'download/RSIG3D_Darwin.zip',
+  'download/RSIG3D_Darwin.x86_64.zip',
+  'download/RSIG3D_Darwin.arm64.zip',
+  'download/RSIG3D_Linux.x86_64.zip',
+  'download/rsig3d_darwin_signed.zip',
+  'download/RSIG3D_code.tgz',
+  'download/Badge_flare1.mp4',
+  'download/smokesense_map.html',
+  'download/pdf.html',
+  'download/retigo-fact-sheet3.pdf',
+  'download/pdf.js', 
+  'download/pdf.js.css', 
+  'download/pdf.js.map.js',
+  'download/pdf.worker.js.map',
+  'download/pdf.worker.js',
+  'download/test/dar.zip',
+
+  'download/rsig.war',
+  'download/rsig_variables.txt',
+
+  #'wildfire/ux_8.html',
+  #'wildfire/ux_8matt.html',
+  #'wildfire/ux_8bmatt.html',
+  #'wildfire/ux_8matt_functions.js',
+  #'wildfire/ux_8matt_states.js',
+  'wildfire/test_api6.html',
+
+  'data/downloader/downloader',
+  'data/downloader/products.txt',
+  'data/downloader/files.txt',
+
+  'data/FAQSD/data/2001_ozone_daily_8hour_maximum.txt',
+  'data/FAQSD/data/2001_pm25_daily_average.txt',
+  'data/FAQSD/data/2002_ozone_daily_8hour_maximum.txt',
+  'data/FAQSD/data/2002_pm25_daily_average.txt',
+  'data/FAQSD/data/2003_ozone_daily_8hour_maximum.txt',
+  'data/FAQSD/data/2003_pm25_daily_average.txt',
+  'data/FAQSD/data/2004_ozone_daily_8hour_maximum.txt',
+  'data/FAQSD/data/2004_pm25_daily_average.txt',
+  'data/FAQSD/data/2005_ozone_daily_8hour_maximum.txt',
+  'data/FAQSD/data/2005_pm25_daily_average.txt',
+  'data/FAQSD/data/2006_ozone_daily_8hour_maximum.txt',
+  'data/FAQSD/data/2006_pm25_daily_average.txt',
+  'data/FAQSD/data/2007_ozone_daily_8hour_maximum.txt',
+  'data/FAQSD/data/2007_pm25_daily_average.txt',
+  'data/FAQSD/data/2008_ozone_daily_8hour_maximum.txt',
+  'data/FAQSD/data/2008_pm25_daily_average.txt',
+  'data/FAQSD/data/2009_ozone_daily_8hour_maximum.txt',
+  'data/FAQSD/data/2009_pm25_daily_average.txt',
+  'data/FAQSD/data/2010_ozone_daily_8hour_maximum.txt',
+  'data/FAQSD/data/2010_pm25_daily_average.txt',
+  'data/FAQSD/data/2011_ozone_daily_8hour_maximum.txt',
+  'data/FAQSD/data/2011_pm25_daily_average.txt',
+  'data/FAQSD/data/2012_ozone_daily_8hour_maximum.txt',
+  'data/FAQSD/data/2012_pm25_daily_average.txt',
+  'data/FAQSD/data/2013_ozone_daily_8hour_maximum.txt',
+  'data/FAQSD/data/2013_pm25_daily_average.txt',
+  'data/FAQSD/data/2014_ozone_daily_8hour_maximum.txt',
+  'data/FAQSD/data/2014_pm25_daily_average.txt',
+  'data/FAQSD/data/2015_ozone_daily_8hour_maximum.txt',
+  'data/FAQSD/data/2015_pm25_daily_average.txt',
+  'data/FAQSD/data/2016_ozone_daily_8hour_maximum.txt',
+  'data/FAQSD/data/2016_pm25_daily_average.txt',
+  'data/FAQSD/data/2017_ozone_daily_8hour_maximum.txt',
+  'data/FAQSD/data/2017_pm25_daily_average.txt',
+  'data/FAQSD/data/2018_ozone_daily_8hour_maximum.txt',
+  'data/FAQSD/data/2018_pm25_daily_average.txt',
+  'data/FAQSD/data/2019_ozone_daily_8hour_maximum.txt',
+  'data/FAQSD/data/2019_pm25_daily_average.txt',
+  'data/FAQSD/data/2020_ozone_daily_8hour_maximum.txt',
+  'data/FAQSD/data/2020_pm25_daily_average.txt',
+  'data/FAQSD/data/2021_ozone_daily_8hour_maximum.txt',
+  'data/FAQSD/data/2021_pm25_daily_average.txt',
+  'data/FAQSD/inputs/2001.zip',
+  'data/FAQSD/inputs/2002.zip',
+  'data/FAQSD/inputs/2003.zip',
+  'data/FAQSD/inputs/2004.zip',
+  'data/FAQSD/inputs/2005.zip',
+  'data/FAQSD/inputs/2006.zip',
+  'data/FAQSD/inputs/2007.zip',
+  'data/FAQSD/inputs/2008.zip',
+  'data/FAQSD/inputs/2009.zip',
+  'data/FAQSD/inputs/2010.zip',
+  'data/FAQSD/inputs/2011.zip',
+  'data/FAQSD/inputs/2012.zip',
+  'data/FAQSD/inputs/2013.zip',
+  'data/FAQSD/inputs/2014.zip',
+  'data/FAQSD/inputs/2015.zip',
+  'data/FAQSD/inputs/2016.zip',
+  'data/FAQSD/inputs/2017.zip',
+  'data/FAQSD/inputs/2018.zip',
+  'data/FAQSD/inputs/2019.zip',
+  'data/FAQSD/inputs/2020.zip',
+  'data/FAQSD/inputs/2021.zip',
+  'data/FAQSD/inputs/CMAQ_DS_O3_2001_12km_csv.zip',
+  'data/FAQSD/inputs/CMAQ_DS_O3_2001_36km_csv.zip',
+  'data/FAQSD/inputs/CMAQ_DS_O3_2001_csv.zip',
+  'data/FAQSD/inputs/CMAQ_DS_O3_2002_12km_csv.zip',
+  'data/FAQSD/inputs/CMAQ_DS_O3_2002_12km.zip',
+  'data/FAQSD/inputs/CMAQ_DS_O3_2002_36km_csv.zip',
+  'data/FAQSD/inputs/CMAQ_DS_O3_2002_36km.zip',
+  'data/FAQSD/inputs/CMAQ_DS_O3_2002_csv.zip',
+  'data/FAQSD/inputs/CMAQ_DS_O3_2003_12km_csv.zip',
+  'data/FAQSD/inputs/CMAQ_DS_O3_2003_12km.zip',
+  'data/FAQSD/inputs/CMAQ_DS_O3_2003_36km_csv.zip',
+  'data/FAQSD/inputs/CMAQ_DS_O3_2003_36km.zip',
+  'data/FAQSD/inputs/CMAQ_DS_O3_2003_csv.zip',
+  'data/FAQSD/inputs/CMAQ_DS_O3_2004_12km_csv.zip',
+  'data/FAQSD/inputs/CMAQ_DS_O3_2004_12km.zip',
+  'data/FAQSD/inputs/CMAQ_DS_O3_2004_36km_csv.zip',
+  'data/FAQSD/inputs/CMAQ_DS_O3_2004_36km.zip',
+  'data/FAQSD/inputs/CMAQ_DS_O3_2004_csv.zip',
+  'data/FAQSD/inputs/CMAQ_DS_O3_2005_12km_csv.zip',
+  'data/FAQSD/inputs/CMAQ_DS_O3_2005_12km.zip',
+  'data/FAQSD/inputs/CMAQ_DS_O3_2005_36km_csv.zip',
+  'data/FAQSD/inputs/CMAQ_DS_O3_2005_36km.zip',
+  'data/FAQSD/inputs/CMAQ_DS_O3_2005_csv.zip',
+  'data/FAQSD/inputs/CMAQ_DS_O3_2006_12km_csv.zip',
+  'data/FAQSD/inputs/CMAQ_DS_O3_2006_12km.zip',
+  'data/FAQSD/inputs/CMAQ_DS_O3_2006_36km_csv.zip',
+  'data/FAQSD/inputs/CMAQ_DS_O3_2006_36km.zip',
+  'data/FAQSD/inputs/CMAQ_DS_O3_2006_csv.zip',
+  'data/FAQSD/inputs/CMAQ_DS_O3_2007_12km_csv.zip',
+  'data/FAQSD/inputs/CMAQ_DS_O3_2007_12km.zip',
+  'data/FAQSD/inputs/CMAQ_DS_O3_2007_csv.zip',
+  'data/FAQSD/inputs/CMAQ_DS_O3_2008_12km_csv.zip',
+  'data/FAQSD/inputs/CMAQ_DS_O3_2008_12km.zip',
+  'data/FAQSD/inputs/CMAQ_DS_O3_2008_csv.zip',
+  'data/FAQSD/inputs/CMAQ_DS_PM25_2001_12km_csv.zip',
+  'data/FAQSD/inputs/CMAQ_DS_PM25_2001_36km_csv.zip',
+  'data/FAQSD/inputs/CMAQ_DS_PM25_2001_csv.zip',
+  'data/FAQSD/inputs/CMAQ_DS_PM25_2002_12km_csv.zip',
+  'data/FAQSD/inputs/CMAQ_DS_PM25_2002_12km.zip',
+  'data/FAQSD/inputs/CMAQ_DS_PM25_2002_36km_csv.zip',
+  'data/FAQSD/inputs/CMAQ_DS_PM25_2002_36km.zip',
+  'data/FAQSD/inputs/CMAQ_DS_PM25_2002_csv.zip',
+  'data/FAQSD/inputs/CMAQ_DS_PM25_2003_12km_csv.zip',
+  'data/FAQSD/inputs/CMAQ_DS_PM25_2003_12km.zip',
+  'data/FAQSD/inputs/CMAQ_DS_PM25_2003_36km_csv.zip',
+  'data/FAQSD/inputs/CMAQ_DS_PM25_2003_36km.zip',
+  'data/FAQSD/inputs/CMAQ_DS_PM25_2003_csv.zip',
+  'data/FAQSD/inputs/CMAQ_DS_PM25_2004_12km_csv.zip',
+  'data/FAQSD/inputs/CMAQ_DS_PM25_2004_12km.zip',
+  'data/FAQSD/inputs/CMAQ_DS_PM25_2004_36km_csv.zip',
+  'data/FAQSD/inputs/CMAQ_DS_PM25_2004_36km.zip',
+  'data/FAQSD/inputs/CMAQ_DS_PM25_2004_csv.zip',
+  'data/FAQSD/inputs/CMAQ_DS_PM25_2005_12km_csv.zip',
+  'data/FAQSD/inputs/CMAQ_DS_PM25_2005_12km.zip',
+  'data/FAQSD/inputs/CMAQ_DS_PM25_2005_36km_csv.zip',
+  'data/FAQSD/inputs/CMAQ_DS_PM25_2005_36km.zip',
+  'data/FAQSD/inputs/CMAQ_DS_PM25_2005_csv.zip',
+  'data/FAQSD/inputs/CMAQ_DS_PM25_2006_12km_csv.zip',
+  'data/FAQSD/inputs/CMAQ_DS_PM25_2006_12km.zip',
+  'data/FAQSD/inputs/CMAQ_DS_PM25_2006_36km_csv.zip',
+  'data/FAQSD/inputs/CMAQ_DS_PM25_2006_36km.zip',
+  'data/FAQSD/inputs/CMAQ_DS_PM25_2006_csv.zip',
+  'data/FAQSD/inputs/CMAQ_DS_PM25_2007_12km_csv.zip',
+  'data/FAQSD/inputs/CMAQ_DS_PM25_2007_12km.zip',
+  'data/FAQSD/inputs/CMAQ_DS_PM25_2007_csv.zip',
+  'data/FAQSD/inputs/CMAQ_DS_PM25_2008_12km_csv.zip',
+  'data/FAQSD/inputs/CMAQ_DS_PM25_2008_12km.zip',
+  'data/FAQSD/inputs/CMAQ_DS_PM25_2008_csv.zip',
+  'data/FAQSD/inputs/ds.input.aqs.o3.2002.csv',
+  'data/FAQSD/inputs/ds.input.aqs.o3.2003.csv',
+  'data/FAQSD/inputs/ds.input.aqs.o3.2004.csv',
+  'data/FAQSD/inputs/ds.input.aqs.o3.2005.csv',
+  'data/FAQSD/inputs/ds.input.aqs.o3.2006.csv',
+  'data/FAQSD/inputs/ds.input.aqs.o3.2007.csv',
+  'data/FAQSD/inputs/ds.input.aqs.o3.2008.csv',
+  'data/FAQSD/inputs/ds.input.aqs.o3.2013.csv',
+  'data/FAQSD/inputs/ds.input.aqs.o3.2014.csv',
+  'data/FAQSD/inputs/ds.input.aqs.o3.2015.csv',
+  'data/FAQSD/inputs/ds.input.aqs.o3.2016.csv',
+  'data/FAQSD/inputs/ds.input.aqs.o3.2017.csv',
+  'data/FAQSD/inputs/ds.input.aqs.o3.2018.csv',
+  'data/FAQSD/inputs/ds.input.aqs.o3.2019.csv',
+  'data/FAQSD/inputs/ds.input.aqs.o3.2020.csv',
+  'data/FAQSD/inputs/ds.input.aqs.o3.2021.csv',
+  'data/FAQSD/inputs/ds.input.aqs.pm25.2002.csv',
+  'data/FAQSD/inputs/ds.input.aqs.pm25.2003.csv',
+  'data/FAQSD/inputs/ds.input.aqs.pm25.2004.csv',
+  'data/FAQSD/inputs/ds.input.aqs.pm25.2005.csv',
+  'data/FAQSD/inputs/ds.input.aqs.pm25.2006.csv',
+  'data/FAQSD/inputs/ds.input.aqs.pm25.2007.csv',
+  'data/FAQSD/inputs/ds.input.aqs.pm25.2008.csv',
+  'data/FAQSD/inputs/ds.input.aqs.pm25.2013.csv',
+  'data/FAQSD/inputs/ds.input.aqs.pm25.2014.csv',
+  'data/FAQSD/inputs/ds.input.aqs.pm25.2015.csv',
+  'data/FAQSD/inputs/ds.input.aqs.pm25.2016.csv',
+  'data/FAQSD/inputs/ds.input.aqs.pm25.2017.csv',
+  'data/FAQSD/inputs/ds.input.aqs.pm25.2018.csv',
+  'data/FAQSD/inputs/ds.input.aqs.pm25.2019.csv',
+  'data/FAQSD/inputs/ds.input.aqs.pm25.2020.csv',
+  'data/FAQSD/inputs/ds.input.aqs.pm25.2021.csv',
+  'data/FAQSD/inputs/ds.input.cmaq.ozone.2009.csv',
+  'data/FAQSD/inputs/ds_input_cmaq_ozone_2009.zip',
+  'data/FAQSD/inputs/ds.input.cmaq.ozone.2010.csv',
+  'data/FAQSD/inputs/ds_input_cmaq_ozone_2010.zip',
+  'data/FAQSD/inputs/ds.input.cmaq.ozone.2011.csv',
+  'data/FAQSD/inputs/ds_input_cmaq_ozone_2011.zip',
+  'data/FAQSD/inputs/ds.input.cmaq.ozone.2012.csv',
+  'data/FAQSD/inputs/ds_input_cmaq_ozone_2012.zip',
+  'data/FAQSD/inputs/ds.input.cmaq.ozone.2013.csv',
+  'data/FAQSD/inputs/ds_input_cmaq_ozone_2013.zip',
+  'data/FAQSD/inputs/ds.input.cmaq.ozone.2014.csv',
+  'data/FAQSD/inputs/ds_input_cmaq_ozone_2014.zip',
+  'data/FAQSD/inputs/ds.input.cmaq.ozone.2015.csv',
+  'data/FAQSD/inputs/ds_input_cmaq_ozone_2015.zip',
+  'data/FAQSD/inputs/ds.input.cmaq.ozone.2016.csv',
+  'data/FAQSD/inputs/ds_input_cmaq_ozone_2016.zip',
+  'data/FAQSD/inputs/ds.input.cmaq.ozone.2017.csv',
+  'data/FAQSD/inputs/ds_input_cmaq_ozone_2017.zip',
+  'data/FAQSD/inputs/ds.input.cmaq.ozone.2018.csv',
+  'data/FAQSD/inputs/ds_input_cmaq_ozone_2018.zip',
+  'data/FAQSD/inputs/ds.input.cmaq.ozone.2019.csv',
+  'data/FAQSD/inputs/ds_input_cmaq_ozone_2019.zip',
+  'data/FAQSD/inputs/ds.input.cmaq.ozone.2020.csv',
+  'data/FAQSD/inputs/ds_input_cmaq_ozone_2020.zip',
+  'data/FAQSD/inputs/ds.input.cmaq.ozone.2021.csv',
+  'data/FAQSD/inputs/ds_input_cmaq_ozone_2021.zip',
+  'data/FAQSD/inputs/ds.input.cmaq.pm25.2009.csv',
+  'data/FAQSD/inputs/ds_input_cmaq_pm25_2009.zip',
+  'data/FAQSD/inputs/ds.input.cmaq.pm25.2010.csv',
+  'data/FAQSD/inputs/ds_input_cmaq_pm25_2010.zip',
+  'data/FAQSD/inputs/ds.input.cmaq.pm25.2011.csv',
+  'data/FAQSD/inputs/ds_input_cmaq_pm25_2011.zip',
+  'data/FAQSD/inputs/ds.input.cmaq.pm25.2012.csv',
+  'data/FAQSD/inputs/ds_input_cmaq_pm25_2012.zip',
+  'data/FAQSD/inputs/ds.input.cmaq.pm25.2013.csv',
+  'data/FAQSD/inputs/ds_input_cmaq_pm25_2013.zip',
+  'data/FAQSD/inputs/ds.input.cmaq.pm25.2014.csv',
+  'data/FAQSD/inputs/ds_input_cmaq_pm25_2014.zip',
+  'data/FAQSD/inputs/ds.input.cmaq.pm25.2015.csv',
+  'data/FAQSD/inputs/ds_input_cmaq_pm25_2015.zip',
+  'data/FAQSD/inputs/ds.input.cmaq.pm25.2016.csv',
+  'data/FAQSD/inputs/ds_input_cmaq_pm25_2016.zip',
+  'data/FAQSD/inputs/ds.input.cmaq.pm25.2017.csv',
+  'data/FAQSD/inputs/ds_input_cmaq_pm25_2017.zip',
+  'data/FAQSD/inputs/ds.input.cmaq.pm25.2018.csv',
+  'data/FAQSD/inputs/ds_input_cmaq_pm25_2018.zip',
+  'data/FAQSD/inputs/ds.input.cmaq.pm25.2019.csv',
+  'data/FAQSD/inputs/ds_input_cmaq_pm25_2019.zip',
+  'data/FAQSD/inputs/ds.input.cmaq.pm25.2020.csv',
+  'data/FAQSD/inputs/ds_input_cmaq_pm25_2020.zip',
+  'data/FAQSD/inputs/ds.input.cmaq.pm25.2021.csv',
+  'data/FAQSD/inputs/ds_input_cmaq_pm25_2021.zip',
+  'data/FAQSD/inputs/oz82009ctymsa.csv',
+  'data/FAQSD/inputs/oz82009monitor.csv',
+  'data/FAQSD/inputs/oz82010ctymsa.csv',
+  'data/FAQSD/inputs/oz82010monitor.csv',
+  'data/FAQSD/inputs/oz82011ctymsa.csv',
+  'data/FAQSD/inputs/oz82011monitor.csv',
+  'data/FAQSD/inputs/oz82012ctymsa.csv',
+  'data/FAQSD/inputs/oz82012monitor.csv',
+  'data/FAQSD/inputs/oz82013monitor.csv',
+  'data/FAQSD/inputs/p252009ctymsa.csv',
+  'data/FAQSD/inputs/p252009monitor.csv',
+  'data/FAQSD/inputs/p252010ctymsa.csv',
+  'data/FAQSD/inputs/p252010monitor.csv',
+  'data/FAQSD/inputs/p252011ctymsa.csv',
+  'data/FAQSD/inputs/p252011monitor.csv',
+  'data/FAQSD/inputs/p252012ctymsa.csv',
+  'data/FAQSD/inputs/p252012monitor.csv',
+  'data/FAQSD/inputs/p252013monitor.csv',
+  'data/FAQSD/outputs/2001_ozone_daily_8hour_maximum.txt.gz',
+  'data/FAQSD/outputs/2001_pm25_daily_average.txt.gz',
+  'data/FAQSD/outputs/2002_ozone_daily_8hour_maximum.txt.gz',
+  'data/FAQSD/outputs/2002_pm25_daily_average.txt.gz',
+  'data/FAQSD/outputs/2003_ozone_daily_8hour_maximum.txt.gz',
+  'data/FAQSD/outputs/2003_pm25_daily_average.txt.gz',
+  'data/FAQSD/outputs/2004_ozone_daily_8hour_maximum.txt.gz',
+  'data/FAQSD/outputs/2004_pm25_daily_average.txt.gz',
+  'data/FAQSD/outputs/2005_ozone_daily_8hour_maximum.txt.gz',
+  'data/FAQSD/outputs/2005_pm25_daily_average.txt.gz',
+  'data/FAQSD/outputs/2006_ozone_daily_8hour_maximum.txt.gz',
+  'data/FAQSD/outputs/2006_pm25_daily_average.txt.gz',
+  'data/FAQSD/outputs/2007_ozone_daily_8hour_maximum.txt.gz',
+  'data/FAQSD/outputs/2007_pm25_daily_average.txt.gz',
+  'data/FAQSD/outputs/2008_ozone_daily_8hour_maximum.txt.gz',
+  'data/FAQSD/outputs/2008_pm25_daily_average.txt.gz',
+  'data/FAQSD/outputs/2009_DS_Annual_Report.pdf',
+  'data/FAQSD/outputs/2009_ozone_daily_8hour_maximum.txt.gz',
+  'data/FAQSD/outputs/2009_pm25_daily_average.txt.gz',
+  'data/FAQSD/outputs/2010_Annual_Report.pdf',
+  'data/FAQSD/outputs/2010_ozone_daily_8hour_maximum.txt.gz',
+  'data/FAQSD/outputs/2010_pm25_daily_average.txt.gz',
+  'data/FAQSD/outputs/2011_Annual_Report.pdf',
+  'data/FAQSD/outputs/2011_ozone_daily_8hour_maximum.txt.gz',
+  'data/FAQSD/outputs/2011_pm25_daily_average.txt.gz',
+  'data/FAQSD/outputs/2012_ozone_daily_8hour_maximum.txt.gz',
+  'data/FAQSD/outputs/2012_pm25_daily_average.txt.gz',
+  'data/FAQSD/outputs/2013_ozone_daily_8hour_maximum.txt.gz',
+  'data/FAQSD/outputs/2013_pm25_daily_average.txt.gz',
+  'data/FAQSD/outputs/2014_ozone_daily_8hour_maximum.txt.gz',
+  'data/FAQSD/outputs/2014_pm25_daily_average.txt.gz',
+  'data/FAQSD/outputs/2015_ozone_daily_8hour_maximum.txt.gz',
+  'data/FAQSD/outputs/2015_pm25_daily_average.txt.gz',
+  'data/FAQSD/outputs/2016_ozone_daily_8hour_maximum.txt.gz',
+  'data/FAQSD/outputs/2016_pm25_daily_average.txt.gz',
+  'data/FAQSD/outputs/2017_ozone_daily_8hour_maximum.txt.gz',
+  'data/FAQSD/outputs/2017_pm25_daily_average.txt.gz',
+  'data/FAQSD/outputs/2018_ozone_daily_8hour_maximum.txt.gz',
+  'data/FAQSD/outputs/2018_pm25_daily_average.txt.gz',
+  'data/FAQSD/outputs/2019_ozone_daily_8hour_maximum.txt.gz',
+  'data/FAQSD/outputs/2019_pm25_daily_average.txt.gz',
+  'data/FAQSD/outputs/2020_ozone_daily_8hour_maximum.txt.gz',
+  'data/FAQSD/outputs/2020_pm25_daily_average.txt.gz',
+  'data/FAQSD/outputs/2020_ozone_daily_8hour_maximum_2010_census.txt.gz',
+  'data/FAQSD/outputs/2020_pm25_daily_average_2010_census.txt.gz',
+  'data/FAQSD/outputs/2021_ozone_daily_8hour_maximum.txt.gz',
+  'data/FAQSD/outputs/2021_pm25_daily_average.txt.gz',
+  'data/FAQSD/outputs/2021_ozone_daily_8hour_maximum_2010_census.txt.gz',
+  'data/FAQSD/outputs/2021_pm25_daily_average_2010_census.txt.gz',
+  'data/FAQSD/outputs/reports.zip',
+
+  'data/FAQSD/docs/2002_HBM_Annual_Report.pdf',
+  'data/FAQSD/docs/2003_HBM_Annual_Report.pdf',
+  'data/FAQSD/docs/2004_HBM_Annual_Report.pdf',
+  'data/FAQSD/docs/2005_HBM_Annual_Report.pdf',
+  'data/FAQSD/docs/2006_HBM_Annual_Report.pdf',
+  'data/FAQSD/docs/2007_HBM_Annual_Report.pdf',
+  'data/FAQSD/docs/2008_HBM_Annual_Report.pdf',
+  'data/FAQSD/docs/2009_DS_Annual_Report.pdf',
+  'data/FAQSD/docs/2010_DS_Annual_Report.pdf',
+  'data/FAQSD/docs/2011_DS_Annual_Report.pdf',
+  'data/FAQSD/docs/2012_DS_Annual_Report.pdf',
+  'data/FAQSD/docs/2013_DS_Annual_Report.pdf',
+  'data/FAQSD/docs/2014_DS_Annual_Report.pdf',
+  'data/FAQSD/docs/2015_DS_Annual_Report.pdf',
+  'data/FAQSD/docs/2016_DS_Annual_Report.pdf',
+  'data/FAQSD/docs/2017_DS_Annual_Report.pdf',
+  'data/FAQSD/docs/2018_DS_Annual_Report.pdf',
+  'data/FAQSD/docs/2019_DS_Annual_Report.pdf',
+  'data/FAQSD/docs/2020_DS_Annual_Report.pdf',
+  'data/FAQSD/docs/2021_DS_Annual_Report.pdf',
+  'data/FAQSD/docs/2021_DS_Annual_Report_Final.pdf',
+
+  'data/FAQSD/docs/Appendix_B_2013_emissions_totals_by_sector.xlsx',
+  'data/FAQSD/docs/Appendix_B_2017_emissions_totals_by_sector.xlsx',
+  'data/FAQSD/docs/Appendix_B_2018_emissions_totals_by_sector.xlsx',
+  'data/FAQSD/docs/Appendix_B_2019_emissions_totals_by_sector.xlsx',
+  'data/FAQSD/docs/Appendix_B_2020_emissions_totals_by_sector.xlsx',
+  'data/FAQSD/docs/Appendix_B_2021_emissions_totals_by_sector.xlsx',
+
+  # 2017-08-23: These 2GB files are from David Wong and linked
+  # (via ofmpub/rsigserver) on CMAQ public web pages:
+  # https://www.epa.gov/cmaq/
+ 
+  'data/CMAQ/inputs/CMAQv5.2_Benchmark_SingleDay_Input.tar.gz',
+  'data/CMAQ/inputs/WRFv3.8_CMAQv5.2_Input.tar.gz',
+
+  'edm/ACES.pdf',
+  'edm/ACES.png',
+  'edm/data.png',
+  'edm/decision_support.png',
+  'edm/Detenbeck_WatershedPeer07FINAL.pdf',
+  'edm/download.html',
+  'edm/download_screen_mac.png',
+  'edm/download_screen_windows.png',
+  'edm/e_estuary.html',
+  'edm/e-Estuary.png',
+  'edm/estuaries.png',
+  'edm/estuary_menu.png',
+  'edm/data_inventory.html',
+  'edm/faq.html',
+  'edm/google.png',
+  'edm/index.html',
+  'edm/land_use.png',
+  'edm/maps.png',
+  'edm/multi.png',
+  'edm/output.png',
+  'edm/qgis.png',
+  'edm/retrieve.png',
+  'edm/robots.txt',
+  'edm/satellite.png',
+  'edm/coastal_vulnerability.png',
+  'edm/currents.png',
+  'edm/satimage2.png',
+  'edm/satimage.png',
+  'edm/google.png',
+  'edm/scenario.png',
+  'edm/sediment.png',
+  'edm/sediment_samples.png',
+  'edm/temperature.png',
+  'edm/topobath.png',
+  'edm/wetlands.png',
+
+  'edm/osx_appsdir.jpg',
+  'edm/osx_extracting.jpg',
+  'edm/osx_homedir.jpg',
+  'edm/osx_runedm.jpg',
+  'edm/osx_saveas.jpg',
+  'edm/win_edmbat.jpg',
+  'edm/win_extract.jpg',
+  'edm/win_extractto.jpg',
+  'edm/win_homedir.jpg',
+  'edm/win_saveas.jpg',
+
+  'edm/download/EDM_VERSION',
+  'edm/download/EDM_Win64.zip',
+  'edm/download/EDM_Darwin.x86_64.zip',
+  'edm/download/EDM_Darwin.arm64.zip',
+  'edm/download/EDM_Linux_i686.zip',
+  'edm/download/EDM_Linux_x86_64.zip',
+  'edm/download/EDM_code.tgz',
+
+  'edm/videos.html',
+  'edm/install.mp4',
+  'edm/maps.mp4',
+  'edm/data.mp4',
+  'edm/save.mp4',
+
+  'asnat/download/ASNAT_VERSION',
+  'asnat/download/Darwin.arm64/ASNAT.zip',
+  'asnat/download/Darwin.x86_64/ASNAT.zip',
+  'asnat/download/Windows/ASNAT.zip',
+  'asnat/download/Linux.x86_64/ASNAT.zip',
+  'asnat/download/ASNAT_User_Manual.pdf',
+  'asnat/download/ASNAT_updated.zip',
+
+  'villageblue/contact.html',
+
+  'canary/images/arrow-up.png',
+  'canary/images/arrow-down.png',
+  'canary/images/bluedot.png'
+);
+
+my $is_retigo_proxy = 0; # 1 = stable, 2 = stable_test.
+
+my @retigo_servable_files = (
+
+   # These are of the form <!--#include file="epa_header.html" -->
+
+  'epa_header.html',
+  'emvl_header.html',
+  'retigo_1.html',
+  'timestamp_converter_engine.html',
+
+  # These are hrefs that must get prefixed with ../rsig/retigo/stable/
+
+  'excel_to_retigo.html',
+  'faq.html',
+  'index.html',
+  'retigo_tutorial.html',
+  'timestamp_converter.html',
+  'retigo-fact-sheet3.pdf',
+  'supported_timestamps.html',  
+
+  'images/conc_symbols_stdgamma2/conc_06.gif',
+  'images/conc_symbols_stdgamma2/conc_11.gif',
+  'images/conc_symbols_stdgamma2/conc_19.gif',
+  'images/conc_symbols_stdgamma2/conc_03.gif',
+  'images/conc_symbols_stdgamma2/conc_14.gif',
+  'images/conc_symbols_stdgamma2/conc_12.gif',
+  'images/conc_symbols_stdgamma2/conc_15.gif',
+  'images/conc_symbols_stdgamma2/conc_17.gif',
+  'images/conc_symbols_stdgamma2/conc_02.gif',
+  'images/conc_symbols_stdgamma2/conc_01.gif',
+  'images/conc_symbols_stdgamma2/conc_16.gif',
+  'images/conc_symbols_stdgamma2/conc_missing.gif',
+  'images/conc_symbols_stdgamma2/conc_00.gif',
+  'images/conc_symbols_stdgamma2/conc_07.gif',
+  'images/conc_symbols_stdgamma2/conc_04.gif',
+  'images/conc_symbols_stdgamma2/conc_05.gif',
+  'images/conc_symbols_stdgamma2/conc_18.gif',
+  'images/conc_symbols_stdgamma2/conc_09.gif',
+  'images/conc_symbols_stdgamma2/conc_08.gif',
+  'images/conc_symbols_stdgamma2/conc_10.gif',
+  'images/conc_symbols_stdgamma2/conc_na.gif',
+  'images/conc_symbols_stdgamma2/conc_13.gif',
+  'images/busy5.gif',
+  'images/conc_symbols_bluered/conc_06.gif',
+  'images/conc_symbols_bluered/conc_11.gif',
+  'images/conc_symbols_bluered/conc_19.gif',
+  'images/conc_symbols_bluered/conc_03.gif',
+  'images/conc_symbols_bluered/conc_14.gif',
+  'images/conc_symbols_bluered/conc_12.gif',
+  'images/conc_symbols_bluered/conc_15.gif',
+  'images/conc_symbols_bluered/conc_17.gif',
+  'images/conc_symbols_bluered/conc_02.gif',
+  'images/conc_symbols_bluered/conc_01.gif',
+  'images/conc_symbols_bluered/conc_16.gif',
+  'images/conc_symbols_bluered/conc_missing.gif',
+  'images/conc_symbols_bluered/conc_00.gif',
+  'images/conc_symbols_bluered/conc_07.gif',
+  'images/conc_symbols_bluered/conc_04.gif',
+  'images/conc_symbols_bluered/conc_05.gif',
+  'images/conc_symbols_bluered/conc_18.gif',
+  'images/conc_symbols_bluered/conc_09.gif',
+  'images/conc_symbols_bluered/conc_08.gif',
+  'images/conc_symbols_bluered/conc_10.gif',
+  'images/conc_symbols_bluered/conc_na.gif',
+  'images/conc_symbols_bluered/conc_13.gif',
+  'images/conc_symbols/conc_fill.gif',
+  'images/conc_symbols/conc_06.gif',
+  'images/conc_symbols/conc_11.gif',
+  'images/conc_symbols/conc_19.gif',
+  'images/conc_symbols/conc_03.gif',
+  'images/conc_symbols/conc_14.gif',
+  'images/conc_symbols/conc_12.gif',
+  'images/conc_symbols/conc_15.gif',
+  'images/conc_symbols/conc_17.gif',
+  'images/conc_symbols/conc_02.gif',
+  'images/conc_symbols/conc_01.gif',
+  'images/conc_symbols/conc_16.gif',
+  'images/conc_symbols/conc_missing.gif',
+  'images/conc_symbols/conc_00.gif',
+  'images/conc_symbols/conc_07.gif',
+  'images/conc_symbols/conc_04.gif',
+  'images/conc_symbols/conc_05.gif',
+  'images/conc_symbols/conc_18.gif',
+  'images/conc_symbols/conc_09.gif',
+  'images/conc_symbols/conc_08.gif',
+  'images/conc_symbols/conc_10.gif',
+  'images/conc_symbols/conc_13.gif',
+  'images/svg_arrows/conc/arrow_00.svg',
+  'images/svg_arrows/conc/arrow_01.svg',
+  'images/svg_arrows/conc/arrow_02.svg',
+  'images/svg_arrows/conc/arrow_03.svg',
+  'images/svg_arrows/conc/arrow_04.svg',
+  'images/svg_arrows/conc/arrow_05.svg',
+  'images/svg_arrows/conc/arrow_06.svg',
+  'images/svg_arrows/conc/arrow_07.svg',
+  'images/svg_arrows/conc/arrow_08.svg',
+  'images/svg_arrows/conc/arrow_09.svg',
+  'images/svg_arrows/conc/arrow_10.svg',
+  'images/svg_arrows/conc/arrow_11.svg',
+  'images/svg_arrows/conc/arrow_12.svg',
+  'images/svg_arrows/conc/arrow_13.svg',
+  'images/svg_arrows/conc/arrow_14.svg',
+  'images/svg_arrows/conc/arrow_15.svg',
+  'images/svg_arrows/conc/arrow_16.svg',
+  'images/svg_arrows/conc/arrow_17.svg',
+  'images/svg_arrows/conc/arrow_18.svg',
+  'images/svg_arrows/conc/arrow_19.svg',
+  'images/svg_arrows/conc/arrow_20.svg',
+  'external/tooltip/images/tt_top.gif',
+  'external/tooltip/images/tt_left.gif',
+  'external/tooltip/images/x_icon.gif',
+  'external/tooltip/images/tt_bottom.gif',
+  'esdr/repository/retigo/FileList_ds.txt',
+  'esdr/repository/retigo/FileList_sd.txt',
+  'repository/FileList_ds.txt',
+  'repository/FileList_sd.txt',
+
+
+  # These are referenced a different way:
+
+  'make_colorbar.js',
+  'where.js',
+  'zerofill.js',
+  'isNumber.js',
+  'get_airnow.js',
+  'get_surfmet.js',
+  'html2canvas.js',
+  'unique.js',
+  'read_userfile.js',
+  'external/htmlDatePicker004/htmlDatePicker.js',
+  'external/tooltip/script.js',
+  'external/jquery-ui-1/js/jquery-ui-1.8.24.custom.min.js',
+  'external/jquery-ui-1/js/jquery-1.8.2.min.js',
+  'external/fast-marker-overlay/maps-v3/src/FastMarkerOverlay.js',
+  'external/FileSaver.js',
+  'external/geoxml3-read-only/ProjectedOverlay.js',
+  'external/geoxml3-read-only/geoxml3.js',
+  'external/wz_jsgraphics.js',
+  'external/jquery-1.8.2.js',
+  'myslider.js',
+  'interpolate.js',
+  'date_handler.js',
+  'external/flot/flot-axislabels-master/jquery.flot.axislabels.js',
+  'external/flot/flot_0.8.1/jquery.flot.symbol.js',
+  'external/flot/flot_0.8.1/jquery.flot.time.js',
+  'external/flot/flot_0.8.1/jquery.flot.js',
+  'symbols_conc.css',
+  'analysis.css',
+  'symbols_wind.css',
+  'external/htmlDatePicker004/htmlDatePicker.css',
+  'external/tooltip/style.css',
+  'external/jquery-ui-1/css/ui-lightness/jquery-ui-1.8.24.custom.css',
+  'indent.css'
+);
+
+# Derived variables:
+
+my $server = ''; # WCS/WMS server to forward query to.
+my $rsig_version = 'current';
+my $service = ''; # wcs, wms, authenticate, deauthenticate, or ''.
+my $rsig_id = '';
+my $rsig_variables = '';
+my $bbox = '';
+my $time = '';
+
+################################## ROUTINES ##################################
+
+
+main();
+
+
+sub main {
+  my $result = 0;
+  my $command = '';
+  my $client_address = $ENV{ 'REMOTE_ADDR' };
+  my $query_string = parse_url();
+  my $tag = 'proxy ';
+  my $i = index( $query_string, $tag );
+
+  if ( $i == 0 ) {
+    my $file_name = substr( $query_string, length( $tag ) );
+    $result = serve_file( $file_name, 1 );
+
+    if ( index( $file_name, 'index.html' ) != -1 ) {
+      my $prefix = $file_name eq 'index.html' ? 'rsig/' : '';
+      print STDERR "\nrsig_statistics: webpage $prefix$file_name\n";
+    } elsif ( index( $file_name, 'download' ) != -1 ||
+              index( $file_name, '.gz'      ) != -1 ) {
+      print STDERR "\nrsig_statistics: download $file_name\n";
+    }
+
+  } else {
+
+    if ( $query_string eq '' ) {
+      print STDERR "rsigserver: Invalid input: empty query string!\n";
+    } else {
+      my $denied = '';
+
+      if ( $server eq '' && $service eq 'wcs' ) {
+        my @data_sources = (
+          'airnow', 'aqs', 'calipso', 'cmaq', 'modis',
+          'nesdis', 'goesbb', 'uvnet', 'faqsd', 'gasp', 'goes', 'mozaic',
+          'neubrew', 'ceilometer', 'pandora', 'hrrr',
+          'viirs', 'tropomi', 'tempo', # 'tempo2',
+          'regridded',
+          'surfmet', 'metar', 'compare',
+          'satellitepm', 'omi', 'omibehr', 'omibehrioapi', 'hms',
+          'acam', 'hsrl', 'tad',
+          'purpleair',
+          # EDM:
+          'landuse', 'tidal', 'wqp', 'dv', 'nerrs', 'ncca', 'ncca2',
+          'buoy', 'erddap', 'ofs', 'aquarius', 'smap', 'nldas',
+          # WildfireApp:
+          'hysplit'
+        );
+
+        foreach my $data_source ( @data_sources ) {
+
+          # tempo data is forwarded to cain.larc.nasa.gov/cgi-bin/temposerver
+          # which only accepts connections from YOUR_WEBSERVER_HOST
+          # but not YOUR_WEBSERVER_HOST which is an alternative alias
+          # forwarded to by ofmpub. Thus the forwarding HACK below.
+
+          if ( $data_source eq 'tempo' ) {
+            $server = 'https://cain.larc.nasa.gov/cgi-bin/temposerver?';
+            $command = "$curl_command '$server$query_string' " .
+                       "| $sed 's/<name>/<name>$data_source./g'";
+
+            $result = execute_command( $command );
+          #} elsif ( $data_source ne 'cmaq') {
+          } else {
+            $server = $server_host_dir . $data_source . 'server?';
+            $command = "$curl_command '$server$query_string' " .
+                       "| $sed 's/<name>/<name>$data_source./g'";
+            $result = execute_command( $command );
+          }
+        }
+
+      } else {
+
+        if ( index( $server, '/deauthserver?' ) != -1 ) {
+          #my $sessionKey = $query_string; 
+          #my $service = 'DEAUTH=';
+          $command = "$curl_command '$server$query_string'";
+          print STDERR $query_string;
+          $result = execute_command( $command );
+        } elsif ( index( $server, '/authserver?' ) != -1 ) {
+          my $hashstring = sha1_hex($query_string); 
+          my $service = 'AUTH=';
+          $command = "$curl_command '$server$service$hashstring'";
+          $result = execute_command( $command );
+        } else {
+          $command = "$curl_command '$server$query_string'";
+          $result = execute_command( $command );
+        }
+      }
+
+      # Log non-rsiginfo accesses:
+
+      if ( index( $server, '/rsiginfo?' ) == -1 &&
+           index( $server, '/rsigkill?' ) == -1 ) {
+
+        if ( $rsig_id eq '' ) {
+          my $timestamp = sprintf( "%013d", time() );
+          $rsig_id = "rsigid-$client_address-$timestamp";
+        }
+
+        print STDERR "\nrsig_statistics: $rsig_version $service $rsig_id " .
+          "$rsig_variables$denied $time $bbox\n";
+      }
+    }
+  }
+
+  $result = 1 - $result; # UNIX: zero is success, non-zero is failure.
+  debug( "exit result = $result" );
+
+# TEMP HACK:
+if ( $result != 0 ) {
+  print STDOUT "Content-type: text/plain; charset=iso-8859-1\n\n";
+  print STDOUT "\nFAILED\n"; # TEMP HACK: fail fast.
+}
+
+  exit $result;
+}
+
+
+
+# Safely parse URL and return as a reconstructed, untainted query string.
+
+sub parse_url {
+  use CGI qw/ untaint /;     # Load Safe untainting CGI routines.
+  $CGI::DISABLE_UPLOADS = 1; # Disable uploads.
+  $CGI::POST_MAX = 2048;     # Limit posts to 2048 bytes.
+  my $query = new CGI;       # Parse QUERY_STRING.
+  %ENV = ();                 # Unset all environment variables.
+  my @names = $query->param; # Extract names of parameters.
+  my $count = @names;
+  my $result = '';
+  my $format = '';
+  my $data_source = '';
+  debug( "\n\n-------------- BEGIN rsigserver -----------\n" );
+  debug( "$count" );
+
+  if ( $count < 1 ) {
+    return $result;
+  }
+
+  # RETIGO sometimes invokes rsigserver with a query string that contains
+  # &parameter=value e.g.,
+  # .../rsigserver?retigo/stable_test/retigo_load.html?Deployments=376&...
+  # Treat this like proxy serving a web page and just trim-off and ignore
+  # the parameters after '?':
+
+  $_ = $names[ 0 ];         # $_ is tainted.
+  s/[^\w\/\.\?]/_/go;       # Untaint $_ allowing for possible file name chars.
+  my $possible_retigo = $_; # $possible_retigo is untainted.
+  # Might be 'retigo/stable_test/retigo_load.html?Deployments'
+
+  if ( index( "$possible_retigo", '/retigo_load.html?' ) != -1 ) {
+    my $i = index( $possible_retigo, '?' );
+    my $file_name = substr( $possible_retigo, 0, $i ); # Trim off ?...
+    $result = "proxy $file_name"; # Prefix with proxy to cause url editing.
+  } elsif ( uc( "$possible_retigo" ) eq 'CHECK_KEY' ) {
+    $server = $server_host_dir . 'purpleairserver?';
+    $_ = $names[ 0 ];  # $_ is tainted.
+    s/[^A-Za-z1]/_/go; # Untaint $_.
+    my $option = $_;   # $option is untainted.
+    $_ = $query->param( $option ); # $_ is tainted.
+    s/[^\(\)\w\#\-@.,:\/]/_/go;    # Untaint $_.
+    my $value = $_;                # $value is untainted.
+    my $uc_option = uc( $option );
+    my $uc_value  = uc( $value );
+    $result = $uc_option . '=' . $uc_value;
+    print "Content-type: text/plain; charset=iso-8859-1\n\n";
+  } elsif ( uc( "$possible_retigo" ) eq 'CHECK_TEMPO_KEY' ) {
+    $server = $server_host_dir . 'temposerver?';
+    $_ = $names[ 0 ];  # $_ is tainted.
+    s/[^A-Za-z1]/_/go; # Untaint $_.
+    my $option = $_;   # $option is untainted.
+    $_ = $query->param( $option ); # $_ is tainted.
+    s/[^\(\)\w\#\-@.,:\/]/_/go;    # Untaint $_.
+    my $value = $_;                # $value is untainted.
+    my $uc_option = uc( $option );
+    my $uc_value  = uc( $value );
+    #$result = $uc_option . '=' . $uc_value;
+    $result = 'CHECK_KEY=' . $uc_value;
+    print "Content-type: text/plain; charset=iso-8859-1\n\n";
+  } elsif ( uc( "$possible_retigo" ) eq 'CHECK_OAQPS_KEY' ) {
+    $server = $server_host_dir . 'cmaqserver?';
+    $_ = $names[ 0 ];  # $_ is tainted.
+    s/[^A-Za-z1]/_/go; # Untaint $_.
+    my $option = $_;   # $option is untainted.
+    $_ = $query->param( $option ); # $_ is tainted.
+    s/[^\(\)\w\#\-@.,:\/]/_/go;    # Untaint $_.
+    my $value = $_;                # $value is untainted.
+    my $uc_option = uc( $option );
+    my $uc_value  = uc( $value );
+    #$result = $uc_option . '=' . $uc_value;
+    $result = 'CHECK_KEY=' . $uc_value;
+    print "Content-type: text/plain; charset=iso-8859-1\n\n";
+  } elsif ( $count == 1 ) { # proxy server usage: serve named web page if on list:
+    $_ = $names[ 0 ];  # $_ is tainted.
+    s/[^A-Za-z1]/_/go; # Untaint $_.
+    my $option = $_;   # $option is untainted.
+    debug( "$option" );
+
+    if ( $option eq 'keywords' ) {
+      $_ = $query->param( $option ); # $_ is tainted.
+      s/[^\w\-_.\/]/_/go;            # Untaint $_.
+      my $value = $_;                # $value is untainted.
+      debug( "option = '$option' value = '$value'" );
+      $result = "proxy $value";
+      # MATT FIX.
+      #print "Content-type: text/plain; charset=iso-8859-1\n\n";
+    }
+
+  } else {
+
+    for ( my $parameter = 0; $parameter < $count; ++$parameter ) {
+      $_ = $names[ $parameter ];     # $_ is tainted.
+      s/[^A-Za-z1]/_/go;             # Untaint $_.
+      my $option = $_;               # $option is untainted.
+
+      if ( $option eq '_' ) {
+        next; # HACK for _=unique-integer AJAX cache HACK.
+      }
+
+      $_ = $query->param( $option ); # $_ is tainted.
+      s/[^\(\)\w\#\-@.,:\/]/_/go;    # Untaint $_.
+      my $value = $_;                # $value is untainted.
+      my $lc_option = lc( $option );
+      my $lc_value  = lc( $value );
+      debug( "$option $value (server = '$server')" );
+
+      if ( $lc_option eq 'rsig_id' || $lc_option eq 'test' ) {
+        $rsig_id = $lc_value;
+
+        if ( $server eq '' ) {
+          $server = $server_host_dir . 'rsiginfo?';
+        }
+      } elsif ( $lc_option eq 'time' ) {
+        $time = $lc_value;
+      } elsif ( $lc_option eq 'bbox' ) {
+
+        if ( $bbox eq '' ) {
+          $bbox = $lc_value;
+        }
+      } elsif ( $lc_option eq 'data_bounds' ) {
+        $bbox = $lc_value;
+      } elsif ( $lc_option eq 'service' ) {
+        $service = $lc_value;
+
+        if ( $lc_value eq 'kill' || $lc_value eq 'killall' ) {
+          $server = $server_host_dir . 'rsigkill?';
+        } elsif ( $lc_value eq 'ozone_forecast' ) {
+          $format = 'image/png';
+          print "Content-type: $format; charset=iso-8859-1\n\n";
+          $server = $server_host_dir . 'ozoneforecasterserver?';
+        } elsif ( $lc_value eq 'edm' ) {
+          $server = $server_host_dir . 'edmserver?';
+        } elsif ( $lc_value eq 'retigo' ) {
+          $server = $server_host_dir . 'retigoserver?';
+        } elsif ( $lc_value eq 'cmaqapp' ) {
+          $server = $server_host_dir . 'cmaqappserver?';
+        } elsif ( $lc_value eq 'viper' ) {
+          $server = $server_host_dir . 'viperserver?';
+        } elsif ( $lc_value eq 'hysplit' ) {
+          $server = $server_host_dir . 'hysplitserver?';
+        } elsif ( $lc_value eq 'authenticate' ) {
+          $server = $server_host_dir . 'authserver?';
+        } elsif ( $lc_value eq 'deauthenticate' ) {
+          $server = $server_host_dir . 'deauthserver?';
+        } elsif ( $lc_value eq 'villageblue' ) {
+          $server = $server_host_dir . 'villageblueserver?';
+        } elsif ( $lc_value eq 'canary' ) {
+          $server = $server_host_dir . 'canaryserver?';
+        } elsif ( $lc_value eq 'canarystatus' ) {
+          $server = $server_host_dir . 'canarystatusserver?';
+        } elsif ( $lc_value eq 'geocode' ) {
+          $format = 'application/json';
+          print "Content-type: $format; charset=utf-8\n";
+          print "Access-Control-Allow-Origin: * \n\n";
+          $server = $server_host_dir . 'geocodeserver?';
+        } elsif ( $lc_value eq 'outage' ) {
+          $server = $server_host_dir . 'outageserver?';
+        } elsif ( $lc_value eq 'nwis' ) {
+          $server = $server_host_dir . 'nwisserver?';
+        } elsif ( $lc_value eq 'wqdata' ) {
+          $server = $server_host_dir . 'wqdataserver?';
+        } elsif ( $lc_value eq 'lung' ) {
+          $server = $server_host_dir . 'lungserver?';
+        } elsif ( $lc_value eq 'retigowms' ) {
+          $server = $server_host_dir . 'retigowmsserver?';
+        } elsif ( $lc_value eq 'wms' ) {
+          $server = $server_host_dir . 'wmsserver?';
+        }
+      } elsif ( $lc_option eq 'layers' ) {
+        $rsig_variables = $lc_value;
+      } elsif ( $lc_option eq 'coverage' ) {
+        $rsig_variables = $lc_value;
+
+        # Check/transform COVERAGE=cmaq.o3,cmaq.no2 to 'COVERAGE=o3,no2':
+
+        my @variables = split( /,/, $lc_value );
+        my $variable_count = @variables;
+        $value = '';
+
+        debug( "@variables $variable_count" );
+
+        for ( my $variable = 0; $variable < $variable_count; ++$variable ) {
+          my $source_variable = $variables[ $variable ];
+          my @parts = split( /\./, $source_variable );
+          my $count = @parts;
+
+          debug( "source_variable = '$source_variable'" );
+          debug( "parts = '@parts' $count" );
+
+          if ( $count < 2 ) {
+            print "Content-type: text/plain; charset=iso-8859-1\n\n";
+            die "\nMissing data source for variable '$source_variable'.\n";
+          } else {
+            my $this_data_source = $parts[ 0 ];
+
+            if ( $data_source eq '' ) {
+              $data_source = $this_data_source;
+              $server = $server_host_dir . $data_source . 'server?';
+            } elsif ( $this_data_source ne $data_source ) {
+              print "Content-type: text/plain; charset=iso-8859-1\n\n";
+              die "\nMismatched data source '$data_source'.\n";
+            }
+
+            if ( $value eq '' ) {
+              $value = $parts[ 1 ];
+            } else {
+              $value .= ',' . $parts[ 1 ];
+            }
+
+            for ( my $part = 2; $part < $count; ++$part ) {
+              $value .= '.' . $parts[ $part ];
+            }
+          }
+        }
+      } elsif ( $lc_option eq 'format' ) {
+        $format = $lc_value;
+
+        if ( $content_types{ $format } ) {
+#         print "Content-type: $content_types{$format}; charset=iso-8859-1\n\n";
+          print "Content-type: $content_types{$format}; charset=iso-8859-1\n" .
+                "Access-Control-Allow-Origin: * \n" .
+                "Cache-Control: no-cache, no-store, must-revalidate\n" .
+                "Pragma: no-cache\n" .
+                "Expires: 0\n\n";
+        } else {
+          print "Content-type: $format; charset=iso-8859-1\n" .
+                "Access-Control-Allow-Origin: * \n" .
+                "Cache-Control: no-cache, no-store, must-revalidate\n" .
+                "Pragma: no-cache\n" .
+                "Expires: 0\n\n";
+        }
+      }
+
+      my $ok = 1;
+
+      if (  $service eq 'wcs' ) {
+        $ok = $lc_option ne '' && $lc_option ne 'rsig_id';
+
+        if ( $ ok ) {
+
+          if ( index( ' minimum_cad maximum_uncertainty ', $lc_option ) != -1 ) {
+            $ok = index( $server, 'calipsoserver' ) != -1;
+          } elsif ( index( ' aod_range std_range cls_range ch1_range sig_range sfc_range mos_range sca_range ',
+                           $lc_option ) != -1 ) {
+            $ok = index( $server, 'gaspserver' ) != -1;
+          }
+        }
+      }
+
+      if ( $ok ) {
+
+        if ( $result eq '' ) {
+          $result = $option . '=' . $value;
+        } else {
+          $result = $result . '&' . $option . '=' . $value;
+        }
+      }
+
+    } # End loop on parameters.
+
+    if ( $format eq '' ) {
+
+      if ( index( $server, 'edmserver' ) != -1 &&
+           index( lc( $result ), 'download' ) != -1 ) {
+        my $header = "Content-Type: application/zip; charset=iso-8859-1;\n" .
+                     "Content-Disposition: attachment; filename=EDM.zip\n\n";
+        debug( "rsigserver printing HTTP header:\n$header" );
+        print $header;
+      } else {
+        debug( "rsigserver printing text/plain HTTP header" );
+        print "Access-Control-Allow-Origin: * \n"; # allow cross-origin requests
+        #print "Content-type: text/xml; charset=iso-8859-1\n\n";
+        print "Content-type: text/plain; charset=iso-8859-1\n\n";
+      }
+    }
+
+  } # End else parse query string parameters.
+
+  debug( "$result" );
+  return $result;
+}
+
+
+
+# Does line contain any filter_tags?
+# if ( ! filter_line( $line ) ) print $line;
+
+sub filter_line {
+  my $line = shift;
+  my $result = 0;
+  my $count = @filter_tags;
+
+  for ( my $i = 0; $i < $count; ++$i ) {
+
+    if ( index( $line, $filter_tags[ $i ] ) != -1 ) {
+      $result = 1;
+      $i = $count; # Stop looping.
+    }
+  }
+
+  return $result;
+}
+
+
+
+# my $i = is_servable_file( $name );
+# 0 if not on servable file list.
+# 1 if RSIG/EDM file.
+# 2 if RETIGO stable file.
+# 3 if RETIGO stable_test file.
+
+sub is_servable_file {
+  my ( $name ) = @_;
+  my $result = 0;
+
+  debug( "is_servable_file name = '$name'" );
+
+  if ( index( $name, ' ' ) != -1 ) {
+      $result = 0;
+
+######################################################################
+#
+# NOTE: DO NOT DELETE
+#       If this block of code (down to END OF AUTHENTICATON CODE) is 
+#       commented out, do not delete it. We may need to use it again
+#       in the future to support password authentication, and it was
+#       a PITA to figure out.
+######################################################################
+  } elsif ( index( $name, 'canary/evaluation/index.html' ) == 0 || index( $name, 'canary/evaluation/rangeEvents.js' ) == 0 ||  index( $name, 'villageblue/evaluation/index.html' ) == 0) {
+      $result = 1;
+#  } elsif ( index( $name, 'canary/images' ) == 0 ) {
+#      # images that might not be asked for using the key  
+#      $result = 1;
+#  } elsif ( index( $name, 'canary/dev/images' ) != -1 ) {
+#      # Village Blue files other than index.html that came in via POST
+#      # with a key, but are servable without authentication
+#
+#      my $dot = index( $name, '.' ); # Remapped separator char: key.file
+#      if ( $dot != -1 ) {
+#    my $key = substr( $name, 0, $dot );
+#    my $file_name = substr( $name, $dot + 1 );
+#    $_[0] = $file_name; # Change $name to not include $key.
+#    $result = 1;
+#      }
+  } elsif ( index( $name, 'canary/evaluation/' ) != -1 || index( $name, 'villageblue/evaluation/' ) != -1) {
+
+    # Village Blue files other than index.html are only servable if a key
+    # is prepended to the name and the name is POSTed.
+
+    my $dot = index( $name, '.' ); # Remapped separator char: key.file
+
+    if ( $dot != -1 ) {
+      my $key = substr( $name, 0, $dot );
+      my $file_name = substr( $name, $dot + 1 );
+      debug( "key = '$key', file_name = '$file_name'" );
+
+      # Verify the key:
+      #if ( $key eq 'banana' ) { # Replace this with real code...
+      #  $_[0] = $file_name; # Change $name to not include $key.
+      #  $result = 1;
+      #  debug( "result = $result, _[0]= '$_[0]'" );
+      #}
+      #
+      # aforementioned real code
+      my $match = 0;
+      my ( $sessionkeyfile ) = '/tmp/vb_sessionkeys.txt';
+      # if sessionkeyfile does not exist, create it
+      unless(-e $sessionkeyfile) {
+    #Create the file if it doesn't exist
+    open my $fc, ">", $sessionkeyfile;
+    close $fc;
+      }
+      # set permissions
+      chmod 0666, $sessionkeyfile or die "Couldn't chmod $sessionkeyfile: $!";;
+      # check to see if key matches entry in sessionkeyfile
+      open(my $fh, '<:encoding(UTF-8)', $sessionkeyfile) or die "Can't open sessionkeyfile";
+      while (my $line = <$fh>) {
+    chomp $line; # trims newline
+    my @lineParse = split ' ', $line;
+    if ( (defined $lineParse[0]) && ($lineParse[0] eq $key) && ($lineParse[0] ne 'invalid') ) {
+        $_[0] = $file_name; # Change $name to not include $key.
+        $match += 1;
+        debug( "result = $result, _[0]= '$_[0]'" );
+    } else {
+        # do nothing
+    }
+      }
+      close $fh;
+
+
+      if ($match > 0) {
+    # The key matched. Serve the appropriate file. 
+    $result = 1;
+      } elsif ($match == 0) {
+    # The key did not match. Serve the login page
+    if ( index( $name, 'canary/evaluation/') != -1 ) {
+      $_[0] = 'canary/evaluation/index.html';
+      $result = 1;
+    } elsif (index( $name, 'villageblue/evaluation/') != -1) {
+      $_[0] = 'villageblue/evaluation/index.html';
+      $result = 1;
+    }
+      } else {
+    # whatever
+    $result = 0;
+      }
+    }
+######################################################################
+#  END OF AUTHENTICATION CODE
+######################################################################
+
+  } elsif ( ( # HACK: Too many files to list so just check for partial match:
+               index( $name, 'retigo/stable/' ) == 0
+            || index( $name, 'retigo/stable_test/' ) == 0
+            || index( $name, 'villageblue/baltimore/' ) == 0
+            || index( $name, 'villageblue/test/' ) == 0
+            || index( $name, 'cmaq_application/public/' ) == 0
+            || index( $name, 'data/CMAQ/application_images/' ) == 0
+            || index( $name, 'data/TROPOMI/data/' ) == 0
+            || index( $name, 'data/CMAQ/CDC/CONUS/2011/sector_emissions/em_v6/' ) == 0
+            || index( $name, 'data/CMAQ/EQUATES/CONUS/20' ) == 0
+            || index( $name, 'data/CMAQ/EQUATES/HEMI/20' ) == 0
+            )
+            # Check/disallow dangerous usage (after untaint in parse_url):
+            && index( $name, '../' ) == -1
+            ) {
+    $result = 1;
+  } elsif ( $is_retigo_proxy == 1 ) {
+    $result = index( $name, 'retigo/stable/' ) == -1 ? 2 : 1;
+  } elsif ( $is_retigo_proxy == 2 ) {
+    $result = index( $name, 'retigo/stable_test/' ) == -1 ? 3 : 1;
+  } else {
+    my $file_count = @servable_files;
+
+    for ( my $f = 0; $f < $file_count; ++$f ) {
+
+      if ( $name eq $servable_files[ $f ] ) {
+        $result = 1;
+        $f = $file_count; # Stop looping.
+      }
+    }
+
+#   if ( $result == 0 ) {
+#     $file_count = @retigo_servable_files;
+#
+#     for ( my $f = 0; $f < $file_count; ++$f ) {
+#
+#       if ( $name eq $retigo_servable_files[ $f ] ) {
+#         $result = 2;
+#         $f = $file_count; # Stop looping.
+#       }
+#     }
+#   }
+  }
+
+  return $result;
+}
+
+
+
+# Check if name is the name of a servable file:
+# my $file_name = servable_file_name( $name );
+
+sub servable_file_name {
+  my ( $name ) = @_;
+  my $servable =
+    $is_retigo_proxy ? 1 + $is_retigo_proxy : is_servable_file( $name );
+  debug( "after call, is_retigo_proxy = $is_retigo_proxy, name = '$name'" );
+  my $result =
+    $servable   == 1 ? "../rsig/$name" # Path from cgi-bin/ to /rsig.
+    : $servable == 2 ? "../rsig/retigo/stable/$name"
+    : $servable == 3 ? "../rsig/retigo/stable_test/$name"
+    : '';
+  return $result;
+}
+
+
+
+# Get path of file name, if any.
+# my $dir = path_name( 'sub/dir/file.ext' ); # $dir eq 'sub/dir/'.
+
+sub path_name {
+  my $name = shift;
+  my $i = rindex( $name, '/' );
+  my $result = '';
+
+  if ( $i != -1 ) {
+    $result = substr( $name, 0, $i + 1 );
+  }
+
+  return $result;
+}
+
+
+
+# my $save_file_name = save_as_file_name( 'download/RSIG3D_Win64.zip' ); # $save_file_name eq 'RSIG3D.zip'.
+
+sub save_as_file_name {
+  my $name = shift;
+  my $result = $name;
+  my $i = rindex( $name, '/' );
+
+  if ( $i != -1 ) {
+    $result = substr( $name, $i + 1 ); # Skip past path.
+  }
+
+  # Remove platform-specific part of name of zip file:
+
+  if ( index( $result, '.zip' ) != -1 ) {
+    # on second thought, don't remove platform specific info (MJF, 2/1/2021)
+    #$result =~ s/_Darwin//g;
+    #$result =~ s/_Win64//g;
+    #$result =~ s/_Linux.x86_64//g;
+    #$result =~ s/_Linux.i686//g;
+  }
+
+  return $result;
+}
+
+
+
+sub serve_file {
+  my $name = shift;
+  my $output_header = shift;
+  my $result = 0;
+  my $file_name = servable_file_name( $name );
+  debug( "serve_file( $name, $output_header ): servable_file_name = '$file_name'" );
+
+  if ( $file_name ne '' ) { # If found servable file then serve it:
+    my $dir = path_name( $name ); # 'edm/' if $name is 'edm/index.html'.
+
+    if ( $dir eq '' ) {
+
+      if ( $is_retigo_proxy == 1 ) {
+        $dir = 'retigo/stable/';
+      } elsif ( $is_retigo_proxy == 2 ) {
+        $dir = 'retigo/stable_test/';
+      }
+    }
+
+    debug( "file_name = '$file_name'" );
+    debug( "dir = '$dir'" );
+
+    my $ext = substr( $file_name, rindex( $file_name, '.' ) + 1 );
+
+    if ( index( $ext, '/' ) != -1 ) {
+      $ext = '';
+    }
+
+    debug( "ext = '$ext'" );
+    my $format = $content_types{ $ext }; # Get content type from file ext.
+
+    if ( ! $format ) {
+      #$format = 'text/plain';
+      $format = 'application/octet-stream';
+    }
+
+    debug( "format = '$format'" );
+ 
+    # Start http header:
+ 
+    my $header = "Content-type: $format; charset=iso-8859-1\n";
+
+    # For files to save to local disk, set the local filename:
+
+    my $save_file_name = save_as_file_name( $file_name );
+    
+    if ( ( index( 'zip tgz mov wmv pdf txt jar csv mp4 xlsx kmz gz', $ext ) != -1 ||
+           $file_name eq 'data/downloader/downloader' ) &&
+       index( $file_name, 'villageblue/evaluation/' ) == -1 ) {
+      debug( "save_file_name = '$save_file_name'" );
+      $header .= "Content-Disposition: attachment; filename=\"$save_file_name\"\n" .
+                 "Access-Control-Allow-Origin: * \n"; # allow cross-origin requests;
+    }
+
+    # Request no-caching for RSIG2D applet and RETIGO web pages:
+
+    if ( index( $name, 'index.html'  ) != -1 ) {
+      $header .=
+        "Cache-Control: no-cache, no-store, must-revalidate\n" .
+        "Pragma: no-cache\n" .
+        "Expires: 0\n";
+    }
+
+    if ( index( $name, 'retigo/stable_test/' ) != -1 && index ( $name, '.css.gz' ) != -1 ) {
+      $header .= "Content-type: text/css\n" .
+                 "Content-Encoding: gzip\n";
+    }
+
+    $header .= "\n"; # End of http header.
+
+
+    if ( $output_header ) {
+      debug( "rsigserver printing HTTP header:\n$header" );
+      print $header;
+
+      if ( index( $name, 'retigo/stable/' ) != -1 ) {
+        $is_retigo_proxy = 1;
+      } elsif ( index( $name, 'retigo/stable_test/' ) != -1 ) {
+        $is_retigo_proxy = 2;
+      }
+
+    }
+
+    # Open and read the file.
+    # For html files,
+    # search the content lines for references to servable files and, if found,
+    # insert prefix to rsigserver so clicking the links will work.
+    # For non-html files, just echo the lines to output.
+
+    open my $file, "< $file_name" or die "Can't open file for reading: $!";
+
+    while ( my $line = <$file> ) {
+
+      if ( index( ' html css js swf ', $ext ) != -1 ) {
+
+        if ( index( $line, '<!--#include file=' ) != -1 ) { # HACK for RETIGO.
+          my $start = index( $line, '"' );
+          my $end = rindex( $line, '"' );
+          my $length = $end - $start - 1;
+          my $included_file_name = substr( $line, $start + 1, $length );
+          serve_file( $included_file_name, 0 ); # Recurse!
+        } elsif ( index( $line, 'mailto:' ) == -1 ) {
+          foreach my $tag ( @prefix_tags ) {
+            my $i = index( $line, $tag );
+
+            if ( $i != -1 ) {
+              $i += length( $tag );
+              my $q = index( substr( $line, $i ), '"' );
+
+              if ( $q == -1 ) {
+                $q = index( substr( $line, $i ), "'" );
+              }
+
+              if ( $q != -1 ) {
+                $q += $i; # line[i:q] is the referenced file name.
+                my $ref_name = substr( $line, $i, $q - $i );
+                debug( "ref_name = $ref_name" );
+
+                # Don't edit intra-file links (that start with '#')
+                # nor external links (that contain 'https:'):
+
+                if ( $ref_name ne '' &&
+                     index( $ref_name, '#' ) != 0 &&
+                     index( $ref_name, 'http' ) == -1 &&
+                     index( $ref_name, ':' ) == -1  &&
+                     index( $ref_name, ' ' ) == -1 ) {
+
+                  # See if the referenced file is servable:
+
+#                 if ( $ref_name eq './current/code/java' ) {
+#                   $line =~ s|./|$prefix|; # Prepend rsigserver.
+#                   $line =~ s|CODE=|ARCHIVE=rsigserver?current/code/java/rsig.jar CODE=|;
+#                   debug( "edited line = $line" );
+#                 } elsif ( $ref_name eq 'rsig.jar' ) {
+#                   my $pathed_jar = $prefix . 'current/code/java/rsig.jar';
+#                   $line =~ s|rsig.jar|$pathed_jar|;
+#                   debug( "edited line = $line" );
+#                 } else {
+                    my $servable = is_servable_file( "$dir$ref_name" );
+                    debug( "AAAAAA is_servable_file( $dir$ref_name ) = $servable" );
+
+                    if ( $servable ) { # It is servable so edit the ref:
+                      my $edited_line =
+                        substr( $line, 0, $i ) . # Up to file name.
+                        $prefix .                # Insert prefix.
+                        $dir .                   # Insert path, if any.
+                        substr( $line, $i );     # File name to end.
+                      debug( "edited_line = $edited_line" );
+                      $line = $edited_line; # Re-search with next tag.
+                    }
+#                 }
+                }
+              }
+            }
+          }
+        }
+      }
+
+      if ( $ext ne 'html' || ! filter_line( $line ) ) {
+        print $line;
+        $result = 1;
+      }
+    }
+
+    close $file or die "Can't close file: $!";
+  }
+
+  return $result;
+}
+
+
+
+############################### HELPER ROUTINES ##############################
+
+
+
+
+# debug( $message );
+
+sub debug {
+  my $message = shift;
+
+  if ( $debugging ) {
+    print STDERR "\n$message\n";
+####print STDOUT "\n$message\n";
+  }
+}
+
+
+
+# Execute command and echo its output to STDOUT. E.g., execute_command( 'ls' );
+
+sub execute_command {
+  my $command = shift;
+  my $result = 0;
+  my $the_pipe = 0;
+
+  # Untaint command (match expression is arbitrary as far as -T is concerned):
+
+  if ( $command =~ m#^(/[\w\-]+/[\w\- /\.\(\)@,':?=&|<>]+)$# ) {
+    $command = $1; # Re-assign first match, which is enough to satisfy -T.
+    debug( "$0 executing command = $command" );
+    %ENV = (); # Unset all environment variables prior to popen.
+    # Complicated, supposedly safer way to open a readable pipe to command:
+    my $pid = open( the_pipe, "-|" );
+
+    if ( ! defined( $pid ) ) {
+      die "Couldn't open pipe to subprocess";
+    } elsif ( $pid ) { # Parent process.
+      while ( <the_pipe> ) {
+        print;
+      }
+
+      close( the_pipe ) or die $!;
+      $result = ! $?;
+    } else { # Child process.
+      exec( $command ) or die "can't exec program: $!";
+    }
+  } else {
+    print STDERR "\n$0: '$command' contains invalid characters.\n";
+  }
+
+  return $result;
+}
+
+
+
+
+

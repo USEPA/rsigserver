@@ -1,0 +1,122 @@
+#!/bin/csh -f
+# listfiles - List METAR data files for given starting YYYYMMDDHH and HOURS.
+# 2016-02-25 plessel.todd@epa.gov 919-541-5500
+
+set url = `grep '^set url' /data/METAR/get_metar_files | awk '{ print $NF }' | tr -d "'"`
+set data_directory = '/data/METAR/data'
+
+@ ok = 0
+@ yyyymmddhh = 0
+@ hours      = 0
+@ list_original_files = 0
+
+if ( $#argv == 2 || $#argv == 3 ) then
+  @ yyyymmddhh = $1
+  @ hours      = $2
+  @ ok = ($yyyymmddhh >= 1990010100 && $yyyymmddhh <= 2147123123 && $hours >= 1)
+
+  if ( $ok && $#argv == 3 ) then
+
+    if ( "$3" == 'original_files' ) then
+      @ list_original_files = 1
+    else
+      @ ok = 0
+    endif
+  endif
+
+  if ( ! $ok ) then
+    echo "$0 Invalid command-line arguments $*"
+  endif
+endif
+
+if ( ! $ok ) then
+  echo
+  echo "$0 - List METAR AOD data files for given starting YYYYMMDDHH and HOURS."
+  echo "usage: $0 YYYYMMDDHH HOURS [original_files]"
+  echo "example: $0 2016022400 24"
+  echo /data/METAR/data/2016/20160224_0000
+  echo /data/METAR/data/2016/20160224_0100
+  echo /data/METAR/data/2016/20160224_0200
+  echo /data/METAR/data/2016/20160224_0300
+  echo /data/METAR/data/2016/20160224_0400
+  echo /data/METAR/data/2016/20160224_0500
+  echo /data/METAR/data/2016/20160224_0600
+  echo /data/METAR/data/2016/20160224_0700
+  echo /data/METAR/data/2016/20160224_0800
+  echo /data/METAR/data/2016/20160224_0900
+  echo /data/METAR/data/2016/20160224_1000
+  echo /data/METAR/data/2016/20160224_1100
+  echo /data/METAR/data/2016/20160224_1200
+  echo /data/METAR/data/2016/20160224_1300
+  echo /data/METAR/data/2016/20160224_1400
+  echo /data/METAR/data/2016/20160224_1500
+  echo /data/METAR/data/2016/20160224_1600
+  echo /data/METAR/data/2016/20160224_1700
+  echo /data/METAR/data/2016/20160224_1800
+  echo /data/METAR/data/2016/20160224_1900
+  echo /data/METAR/data/2016/20160224_2000
+  echo /data/METAR/data/2016/20160224_2100
+  echo /data/METAR/data/2016/20160224_2200
+  echo /data/METAR/data/2016/20160224_2300
+  echo
+  exit 1
+endif
+
+@ yyyymmdd = $yyyymmddhh / 100
+@ yyyy =   $yyyymmddhh / 1000000
+@ mm   = ( $yyyymmddhh / 10000 ) % 100
+@ dd   = ( $yyyymmddhh / 100 ) % 100
+@ hh   =   $yyyymmddhh % 100
+@ hour = 1
+
+@ leap = ( $yyyy % 4 == 0 && ! ( $yyyy % 100 == 0 && ! $yyyy % 400 == 0 ) )
+if ( $leap ) then
+  set days_per_month = ( 31 29 31 30 31 30 31 31 30 31 30 31 )
+else
+  set days_per_month = ( 31 28 31 30 31 30 31 31 30 31 30 31 )
+endif
+
+while ( $hour <= $hours )
+
+  # List files matching yyyymmdd_hh00:
+
+  set yyyymmdd_hh00 = `printf "%d_%02d00" $yyyymmdd $hh`
+  set input_file = "$data_directory/$yyyy/$yyyymmdd_hh00"
+
+  if ( -f "$input_file" ) then
+  
+    if ( $list_original_files ) then
+      echo "$url$yyyymmdd_hh00.gz"
+    else
+      echo "$input_file"
+    endif
+  endif
+
+  @ hh += 1
+
+  if ( $hh > 23 ) then
+    @ hh = 0
+    @ dd += 1
+
+    if ( $dd > $days_per_month[$mm] ) then
+      @ dd = 1
+      @ mm += 1
+
+      if ( $mm > 12 ) then
+        @ mm = 1
+        @ yyyy += 1
+        @ leap = ( $yyyy % 4 == 0 && ! ( $yyyy % 100 == 0 && ! $yyyy % 400 == 0 ) )
+
+        if ( $leap ) then
+          set days_per_month = ( 31 29 31 30 31 30 31 31 30 31 30 31 )
+        else
+          set days_per_month = ( 31 28 31 30 31 30 31 31 30 31 30 31 )
+        endif
+      endif
+    endif
+  endif
+
+  @ yyyymmdd = ( $yyyy * 10000 ) + ( $mm * 100 ) + $dd
+  @ hour += 1
+end
+

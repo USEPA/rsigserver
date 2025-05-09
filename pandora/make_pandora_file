@@ -1,0 +1,3 @@
+#!/bin/csh -f
+
+grep '\.' All*csv | awk -F, '{ n = split( $(NF-1), a, " " ); printf "%d-%s-%s %f %f\n", $1, $2, a[n], $4, $3 }' > pandoras.txt

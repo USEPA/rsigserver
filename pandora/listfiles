@@ -1,0 +1,91 @@
+#!/bin/csh -f
+# listfiles - List pandora files for given type and time range and lonlat bounds
+# Usage: listfiles file_type yyyymmdd1 yyyymmdd2 lonmin latmin lonmax latmax [id]
+# Example: listfiles L2_rfuh5p1_8 20220701 20220702 -76 39 -72 42
+
+set data_directory = '/data/Pandora/data'
+
+if ( "$1" == 'locations' ) then
+  ls /data/Pandora/pandoras.txt
+  exit 0
+endif
+
+@ ok = ( $#argv == 7 || $#argv == 8 )
+
+if ( $ok ) then
+
+  set file_type = "$1"
+  set yyyymmdd1 = "$2"
+  set yyyymmdd2 = "$3"
+  set lonmin    = "$4"
+  set latmin    = "$5"
+  set lonmax    = "$6"
+  set latmax    = "$7"
+  set id        = "$8"
+
+  if ( "$file_type" == 'L2Tot_rnvs0p1_7'  || \
+       "$file_type" == 'L2Tot_rnvs1p1_7'  || \
+       "$file_type" == 'L2Tot_rout0p1_7'  ||  \
+       "$file_type" == 'L2_rfuh5p1_8'     ||  \
+       "$file_type" == 'L2Tot_rout0p1_7'  ||  \
+       "$file_type" == 'L2_rnvh3p1_8'     ||  \
+       "$file_type" == 'L2_rnvs3p1_8'     ||  \
+       "$file_type" == 'L2_rout2p1_8'     ||  \
+       "$file_type" == 'L2_rsus1p1_8'     ||  \
+       "$file_type" == 'L2Trop_rnvh1p1_7' ||  \
+       "$file_type" == 'L2_rnvssp1_8' ) then
+    @ ok = `echo $lonmin $lonmax $latmin $latmax | awk '{ print ( $1 >= -180.0 && $1 <= 180.0 && $2 >= $1 && $2 <= 180.0 && $3 >= -90.0 && $3 <= 90.0 && $4 >= $3 && $4 <= 90.0 ) }'`
+endif
+endif
+
+if ( ! $ok ) then
+  echo
+  echo "Usage: $0 file_typel yyyymmdd1 yyyymmdd2 lonmin latmin lonmax latmax [id]"
+  echo "Example: $0 L2_rfuh5p1_8 20220701 20220702 -76 39 -72 42"
+  echo '/data/Pandora/data/Pandora134s1_BristolPA_L2_rfuh5p1-8.txt'
+  echo '/data/Pandora/data/Pandora166s1_PhiladelphiaPA_L2_rfuh5p1-8.txt'
+  echo '/data/Pandora/data/Pandora180s1_BronxNY_L2_rfuh5p1-8.txt'
+  echo '/data/Pandora/data/Pandora186s1_MadisonCT_L2_rfuh5p1-8.txt'
+  echo '/data/Pandora/data/Pandora64s1_NewHavenCT_L2_rfuh5p1-8.txt'
+  echo '/data/Pandora/data/Pandora69s1_NewBrunswickNJ_L2_rfuh5p1-8.txt'
+  echo
+  echo "Example: $0 L2_rfuh5p1_8 20220701 20220702 -76 39 -72 42 180"
+  echo '/data/Pandora/data/Pandora180s1_BronxNY_L2_rfuh5p1-8.txt'
+  echo
+  exit 1
+endif
+
+# Change last _ to -
+
+set file_type = `echo $file_type | awk '{ last = index( $1, "_" ); i = last; while ( i != 0 ) { i = index( substr( $1, last + 1 ), "_" ); if ( i != 0 ) last += i } print substr( $1, 1, last - 1 ) "-" substr( $1, last + 1 ) }'`
+
+if ( "$id" != '' ) then
+  ls -1 $data_directory/Pandora${id}s*_$file_type.txt
+else
+  set files = `ls -1 $data_directory/Pandora*_$file_type.txt`
+
+  foreach input ( $files )
+    set lon = `head -200 $input | grep '^Location longitude ' | awk '{ print $NF }'`
+    @ in_subset = `echo $lon $lonmin $lonmax | awk '{ print ( $1 >= $2 && $1 <= $3 ) }'`
+
+    if ( $in_subset ) then
+      set lat = `head -200 $input | grep '^Location latitude ' | awk '{ print $NF }'`
+      @ in_subset = `echo $lat $latmin $latmax | awk '{ print ( $1 >= $2 && $1 <= $3 ) }'`
+
+      if ( $in_subset ) then
+        set start_yyyymmdd = `head -200 $input | grep '^Data start time' | awk '{ print substr( $NF, 1, 8 ) }'`
+        @ in_subset = `echo $start_yyyymmdd $yyyymmdd2 | awk '{ print ( ( $1 == "NONE" ) || ( $1 <= $2 ) ) }'`
+
+        if ( $in_subset ) then
+          set end_yyyymmdd = `head -200 $input | grep '^Data end time' | awk '{ print substr( $NF, 1, 8 ) }'`
+          @ in_subset = `echo $end_yyyymmdd $yyyymmdd1 | awk '{ print ( ( $1 == "NONE" ) || ( $1 >= $2 ) ) }'`
+
+          if ( $in_subset ) then
+            echo $input
+          endif
+        endif
+      endif
+    endif
+  end
+endif
+

@@ -1,0 +1,33 @@
+
+2025-02-28
+plessel.todd@epa.gov 919-541-5500
+
+This directory contains the C source code for the bounds_filter program.
+
+It uses the following external libraries: netcdf4 hdf5_hl hdf5 curl z
+and Standard C libraries: dl m c.
+To compile: ./makeit
+
+Files:
+------
+README - This file.
+*.[hc] - C source files for the program.
+makeit - C Shell script to compile the program.
+
+
+Running and Program Usage Documentation:
+----------------------------------------
+For bounds_filter program usage documentation simply execute 
+bounds_filter |& more
+to see what command-line options are required/available and
+the format of the resulting output files.
+
+
+Notes:
+------
+The bounds_filter program is invoked by the C-Shell listfiles program
+to check that the file bounds intersect the user-specified BBOX.
+If so, it prints the file name.
+Use the ncdump utility (from NetCDF library) to examine an input file:
+ncdump TEMPO_NO2_L2_V01_20231017T111336Z_S001G01.nc | more
+

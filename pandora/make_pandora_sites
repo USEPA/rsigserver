@@ -1,0 +1,18 @@
+#!/bin/csh -f
+
+touch ids lons lats names starts ends
+rm    ids lons lats names starts ends
+
+foreach f ( data/P*t )
+  echo $f | sed 's|data/Pandora||g' | tr 's' ' ' | awk '{ print $1 }' >> ids
+  head -99 $f | grep '^Location longitude ' | awk '{ print $NF }' >> lons
+  head -99 $f | grep '^Location latitude ' | awk '{ print $NF }' >> lats
+  echo $f | awk -F_ '{ print $2"_"$3"_"$4 }' | sed 's/.txt//g'  >> names
+  head -99 $f | grep '^Data start time' | awk '{ print substr( $NF, 1, 4 )"-"substr( $NF, 5, 2 )"-"substr( $NF, 7, 2 ) }' >> starts
+  head -99 $f | grep '^Data end time' | awk '{ if ( substr( $NF, 1, 1 ) == "2" ) print substr( $NF, 1, 4 )"-"substr( $NF, 5, 2 )"-"substr( $NF, 7, 2 ); else print "now" }' >> ends
+end
+
+paste ids lons lats ids names starts ends | sort -n | uniq | xargs printf "%s\t%s\t%s\t%s;%s;%s-%s\n" > pandora_sites.txt
+rm    ids lons lats names starts ends
+ls -l pandora_sites.txt
+

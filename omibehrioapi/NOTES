@@ -1,0 +1,2 @@
+This directory contains the daily 24-hour files of NetCDF-IOAPI-format gridded
+BEHR NO2 data (based on v2-1, 1-layer with BADVAL3 used for cells with no data).

@@ -1,0 +1,468 @@
+
+http://www.vaisala.com/en/products/ceilometers/Pages/CL51.aspx
+
+
+
+
+HDF5 "discoveraq-cl51_GROUND-BAO-TOWER_20140717_R0.h5" {
+GROUP "/" {
+   GROUP "BLVIEW_HEIGHTS" {
+      DATASET "blview_ch" {
+         DATASPACE  SIMPLE { ( 5401, 3 ) / ( 5401, 3 ) }
+         DATA {
+      DATASET "blview_mlh" {
+         DATASPACE  SIMPLE { ( 5401, 3 ) / ( 5401, 3 ) }
+         DATA {
+      DATASET "datetime" {
+         DATATYPE  H5T_STRING {
+         DATASPACE  SIMPLE { ( 5401 ) / ( 5401 ) }
+         DATA {
+   GROUP "BLVIEW_PROFILE" {
+      DATASET "altitude" {
+         DATASPACE  SIMPLE { ( 450 ) / ( 450 ) }
+         DATA {
+      DATASET "blview_profile" {
+         DATASPACE  SIMPLE { ( 5400, 450 ) / ( 5400, 450 ) }
+         DATA {
+      DATASET "datetime" {
+         DATATYPE  H5T_STRING {
+         DATASPACE  SIMPLE { ( 5400 ) / ( 5400 ) }
+         DATA {
+   GROUP "FULL_PROFILE" {
+      DATASET "altitude" {
+         DATASPACE  SIMPLE { ( 1540 ) / ( 1540 ) }
+         DATA {
+      DATASET "datetime" {
+         DATATYPE  H5T_STRING {
+         DATASPACE  SIMPLE { ( 2400 ) / ( 2400 ) }
+         DATA {
+      DATASET "full_profile" {
+         DATASPACE  SIMPLE { ( 2400, 1540 ) / ( 2400, 1540 ) }
+         DATA {
+   DATASET "read_me" {
+      DATATYPE  H5T_STRING {
+      DATA {
+
+
+
+
+
+h5dump discoveraq-cl51_GROUND-BAO-TOWER_20140717_R0.h5 | m
+HDF5 "discoveraq-cl51_GROUND-BAO-TOWER_20140717_R0.h5" {
+GROUP "/" {
+   GROUP "BLVIEW_HEIGHTS" {
+      DATASET "blview_ch" {
+         DATATYPE  H5T_IEEE_F64LE
+         DATASPACE  SIMPLE { ( 5401, 3 ) / ( 5401, 3 ) }
+         DATA {
+         (0,0): 3.143e-319, 3.143e-319, 3.143e-319,
+         (1,0): 3.143e-319, 3.143e-319, 3.143e-319,
+         (2,0): 3.143e-319, 3.143e-319, 3.143e-319,
+         (3,0): 3.143e-319, 3.143e-319, 3.143e-319,
+         (4,0): 3.143e-319, 3.143e-319, 3.143e-319,
+         (5,0): 3.143e-319, 3.143e-319, 3.143e-319,
+         (6,0): 3.143e-319, 3.143e-319, 3.143e-319,
+         (7,0): 3.143e-319, 3.143e-319, 3.143e-319,
+         (8,0): 3.143e-319, 3.143e-319, 3.143e-319,
+         (9,0): 3.143e-319, 3.143e-319, 3.143e-319,
+         (10,0): 3.143e-319, 3.143e-319, 3.143e-319,
+         (11,0): 3.143e-319, 3.143e-319, 3.143e-319,
+         (12,0): 3.143e-319, 3.143e-319, 3.143e-319,
+         (13,0): 3.143e-319, 3.143e-319, 3.143e-319,
+         (14,0): 3.143e-319, 3.143e-319, 3.143e-319,
+         (15,0): 3.143e-319, 3.143e-319, 3.143e-319,
+         (16,0): 3.143e-319, 3.143e-319, 3.143e-319,
+         (17,0): 3.143e-319, 3.143e-319, 3.143e-319,
+...skipping...
+         (5398,0): 3.143e-319, 3.143e-319, 3.143e-319,
+         (5399,0): 3.143e-319, 3.143e-319, 3.143e-319,
+         (5400,0): 3.143e-319, 3.143e-319, 3.143e-319
+         }
+      }
+      DATASET "blview_mlh" {
+         DATATYPE  H5T_IEEE_F64LE
+         DATASPACE  SIMPLE { ( 5401, 3 ) / ( 5401, 3 ) }
+         DATA {
+         (0,0): 1.19208e-319, 3.143e-319, 3.143e-319,
+         (1,0): 1.19208e-319, 3.143e-319, 3.143e-319,
+         (2,0): 1.19208e-319, 3.143e-319, 3.143e-319,
+         (3,0): 4.15606e-317, 3.143e-319, 3.143e-319,
+         (4,0): 4.15606e-317, 3.143e-319, 3.143e-319,
+         (5,0): 4.15606e-317, 3.143e-319, 3.143e-319,
+         (6,0): 4.15606e-317, 3.143e-319, 3.143e-319,
+         (7,0): 4.15606e-317, 3.143e-319, 3.143e-319,
+         (8,0): 4.15606e-317, 3.143e-319, 3.143e-319,
+         (9,0): 4.15606e-317, 3.143e-319, 3.143e-319,
+         (10,0): 4.15606e-317, 3.143e-319, 3.143e-319,
+         (11,0): 4.15606e-317, 3.143e-319, 3.143e-319,
+         (12,0): 1.12884e-319, 3.143e-319, 3.143e-319,
+         (13,0): 1.12884e-319, 3.143e-319, 3.143e-319,
+         (14,0): 1.12884e-319, 3.143e-319, 3.143e-319,
+         (15,0): 1.12884e-319, 3.143e-319, 3.143e-319,
+         (16,0): 1.12884e-319, 3.143e-319, 3.143e-319,
+         (17,0): 1.12884e-319, 3.143e-319, 3.143e-319,
+...skipping...
+         (5398,0): 1.47034e-319, 2.78036e-318, 3.143e-319,
+         (5399,0): 1.47034e-319, 2.78036e-318, 3.143e-319,
+         (5400,0): 1.47034e-319, 2.78036e-318, 3.143e-319
+         }
+      }
+      DATASET "datetime" {
+         DATATYPE  H5T_STRING {
+               STRSIZE 19;
+               STRPAD H5T_STR_NULLPAD;
+               CSET H5T_CSET_ASCII;
+               CTYPE H5T_C_S1;
+            }
+         DATASPACE  SIMPLE { ( 5401 ) / ( 5401 ) }
+         DATA {
+         (0): "2014-07-17 06:00:00", "2014-07-17 06:00:16",
+         (2): "2014-07-17 06:00:32", "2014-07-17 06:00:48",
+         (4): "2014-07-17 06:01:04", "2014-07-17 06:01:20",
+         (6): "2014-07-17 06:01:36", "2014-07-17 06:01:52",
+         (8): "2014-07-17 06:02:08", "2014-07-17 06:02:24",
+         (10): "2014-07-17 06:02:40", "2014-07-17 06:02:56",
+         (12): "2014-07-17 06:03:12", "2014-07-17 06:03:28",
+         (14): "2014-07-17 06:03:44", "2014-07-17 06:04:00",
+         (16): "2014-07-17 06:04:16", "2014-07-17 06:04:32",
+         (18): "2014-07-17 06:04:48", "2014-07-17 06:05:04",
+         (20): "2014-07-17 06:05:20", "2014-07-17 06:05:36",
+         (22): "2014-07-17 06:05:52", "2014-07-17 06:06:08",
+         (24): "2014-07-17 06:06:24", "2014-07-17 06:06:40",
+         (26): "2014-07-17 06:06:56", "2014-07-17 06:07:12",
+         (28): "2014-07-17 06:07:28", "2014-07-17 06:07:44",
+         (30): "2014-07-17 06:08:00", "2014-07-17 06:08:16",
+         (32): "2014-07-17 06:08:32", "2014-07-17 06:08:48",
+         (34): "2014-07-17 06:09:04", "2014-07-17 06:09:20",
+...skipping...
+         }
+      }
+   }
+   GROUP "BLVIEW_PROFILE" {
+      DATASET "altitude" {
+         DATATYPE  H5T_STD_I32LE
+         DATASPACE  SIMPLE { ( 450 ) / ( 450 ) }
+         DATA {
+         (0): 167772160, 335544320, 503316480, 671088640, 838860800,
+         (5): 1006632960, 1174405120, 1342177280, 1509949440, 1677721600,
+         (10): 1845493760, 2013265920, -2113929216, -1946157056, -1778384896,
+         (15): -1610612736, -1442840576, -1275068416, -1107296256,
+         (19): -939524096, -771751936, -603979776, -436207616, -268435456,
+         (24): -100663296, 67174400, 234946560, 402718720, 570490880,
+         (29): 738263040, 906035200, 1073807360, 1241579520, 1409351680,
+         (34): 1577123840, 1744896000, 1912668160, 2080440320, -2046754816,
+         (39): -1878982656, -1711210496, -1543438336, -1375666176,
+         (43): -1207894016, -1040121856, -872349696, -704577536, -536805376,
+         (48): -369033216, -201261056, -33488896, 134348800, 302120960,
+         (53): 469893120, 637665280, 805437440, 973209600, 1140981760,
+         (58): 1308753920, 1476526080, 1644298240, 1812070400, 1979842560,
+         (63): -2147352576, -1979580416, -1811808256, -1644036096,
+         (67): -1476263936, -1308491776, -1140719616, -972947456, -805175296,
+         (72): -637403136, -469630976, -301858816, -134086656, 33751040,
+         (77): 201523200, 369295360, 537067520, 704839680, 872611840,
+         (82): 1040384000, 1208156160, 1375928320, 1543700480, 1711472640,
+...skipping...
+         (438): 638648320, 806420480, 974192640, 1141964800, 1309736960,
+         (443): 1477509120, 1645281280, 1813053440, 1980825600, -2146369536,
+         (448): -1978597376, -1810825216
+         }
+      }
+      DATASET "blview_profile" {
+         DATATYPE  H5T_IEEE_F64LE
+         DATASPACE  SIMPLE { ( 5400, 450 ) / ( 5400, 450 ) }
+         DATA {
+         (0,0): 7.26914e-317, 7.26914e-317, 7.26914e-317, 1.57054e-317,
+         (0,4): 7.26838e-317, 5.19599e-317, 5.19599e-317, 5.19599e-317,
+         (0,8): 3.1236e-317, 1.47034e-319, 2.08646e-317, 6.23048e-317,
+         (0,12): 4.15809e-317, 6.23048e-317, 4.15809e-317, 4.15809e-317,
+         (0,16): 4.15809e-317, 4.15809e-317, 2.0857e-317, 2.0857e-317,
+         (0,20): 1.33121e-319, 2.0857e-317, 2.0857e-317, 1.33121e-319,
+         (0,24): 1.33121e-319, 1.33121e-319, 2.0857e-317, 2.0857e-317,
+         (0,28): 4.15809e-317, 6.23048e-317, 1.39445e-319, 1.39445e-319,
+         (0,32): 1.39445e-319, 1.39445e-319, 1.39445e-319, 6.23048e-317,
+         (0,36): 4.15809e-317, 4.15809e-317, 6.23048e-317, 6.23048e-317,
+         (0,40): 4.15809e-317, 2.0857e-317, 6.22984e-317, 6.22984e-317,
+         (0,44): 6.22984e-317, 6.22984e-317, 1.33121e-319, 2.0857e-317,
+         (0,48): 6.23048e-317, 6.23048e-317, 4.15809e-317, 1.33121e-319,
+         (0,52): 2.0857e-317, 4.15809e-317, 4.15809e-317, 2.0857e-317,
+         (0,56): 2.0857e-317, 2.0857e-317, 1.33121e-319, 1.33121e-319,
+         (0,60): 2.0857e-317, 2.0857e-317, 4.15809e-317, 6.22984e-317,
+         (0,64): 6.22984e-317, 6.22984e-317, 1.33121e-319, 1.33121e-319,
+         (0,68): 1.33121e-319, 2.0857e-317, 2.0857e-317, 1.33121e-319,
+         (0,72): 2.0857e-317, 4.15809e-317, 6.22984e-317, 1.33121e-319,
+         (0,76): 2.0857e-317, 6.22984e-317, 4.15746e-317, 2.0857e-317,
+...skipping...
+         (5399,436): 4.15872e-317, 2.60541e-317, 3.38567e-317, 4.15606e-317,
+         (5399,440): 6.49216e-317, 4.68045e-317, 6.75069e-317, 1.33121e-319,
+         (5399,444): 1.10216e-314, 5.19295e-317, 7.65996e-317, 3.38441e-317,
+         (5399,448): 4.81048e-317, 1.86494e-314
+         }
+      }
+      DATASET "datetime" {
+         DATATYPE  H5T_STRING {
+               STRSIZE 19;
+               STRPAD H5T_STR_NULLPAD;
+               CSET H5T_CSET_ASCII;
+               CTYPE H5T_C_S1;
+            }
+         DATASPACE  SIMPLE { ( 5400 ) / ( 5400 ) }
+         DATA {
+         (0): "2014-07-17 06:00:00", "2014-07-17 06:00:16",
+         (2): "2014-07-17 06:00:32", "2014-07-17 06:00:48",
+         (4): "2014-07-17 06:01:04", "2014-07-17 06:01:20",
+         (6): "2014-07-17 06:01:36", "2014-07-17 06:01:52",
+         (8): "2014-07-17 06:02:08", "2014-07-17 06:02:24",
+         (10): "2014-07-17 06:02:40", "2014-07-17 06:02:56",
+         (12): "2014-07-17 06:03:12", "2014-07-17 06:03:28",
+         (14): "2014-07-17 06:03:44", "2014-07-17 06:04:00",
+         (16): "2014-07-17 06:04:16", "2014-07-17 06:04:32",
+         (18): "2014-07-17 06:04:48", "2014-07-17 06:05:04",
+         (20): "2014-07-17 06:05:20", "2014-07-17 06:05:36",
+         (22): "2014-07-17 06:05:52", "2014-07-17 06:06:08",
+         (24): "2014-07-17 06:06:24", "2014-07-17 06:06:40",
+         (26): "2014-07-17 06:06:56", "2014-07-17 06:07:12",
+         (28): "2014-07-17 06:07:28", "2014-07-17 06:07:44",
+         (30): "2014-07-17 06:08:00", "2014-07-17 06:08:16",
+         (32): "2014-07-17 06:08:32", "2014-07-17 06:08:48",
+         (34): "2014-07-17 06:09:04", "2014-07-17 06:09:20",
+         (36): "2014-07-17 06:09:36", "2014-07-17 06:09:52",
+         (38): "2014-07-17 06:10:08", "2014-07-17 06:10:24",
+...skipping...
+         (5392): "2014-07-18 05:58:08", "2014-07-18 05:58:24",
+         (5394): "2014-07-18 05:58:40", "2014-07-18 05:58:56",
+         (5396): "2014-07-18 05:59:12", "2014-07-18 05:59:28",
+         (5398): "2014-07-18 05:59:44", "2014-07-18 06:00:00"
+         }
+      }
+   }
+   GROUP "FULL_PROFILE" {
+      DATASET "altitude" {
+         DATATYPE  H5T_STD_I32LE
+         DATASPACE  SIMPLE { ( 1540 ) / ( 1540 ) }
+         DATA {
+         (0): 167772160, 335544320, 503316480, 671088640, 838860800,
+         (5): 1006632960, 1174405120, 1342177280, 1509949440, 1677721600,
+         (10): 1845493760, 2013265920, -2113929216, -1946157056, -1778384896,
+         (15): -1610612736, -1442840576, -1275068416, -1107296256,
+         (19): -939524096, -771751936, -603979776, -436207616, -268435456,
+         (24): -100663296, 67174400, 234946560, 402718720, 570490880,
+         (29): 738263040, 906035200, 1073807360, 1241579520, 1409351680,
+         (34): 1577123840, 1744896000, 1912668160, 2080440320, -2046754816,
+         (39): -1878982656, -1711210496, -1543438336, -1375666176,
+         (43): -1207894016, -1040121856, -872349696, -704577536, -536805376,
+         (48): -369033216, -201261056, -33488896, 134348800, 302120960,
+         (53): 469893120, 637665280, 805437440, 973209600, 1140981760,
+         (58): 1308753920, 1476526080, 1644298240, 1812070400, 1979842560,
+         (63): -2147352576, -1979580416, -1811808256, -1644036096,
+         (67): -1476263936, -1308491776, -1140719616, -972947456, -805175296,
+         (72): -637403136, -469630976, -301858816, -134086656, 33751040,
+...skipping...
+         (1521): 1950023680, 2117795840, -2009399296, -1841627136,
+         (1525): -1673854976, -1506082816, -1338310656, -1170538496,
+         (1529): -1002766336, -834994176, -667222016, -499449856, -331677696,
+         (1534): -163905536, 3932160, 171704320, 339476480, 507248640,
+         (1539): 675020800
+         }
+      }
+      DATASET "datetime" {
+         DATATYPE  H5T_STRING {
+               STRSIZE 19;
+               STRPAD H5T_STR_NULLPAD;
+               CSET H5T_CSET_ASCII;
+               CTYPE H5T_C_S1;
+            }
+         DATASPACE  SIMPLE { ( 2400 ) / ( 2400 ) }
+         DATA {
+         (0): "2014-07-17 06:00:35", "2014-07-17 06:01:11",
+         (2): "2014-07-17 06:01:47", "2014-07-17 06:02:23",
+         (4): "2014-07-17 06:02:59", "2014-07-17 06:03:35",
+         (6): "2014-07-17 06:04:11", "2014-07-17 06:04:47",
+         (8): "2014-07-17 06:05:23", "2014-07-17 06:05:59",
+         (10): "2014-07-17 06:06:35", "2014-07-17 06:07:11",
+         (12): "2014-07-17 06:07:47", "2014-07-17 06:08:23",
+         (14): "2014-07-17 06:08:59", "2014-07-17 06:09:35",
+         (16): "2014-07-17 06:10:11", "2014-07-17 06:10:47",
+         (18): "2014-07-17 06:11:23", "2014-07-17 06:11:59",
+         (20): "2014-07-17 06:12:35", "2014-07-17 06:13:11",
+         (22): "2014-07-17 06:13:47", "2014-07-17 06:14:23",
+         (24): "2014-07-17 06:14:59", "2014-07-17 06:15:35",
+         (26): "2014-07-17 06:16:11", "2014-07-17 06:16:47",
+         (28): "2014-07-17 06:17:23", "2014-07-17 06:17:59",
+         (30): "2014-07-17 06:18:35", "2014-07-17 06:19:11",
+         (32): "2014-07-17 06:19:47", "2014-07-17 06:20:23",
+         (34): "2014-07-17 06:20:59", "2014-07-17 06:21:35",
+         (36): "2014-07-17 06:22:11", "2014-07-17 06:22:47",
+...skipping...
+         }
+      }
+      DATASET "full_profile" {
+         DATATYPE  H5T_IEEE_F64LE
+         DATASPACE  SIMPLE { ( 2400, 1540 ) / ( 2400, 1540 ) }
+         DATA {
+         (0,0): 4.15391e-317, 9.51768e-320, 4.15404e-317, 4.15404e-317,
+         (0,4): 8.88528e-320, 8.7588e-320, 8.7588e-320, 8.7588e-320,
+         (0,8): 8.63231e-320, 4.15265e-317, 7.49399e-320, 6.98806e-320,
+         (0,12): 6.98806e-320, 6.98806e-320, 6.98806e-320, 6.86158e-320,
+         (0,16): 6.86158e-320, 6.7351e-320, 6.7351e-320, 6.60862e-320,
+         (0,20): 6.60862e-320, 6.60862e-320, 6.7351e-320, 6.7351e-320,
+         (0,24): 6.7351e-320, 6.60862e-320, 6.7351e-320, 6.7351e-320,
+         (0,28): 6.86158e-320, 6.86158e-320, 6.98806e-320, 6.98806e-320,
+         (0,32): 7.11455e-320, 7.11455e-320, 7.11455e-320, 6.98806e-320,
+         (0,36): 6.86158e-320, 6.86158e-320, 6.98806e-320, 6.86158e-320,
+         (0,40): 6.7351e-320, 6.48214e-320, 6.60862e-320, 6.35566e-320,
+         (0,44): 6.35566e-320, 6.48214e-320, 6.60862e-320, 6.60862e-320,
+         (0,48): 6.7351e-320, 6.7351e-320, 6.7351e-320, 6.86158e-320,
+         (0,52): 6.7351e-320, 6.98806e-320, 6.86158e-320, 6.7351e-320,
+         (0,56): 6.48214e-320, 6.48214e-320, 6.60862e-320, 6.7351e-320,
+         (0,60): 6.60862e-320, 6.7351e-320, 6.86158e-320, 6.86158e-320,
+         (0,64): 6.86158e-320, 6.7351e-320, 6.48214e-320, 6.7351e-320,
+         (0,68): 6.86158e-320, 6.86158e-320, 6.86158e-320, 7.11455e-320,
+...skipping...
+         }
+      }
+   }
+   DATASET "read_me" {
+      DATATYPE  H5T_STRING {
+            STRSIZE H5T_VARIABLE;
+            STRPAD H5T_STR_NULLTERM;
+            CSET H5T_CSET_ASCII;
+            CTYPE H5T_C_S1;
+         }
+      DATASPACE  SCALAR
+      DATA {
+      (0): "Contact:    Travis Knepp
+                        21 Langley Blvd.
+                        Mail Stop 401A, B1250
+                        Hampton, VA 23681
+           
+                        757-864-5558
+           
+                        travis.n.knepp@nasa.gov
+           
+           Secondary:   Jim Szykman
+                        james.j.szykman@nasa.gov
+           
+           Data Organization: NASA Langley Research Center.  
+           
+           Data Source:       Vaisala CL51 Ceilometer
+           
+           Data Resolution:    36 s
+                               The representation in the BLVIEW files is 
+                               somewhat misleading since BLVIEW logs a 
+                               profile every 16 s.  However, the CL51 only
+                               reports a profile every 36 s.  What BLVIEW is
+                               doing is reproducing profiles to yield 16 s 
+                               resolution, even though you may end up with 
+                               three or four identical profiles back-to-back.
+                               Therefore, while the BLVIEW data reported 
+                               herein has a profile/MLH/cloud height value 
+                               every 16 s, you should realize that the "real"
+                               resolution is 36 s and most of the BLVIEW 
+                               profiles are duplicated.
+           
+           Location:    Golden, Colorado
+           Latitude:    39.7496
+           Longitutde: -105.1828
+           Elevation:   1850 m
+           
+           Instrument Details:
+               Manufacturer:               Vaisala
+               Model:                      CL51
+               LASER Source:               Indium Gallium Arsenide Diode LASER
+               Center Wavelength:          910 nm (+/- 10nm)
+               Operation Mode:             Pulsed
+               Pulse Energy:               3.0 micro-watt seconds
+               Pulse Width:                110 ns
+               Pulse Rate:                 6.5 kHz
+               Beam Divergence:            +/- 0.15 x +/- 0.25 mrad
+               Receiver Bandwidth:         3 MHz
+               Field of View Divergence:   +/- 0.56 mrad
+               Full Measurement Range:     15.4 km
+               Cloud Detection Range:      0 - 13 km
+               Measurement Resolution:     10 m
+               Measurement Interval:       6 s (averaged into 36 s)
+           
+           Data Content:
+           
+                Data within this file are for one day according to the time 
+                zone (UTC -6hr); however, the time stamps are reported in UTC.
+                Hence, earliest time stamp corresponds to 0600 UTC, latest-possible
+                time stamp is 0559 UTC of following day.
+           
+                The CL51 ceilometer logs data onto a laptop computer using Vaisala's
+                BLVIEW software.  BLVIEW logs the backscatter profile (up to 4500 m)
+                and estimates the mixed-layer height (up to three) and cloud heights
+                (up to three).  Since the profile data collection is truncated at 
+                4500 m a serial splitter cable was used to split the incoming signal 
+                to a second com port of the laptop where the full profiles were 
+                logged via a Python script.  The full-profile data should be used 
+                with the understanding that no calibration factors have been applied, 
+                while the truncated BLVIEW profiles have had some form of correction
+                applied (qualitatively, the two datasets should be near identical).
+           
+           
+                altitude:
+                    Altitude values are AGL
+                        BLVIEW profiles:  10-4500 m (10 m resolution)
+                        Full profiles:    10-15400 m (10 m resolution)
+           
+                datetime:
+                        Date/time values ('yyyy-mm-dd HH:MM:SS', UTC) corresponding to 
+                        the date/time when the data were transmitted from the CL51.  
+                        This is a representation of the average backscatter over the 
+                        previous 36 s sampling time.
+           
+               full_profile:
+                   The full profile data (rows = time, columns = altitude) logged 
+                   using the split serial line and Python script.
+               
+               blview_profile:
+                   The truncated BLVIEW profile data (time x altitude).  Same 
+                   format as full_profile.
+               
+               blview_ch:
+                   All cloud heights are AGL.
+                   First three estimates of cloud height (cloud_1,cloud_2,cloud_3).
+                   If there are no cloud present then all values are NaN.  
+                   If only one cloud is present then values are (xxx,NaN,NaN) and 
+                   so forth.  Data values are in meters.
+           
+               blview_mlh:
+                   All mixing-layer heights are AGL.
+                   First three estimates of mixing-layer height (mlh_1,mlh_2,mlh_3)
+                   and follow same rule as blview_ch.  Data values are in meters.
+               
+               Note on MLH and cloud height (CH) estimates:
+                   Sometimes multiple MLH/CH layers will be present and, during the 
+                   course of the day, one of those layers will disappear, which can 
+                   make visual interpretation somewhat confusing.  A classic example 
+                   is a three-layer atmosphere where the first layer is at 
+                   approximately 500 m, with the second being a residual layer at 
+                   2000 m.  The first layer may burn off in the morning, at which 
+                   point the NEW "first layer" (as far as BLVIEW is concerned) is 
+                   now at 2000 m, causing an abrupt jump in mlh_1 from 500 m to 
+                   2000 m in a matter of seconds.
+           
+           
+           
+           Data Structures: 
+                Profile rows correspond to the date/time stamps, and columns
+               correspond to altitudes.  For MLH and cloud height (CH) data rows
+               correspond to the datetime array and columns correspond to
+               the first, second, and third MLH/CH estimates.
+           
+           
+           
+           Level Definitions:
+                R1:
+                R1 files are a compilation of the two datasets (BLVIEW and full-
+                profile) collected during DISCOVER-AQ 2014 in Colorado.
+           
+           
+           "
+      }
+   }
+}
+}
+
+

@@ -1,0 +1,92 @@
+#!/bin/csh -f
+# Compile Shapefile library.
+# Usage: makeit
+
+set LIBRARY     = "Shapefile"
+set HEADERS     = "shapefil.h"
+set SOURCE      = "shpopen.c dbfopen.c safileio.c"
+set OBJECTS     = `echo "$SOURCE" | sed "s/\.c/\.o/g"`
+set INCLUDE_DIR = ../../../include
+set LIB_DIR     = ../../../lib
+
+# Determine the platform using uname:
+
+set uname_ = "`uname`"
+set uname_m = "`uname -m`"
+set platform = "$uname_.$uname_m"
+
+echo "platform is $platform"
+
+set LIB_DEBUG     = $LIB_DIR/$platform/lib$LIBRARY.debug.a
+set LIB_OPTIMIZED = $LIB_DIR/$platform/lib$LIBRARY.a
+
+set CC = 'cc'
+set AR = 'ar -rv'
+set RANLIB = 'ar -t'
+set DEBUG = "-g"
+set OPTIMIZED = "-O -DNDEBUG"
+set IFLAGS = "-I../../../include -I."
+
+if ( "$platform" == "IRIX64" ) then
+##set CC = 'cc -64 -mips4 -xansi -fullwarn'
+  set CC = 'cc -64 -mips4 -xansi -fullwarn -mp'
+else if ( "$platform" == "SunOS" ) then
+##set CC = 'cc -xarch=v9'
+  set CC = 'gcc -m64'
+else if ( "$platform" == "AIX" ) then
+  set CC = 'xlc -q64 -qlanglvl=ansi -qfloat=nomaf -U__STR__'
+  set AR = 'ar -X64 -rv'
+  set RANLIB = 'ar -X64 -t'
+else if ( "$platform" == "Linux.i686" ) then
+  set CC = 'gcc -D_FILE_OFFSET_BITS=64 -D_LARGEFILE_SOURCE'
+else if ( "$platform" == "Linux.x86_64" ) then
+  set CC = 'gcc -D_FILE_OFFSET_BITS=64 -D_LARGEFILE_SOURCE'
+else if ( "$platform" == "Linux.ia64" ) then
+  set CC = 'icc -mp -D_FILE_OFFSET_BITS=64 -D_LARGEFILE_SOURCE -openmp'
+else if ( "$platform" == "Darwin.x86_64" ||  "$platform" == "Darwin.arm64" ) then
+##set CC  = '/usr/bin/gcc -m64 -fopenmp'
+  set CC  = '/usr/bin/gcc -m64'
+##set CC  = '/usr/bin/gcc -arch ppc -arch ppc64 -arch i686 -arch x86_64 -fopenmp'
+  set RANLIB = 'ranlib'
+endif
+
+touch junk.o a.out core  $LIB_DEBUG $LIB_OPTIMIZED
+\rm -f   *.o a.out core* $LIB_DEBUG $LIB_OPTIMIZED
+set here = `pwd`
+cd $INCLUDE_DIR ; touch $HEADERS ; \rm -f $HEADERS ; cd $here
+cp -p $HEADERS $INCLUDE_DIR/
+
+# Compile debug version of library:
+
+echo \
+"$CC $DEBUG $IFLAGS -c $SOURCE"
+ $CC $DEBUG $IFLAGS -c $SOURCE
+echo \
+"$AR $LIB_DEBUG $OBJECTS"
+ $AR $LIB_DEBUG $OBJECTS
+echo \
+"$RANLIB $LIB_DEBUG"
+ $RANLIB $LIB_DEBUG
+\rm -f $OBJECTS
+
+# Compile optimized version of library:
+
+echo \
+"$CC $OPTIMIZED $IFLAGS -c $SOURCE"
+ $CC $OPTIMIZED $IFLAGS -c $SOURCE
+echo \
+"$AR $LIB_OPTIMIZED $OBJECTS"
+ $AR $LIB_OPTIMIZED $OBJECTS
+echo \
+ $RANLIB $LIB_OPTIMIZED
+"$RANLIB $LIB_OPTIMIZED"
+\rm -f $OBJECTS
+
+
+echo " "
+ls -lF
+ls -lF $INCLUDE_DIR $LIB_DEBUG $LIB_OPTIMIZED
+file   $INCLUDE_DIR $LIB_DEBUG $LIB_OPTIMIZED
+echo " "
+
+

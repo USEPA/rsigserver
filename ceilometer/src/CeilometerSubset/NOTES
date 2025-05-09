@@ -1,0 +1,887 @@
+Travis Knepp: 757-864-5558, 757-864-2709
+
+Issues:
+
+1. Is "backscatter" really "coefficient of backscatter" - i.e., log(raw_instrument_value)?
+(log10 or natural log?)
+This would explain the orders-of-magnitude difference in values of
+Ceilometer-backscatter [0, 1048575.0] vs
+CALIPSO L1.total_attenuated_backscatter_532 [-.5, 2.5].
+To compare ceilometer backscatter to CALIPSO L1.total_attenuated_backscatter_532
+my CeilometerSubset program could compute ln(file_value).
+Or are they not comparable due to different wavelengths (910nm vs 532nm)?
+Or is the ceilometer counting molecules like NEUBrew (which counts millions of ozone molecules/cm3)?
+Answer: It is a raw photon count. Don't take the log of it.
+
+2. Let's decide on and hard-code a filter range (like we did for CALIPSO and other data).
+Answer: Travis will send me the filter range for each variable.
+blview_backscatter_profile (/m/sr) [0, _]
+full_backscatter_profile (/m/sr) [0, _]
+cloud_base_heights (m) [0, 100000]
+mixing_layer_height (m) [0, 100000] = first value of blview_mlh
+aerosol_layer_heights (m) [0, 100000] = all 3 values of blview_mlh
+
+3. There are more data points (16s temporal x 1540 vertical) than screen pixels.
+Should CeilometerSubset aggregate the data (like CALIPSO.L1.TAB)
+spatially (vertical levels)?
+temporally per minute? per hour?
+Answer:
+a. Travis will re-generate files without replicated values (i.e., values every 36 seconds).
+b. Temporal aggregation (1-minute, 1-hour): TBD (Jim and Travis will ponder).
+c. Spatial (vertical): TBD (Jim and Travis will ponder).
+
+4. File format.
+The Travis R0 file format almost works.
+Suggestions:
+
+a. Move /read_me and /LOCATION to the front of the file
+for more convenient usage with h5dump.
+
+b. Add GROUP /LOCATION to the front of the file:
+
+   GROUP "LOCATION" {
+      DATASET "elevation" {
+         DATATYPE  H5T_STD_I32LE
+         DATASPACE  SCALAR
+         DATA {
+         (0): 1850
+         }
+      }
+      DATASET "latitude" {
+         DATATYPE  H5T_IEEE_F64LE
+         DATASPACE  SCALAR
+         DATA {
+         (0): 40.0452
+         }
+      }
+      DATASET "longitude" {
+         DATATYPE  H5T_IEEE_F64LE
+         DATASPACE  SCALAR
+         DATA {
+         (0): -105.006
+         }
+      }
+      DATASET "sitename" {
+         DATATYPE  H5T_STRING {
+               STRSIZE H5T_VARIABLE;
+               STRPAD H5T_STR_NULLTERM;
+               CSET H5T_CSET_ASCII;
+               CTYPE H5T_C_S1;
+            }
+         DATASPACE  SCALAR
+         DATA {
+         (0): "GOLDEN"
+         }
+      }
+      DATASET "siteid" {
+         integer
+      }
+
+c. Consider putting the site id in the file name.
+
+d. datetime could be two integer datasets: yyyymmdd and hhmmss
+which would be smaller, faster, easier to read with code.
+
+e. Having all data for a UTC day would be easier (no need to get previous day file.
+
+f. Add attributes to the datasets:
+- "units" (short, SI, no spaces)
+- "valid_range" (that data should be filtered by)
+- "description" (sentence under 80 characters)
+- I prefer -9999.0 for invalid rather than problematic Nans.
+
+g. Remove redundant data.
+ 
+The read_me mentions 16s data was replicated from 32s.
+Why double the size of the file for no benefit?
+
+h. Consider better variable names.
+Here's what my ceilometerserver currently uses:
+ 
+backscatter_profile (/m/sr) Backscatter at 910nm not more than 4,500m above ground.
+cloud_height (m) Cloud height in meters above ground.
+full_backscatter_profile (/m/sr) Backscatter at 910nm up to 15,400m above ground.
+mixing_layer_height (m) Mixing layer height in meters above ground.
+Note: my CeilometerSubset program adds the station elevation to the altitudes
+to generate elevations in mAMSL for direct comparison to other data such as CALIPSO,
+MOZAIC, etc. But cloud_height and mixing_layer_height values remain mAGL.
+
+i. Do the CL51 instruments have unique IDs like NEUBrew?
+My CeilometerSubset program generates IDs from the file names.
+
+5. RSIG3D/3D display.
+Matt is working on implementing your mock-up image.
+Since RSIG displays all data in the current hour,
+there would be many co-located points (in RSIG3D 3D view mode).
+And more points than pixels (in annotation curtain) so some kind of reduction must occur.
+
+6. Archive.
+I imagine the NASA Langley DAAC will collect various ceilometer data and
+reformat, store and serve it (via a OGC-WCS I can help develop) like TADS.
+Who will be in charge of it?
+
+--------------------------------------------------
+
+h5dump GOLDEN-15_cl51-8888_20140715_L1.h5 |m
+HDF5 "GOLDEN-15_cl51-8888_20140715_L1.h5" {
+GROUP "/" {
+   ATTRIBUTE "Creation script name" {
+      DATATYPE  H5T_STRING {
+            STRSIZE H5T_VARIABLE;
+            STRPAD H5T_STR_NULLTERM;
+            CSET unknown_cset;
+            CTYPE H5T_C_S1;
+         }
+      DATASPACE  SCALAR
+      DATA {
+      (0): "mk_cl51_h5.py"
+      }
+   }
+   ATTRIBUTE "Creation script version" {
+      DATATYPE  H5T_STRING {
+            STRSIZE H5T_VARIABLE;
+            STRPAD H5T_STR_NULLTERM;
+            CSET H5T_CSET_ASCII;
+            CTYPE H5T_C_S1;
+         }
+      DATASPACE  SCALAR
+      DATA {
+      (0): "1.0"
+      }
+   }
+   ATTRIBUTE "Class file name" {
+      DATATYPE  H5T_STRING {
+            STRSIZE H5T_VARIABLE;
+            STRPAD H5T_STR_NULLTERM;
+            CSET H5T_CSET_ASCII;
+            CTYPE H5T_C_S1;
+         }
+      DATASPACE  SCALAR
+      DATA {
+      (0): "DFClasses_v3.pyc"
+      }
+   }
+   ATTRIBUTE "Class file version" {
+      DATATYPE  H5T_STRING {
+            STRSIZE H5T_VARIABLE;
+            STRPAD H5T_STR_NULLTERM;
+            CSET H5T_CSET_ASCII;
+            CTYPE H5T_C_S1;
+         }
+      DATASPACE  SCALAR
+      DATA {
+      (0): "0.1"
+      }
+   }
+   ATTRIBUTE "File creation date" {
+      DATATYPE  H5T_STRING {
+            STRSIZE H5T_VARIABLE;
+            STRPAD H5T_STR_NULLTERM;
+            CSET H5T_CSET_ASCII;
+            CTYPE H5T_C_S1;
+         }
+      DATASPACE  SCALAR
+      DATA {
+      (0): "20160831 10:05:16"
+      }
+   }
+   GROUP "BLVIEW_PROFILE" {
+      DATASET "aerosol_layer_heights" {
+         DATATYPE  H5T_STD_I64LE
+         DATASPACE  SIMPLE { ( 5400, 3 ) / ( 5400, 3 ) }
+         DATA {
+         (0,0): 3318589975418634240, 5981624730078150656,
+         (0,2): 5981624730078150656,
+...skipping...
+         ATTRIBUTE "description" {
+            DATATYPE  H5T_STRING {
+                  STRSIZE H5T_VARIABLE;
+                  STRPAD H5T_STR_NULLTERM;
+                  CSET H5T_CSET_ASCII;
+                  CTYPE H5T_C_S1;
+               }
+            DATASPACE  SCALAR
+            DATA {
+            (0): "Heights of bottom three layers of aerosols in meters above sea level, first layer considered mixed-layer height."
+            }
+         }
+         ATTRIBUTE "units" {
+            DATATYPE  H5T_STRING {
+                  STRSIZE H5T_VARIABLE;
+                  STRPAD H5T_STR_NULLTERM;
+                  CSET H5T_CSET_ASCII;
+                  CTYPE H5T_C_S1;
+               }
+            DATASPACE  SCALAR
+            DATA {
+            (0): "meters"
+            }
+         }
+         ATTRIBUTE "valid_range" {
+            DATATYPE  H5T_STD_I64LE
+            DATASPACE  SIMPLE { ( 2 ) / ( 2 ) }
+            DATA {
+            (0): 0, -4021151517288431616
+            }
+         }
+      }
+      DATASET "altitude" {
+         DATATYPE  H5T_STD_I64LE
+         DATASPACE  SIMPLE { ( 450 ) / ( 450 ) }
+         DATA {
+         (0): 720575940379279360, 1441151880758558720, 2161727821137838080,
+         (3): 2882303761517117440, 3602879701896396800, 4323455642275676160,
+         (6): 5044031582654955520, 5764607523034234880, 6485183463413514240,
+...skipping...
+         ATTRIBUTE "description" {
+            DATATYPE  H5T_STRING {
+                  STRSIZE H5T_VARIABLE;
+                  STRPAD H5T_STR_NULLTERM;
+                  CSET H5T_CSET_ASCII;
+                  CTYPE H5T_C_S1;
+               }
+            DATASPACE  SCALAR
+            DATA {
+            (0): "Profile bin altitude, meters above sea level"
+            }
+         }
+         ATTRIBUTE "units" {
+            DATATYPE  H5T_STRING {
+                  STRSIZE H5T_VARIABLE;
+                  STRPAD H5T_STR_NULLTERM;
+                  CSET H5T_CSET_ASCII;
+                  CTYPE H5T_C_S1;
+               }
+            DATASPACE  SCALAR
+            DATA {
+            (0): "meters"
+            }
+         }
+         ATTRIBUTE "valid_range" {
+            DATATYPE  H5T_STD_I64LE
+            DATASPACE  SIMPLE { ( 2 ) / ( 2 ) }
+            DATA {
+            (0): 0, -7777435081492135936
+            }
+         }
+      }
+      DATASET "blview_backscatter_profile" {
+         DATATYPE  H5T_STD_I64LE
+         DATASPACE  SIMPLE { ( 2400, 450 ) / ( 2400, 450 ) }
+         DATA {
+         (0,0): 3459327463773962240, 4900479344532520960,
+         (0,2): 5548997690873872384, 4828421750494593024,
+...skipping...
+         ATTRIBUTE "description" {
+            DATATYPE  H5T_STRING {
+                  STRSIZE H5T_VARIABLE;
+                  STRPAD H5T_STR_NULLTERM;
+                  CSET H5T_CSET_ASCII;
+                  CTYPE H5T_C_S1;
+               }
+            DATASPACE  SCALAR
+            DATA {
+            (0): "Backscatter profile at 910 nm not more than 4,500 m above sea level"
+            }
+         }
+         ATTRIBUTE "units" {
+            DATATYPE  H5T_STRING {
+                  STRSIZE H5T_VARIABLE;
+                  STRPAD H5T_STR_NULLTERM;
+                  CSET H5T_CSET_ASCII;
+                  CTYPE H5T_C_S1;
+               }
+            DATASPACE  SCALAR
+            DATA {
+            (0): "1^-9/m/sr"
+            }
+         }
+         ATTRIBUTE "valid_range" {
+            DATATYPE  H5T_STD_I64LE
+            DATASPACE  SIMPLE { ( 2 ) / ( 2 ) }
+            DATA {
+            (0): 720575940379279360, 6934707797313454080
+            }
+         }
+      }
+      DATASET "cloud_base_heights" {
+         DATATYPE  H5T_STD_I64LE
+         DATASPACE  SIMPLE { ( 5400, 3 ) / ( 5400, 3 ) }
+         DATA {
+         (0,0): 5981624730078150656, 5981624730078150656,
+         (0,2): 5981624730078150656,
+...skipping...
+         ATTRIBUTE "description" {
+            DATATYPE  H5T_STRING {
+                  STRSIZE H5T_VARIABLE;
+                  STRPAD H5T_STR_NULLTERM;
+                  CSET H5T_CSET_ASCII;
+                  CTYPE H5T_C_S1;
+               }
+            DATASPACE  SCALAR
+            DATA {
+            (0): "Heights of bottom three layers of clouds in meters above sea level."
+            }
+         }
+         ATTRIBUTE "units" {
+            DATATYPE  H5T_STRING {
+                  STRSIZE H5T_VARIABLE;
+                  STRPAD H5T_STR_NULLTERM;
+                  CSET H5T_CSET_ASCII;
+                  CTYPE H5T_C_S1;
+               }
+            DATASPACE  SCALAR
+            DATA {
+            (0): "meters"
+            }
+         }
+         ATTRIBUTE "valid_range" {
+            DATATYPE  H5T_STD_I64LE
+            DATASPACE  SIMPLE { ( 2 ) / ( 2 ) }
+            DATA {
+            (0): 0, -4021151517288431616
+            }
+         }
+      }
+      DATASET "hhmmss" {
+         DATATYPE  H5T_STD_I64LE
+         DATASPACE  SIMPLE { ( 2400 ) / ( 2400 ) }
+         DATA {
+         (0): 0, 2305843009213693952, 7493989779944505344,
+         (3): -8646911284551352320, -2305843009213693952, 281474976710656,
+...skipping...
+         }
+         ATTRIBUTE "description" {
+            DATATYPE  H5T_STRING {
+                  STRSIZE H5T_VARIABLE;
+                  STRPAD H5T_STR_NULLTERM;
+                  CSET H5T_CSET_ASCII;
+                  CTYPE H5T_C_S1;
+               }
+            DATASPACE  SCALAR
+            DATA {
+            (0): "Time of measurement, HHMMSS UTC"
+            }
+         }
+         ATTRIBUTE "units" {
+            DATATYPE  H5T_STRING {
+                  STRSIZE H5T_VARIABLE;
+                  STRPAD H5T_STR_NULLTERM;
+                  CSET H5T_CSET_ASCII;
+                  CTYPE H5T_C_S1;
+               }
+            DATASPACE  SCALAR
+            DATA {
+            (0): "HHMMSS"
+            }
+         }
+         ATTRIBUTE "valid_range" {
+            DATATYPE  H5T_STD_I64LE
+            DATASPACE  SIMPLE { ( 2 ) / ( 2 ) }
+            DATA {
+            (0): 0, -5217135394797125632
+            }
+         }
+      }
+      DATASET "yyyymmdd" {
+         DATATYPE  H5T_STD_I64LE
+         DATASPACE  SIMPLE { ( 2400 ) / ( 2400 ) }
+         DATA {
+         (0): -6101758465745616896, -6101758465745616896,
+         (2): -6101758465745616896, -6101758465745616896,
+...skipping...
+         }
+         ATTRIBUTE "description" {
+            DATATYPE  H5T_STRING {
+                  STRSIZE H5T_VARIABLE;
+                  STRPAD H5T_STR_NULLTERM;
+                  CSET H5T_CSET_ASCII;
+                  CTYPE H5T_C_S1;
+               }
+            DATASPACE  SCALAR
+            DATA {
+            (0): "Date of measurement, YYYYMMDD UTC"
+            }
+         }
+         ATTRIBUTE "units" {
+            DATATYPE  H5T_STRING {
+                  STRSIZE H5T_VARIABLE;
+                  STRPAD H5T_STR_NULLTERM;
+                  CSET H5T_CSET_ASCII;
+                  CTYPE H5T_C_S1;
+               }
+            DATASPACE  SCALAR
+            DATA {
+            (0): "YYYYMMDD"
+            }
+         }
+         ATTRIBUTE "valid_range" {
+            DATATYPE  H5T_STD_I64LE
+            DATASPACE  SIMPLE { ( 2 ) / ( 2 ) }
+            DATA {
+            (0): 7290537252147429376, -1890446412433326080
+            }
+         }
+      }
+   }
+   GROUP "FULL_PROFILE" {
+      DATASET "altitude" {
+         DATATYPE  H5T_STD_I64LE
+         DATASPACE  SIMPLE { ( 1540 ) / ( 1540 ) }
+         DATA {
+         (0): 720575940379279360, 1441151880758558720, 2161727821137838080,
+         (3): 2882303761517117440, 3602879701896396800, 4323455642275676160,
+...skipping...
+         }
+         ATTRIBUTE "description" {
+            DATATYPE  H5T_STRING {
+                  STRSIZE H5T_VARIABLE;
+                  STRPAD H5T_STR_NULLTERM;
+                  CSET H5T_CSET_ASCII;
+                  CTYPE H5T_C_S1;
+               }
+            DATASPACE  SCALAR
+            DATA {
+            (0): "Profile bin altitude, meters above sea level"
+            }
+         }
+         ATTRIBUTE "units" {
+            DATATYPE  H5T_STRING {
+                  STRSIZE H5T_VARIABLE;
+                  STRPAD H5T_STR_NULLTERM;
+                  CSET H5T_CSET_ASCII;
+                  CTYPE H5T_C_S1;
+               }
+            DATASPACE  SCALAR
+            DATA {
+            (0): "meters"
+            }
+         }
+         ATTRIBUTE "valid_range" {
+            DATATYPE  H5T_STD_I64LE
+            DATASPACE  SIMPLE { ( 2 ) / ( 2 ) }
+            DATA {
+            (0): 0, 2899192260119756800
+            }
+         }
+      }
+      DATASET "full_backscatter_profile" {
+         DATATYPE  H5T_STD_I64LE
+         DATASPACE  SIMPLE { ( 2400, 1540 ) / ( 2400, 1540 ) }
+         DATA {
+         (0,0): 4179340454199820288, 4179340454199820288,
+         (0,2): 4251398048237748224, 4251398048237748224,
+...skipping...
+         }
+         ATTRIBUTE "description" {
+            DATATYPE  H5T_STRING {
+                  STRSIZE H5T_VARIABLE;
+                  STRPAD H5T_STR_NULLTERM;
+                  CSET H5T_CSET_ASCII;
+                  CTYPE H5T_C_S1;
+               }
+            DATASPACE  SCALAR
+            DATA {
+            (0): "Backscatter profile at 910 nm not more than 15,400 m above sea level"
+            }
+         }
+         ATTRIBUTE "units" {
+            DATATYPE  H5T_STRING {
+                  STRSIZE H5T_VARIABLE;
+                  STRPAD H5T_STR_NULLTERM;
+                  CSET H5T_CSET_ASCII;
+                  CTYPE H5T_C_S1;
+               }
+            DATASPACE  SCALAR
+            DATA {
+            (0): "1^-9/m/sr"
+            }
+         }
+         ATTRIBUTE "valid_range" {
+            DATATYPE  H5T_STD_I64LE
+            DATASPACE  SIMPLE { ( 2 ) / ( 2 ) }
+            DATA {
+            (0): 720575940379279360, 6934707797313454080
+            }
+         }
+      }
+      DATASET "hhmmss" {
+         DATATYPE  H5T_STD_I64LE
+         DATASPACE  SIMPLE { ( 2400 ) / ( 2400 ) }
+         DATA {
+         (0): 1152921504606846976, 3746994889972252672, -9223372036854775808,
+         (3): -3746994889972252672, -1152921504606846976,
+...skipping...
+         }
+         ATTRIBUTE "description" {
+            DATATYPE  H5T_STRING {
+                  STRSIZE H5T_VARIABLE;
+                  STRPAD H5T_STR_NULLTERM;
+                  CSET H5T_CSET_ASCII;
+                  CTYPE H5T_C_S1;
+               }
+            DATASPACE  SCALAR
+            DATA {
+            (0): "Time of measurement, HHMMSS UTC"
+            }
+         }
+         ATTRIBUTE "units" {
+            DATATYPE  H5T_STRING {
+                  STRSIZE H5T_VARIABLE;
+                  STRPAD H5T_STR_NULLTERM;
+                  CSET H5T_CSET_ASCII;
+                  CTYPE H5T_C_S1;
+               }
+            DATASPACE  SCALAR
+            DATA {
+            (0): "HHMMSS"
+            }
+         }
+         ATTRIBUTE "valid_range" {
+            DATATYPE  H5T_STD_I64LE
+            DATASPACE  SIMPLE { ( 2 ) / ( 2 ) }
+            DATA {
+            (0): 0, -5217135394797125632
+            }
+         }
+      }
+      DATASET "yyyymmdd" {
+         DATATYPE  H5T_STD_I64LE
+         DATASPACE  SIMPLE { ( 2400 ) / ( 2400 ) }
+         DATA {
+         (0): -6101758465745616896, -6101758465745616896,
+         (2): -6101758465745616896, -6101758465745616896,
+...skipping...
+         }
+         ATTRIBUTE "description" {
+            DATATYPE  H5T_STRING {
+                  STRSIZE H5T_VARIABLE;
+                  STRPAD H5T_STR_NULLTERM;
+                  CSET H5T_CSET_ASCII;
+                  CTYPE H5T_C_S1;
+               }
+            DATASPACE  SCALAR
+            DATA {
+            (0): "Date of measurement, YYYYMMDD UTC"
+            }
+         }
+         ATTRIBUTE "units" {
+            DATATYPE  H5T_STRING {
+                  STRSIZE H5T_VARIABLE;
+                  STRPAD H5T_STR_NULLTERM;
+                  CSET H5T_CSET_ASCII;
+                  CTYPE H5T_C_S1;
+               }
+            DATASPACE  SCALAR
+            DATA {
+            (0): "YYYYMMDD"
+            }
+         }
+         ATTRIBUTE "valid_range" {
+            DATATYPE  H5T_STD_I64LE
+            DATASPACE  SIMPLE { ( 2 ) / ( 2 ) }
+            DATA {
+            (0): 7290537252147429376, -1890446412433326080
+            }
+         }
+      }
+   }
+   GROUP "LOCATION" {
+      DATASET "elevation" {
+         DATATYPE  H5T_STD_I64LE
+         DATASPACE  SCALAR
+         DATA {
+         (0): 4181310779036794880
+         }
+         ATTRIBUTE "description" {
+            DATATYPE  H5T_STRING {
+                  STRSIZE H5T_VARIABLE;
+                  STRPAD H5T_STR_NULLTERM;
+                  CSET H5T_CSET_ASCII;
+                  CTYPE H5T_C_S1;
+               }
+            DATASPACE  SCALAR
+            DATA {
+            (0): "Site elevation, m above sea level."
+            }
+         }
+         ATTRIBUTE "valid_range" {
+            DATATYPE  H5T_STD_I64LE
+            DATASPACE  SIMPLE { ( 2 ) / ( 2 ) }
+            DATA {
+            (0): -8576261065396977665, 1163899028698562560
+            }
+         }
+      }
+      DATASET "latitude" {
+         DATATYPE  H5T_IEEE_F64LE
+         DATASPACE  SCALAR
+         DATA {
+         (0): 5.66689e+243
+         }
+         ATTRIBUTE "description" {
+            DATATYPE  H5T_STRING {
+                  STRSIZE H5T_VARIABLE;
+                  STRPAD H5T_STR_NULLTERM;
+                  CSET H5T_CSET_ASCII;
+                  CTYPE H5T_C_S1;
+               }
+            DATASPACE  SCALAR
+            DATA {
+            (0): "Site latitude (degrees North, negative = S)."
+            }
+         }
+         ATTRIBUTE "valid_range" {
+            DATATYPE  H5T_STD_I64LE
+            DATASPACE  SIMPLE { ( 2 ) / ( 2 ) }
+            DATA {
+            (0): -6413125869375586305, 6485183463413514240
+            }
+         }
+      }
+      DATASET "local_timezone" {
+         DATATYPE  H5T_STRING {
+               STRSIZE H5T_VARIABLE;
+               STRPAD H5T_STR_NULLTERM;
+               CSET H5T_CSET_ASCII;
+               CTYPE H5T_C_S1;
+            }
+         DATASPACE  SCALAR
+         DATA {
+         (0): "US/Mountain"
+         }
+         ATTRIBUTE "description" {
+            DATATYPE  H5T_STRING {
+                  STRSIZE H5T_VARIABLE;
+                  STRPAD H5T_STR_NULLTERM;
+                  CSET H5T_CSET_ASCII;
+                  CTYPE H5T_C_S1;
+               }
+            DATASPACE  SCALAR
+            DATA {
+            (0): "Local time zone where measurement was made."
+            }
+         }
+      }
+      DATASET "longitude" {
+         DATATYPE  H5T_IEEE_F64LE
+         DATASPACE  SCALAR
+         DATA {
+         (0): 1.13458e+142
+         }
+         ATTRIBUTE "description" {
+            DATATYPE  H5T_STRING {
+                  STRSIZE H5T_VARIABLE;
+                  STRPAD H5T_STR_NULLTERM;
+                  CSET H5T_CSET_ASCII;
+                  CTYPE H5T_C_S1;
+               }
+            DATASPACE  SCALAR
+            DATA {
+            (0): "Site longitude (degrees East, negative = W)."
+            }
+         }
+         ATTRIBUTE "valid_range" {
+            DATATYPE  H5T_STD_I64LE
+            DATASPACE  SIMPLE { ( 2 ) / ( 2 ) }
+            DATA {
+            (0): 5548434740920451071, -5476377146882523136
+            }
+         }
+      }
+      DATASET "site_id" {
+         DATATYPE  H5T_STD_I64LE
+         DATASPACE  SCALAR
+         DATA {
+         (0): 1080863910568919040
+         }
+         ATTRIBUTE "description" {
+            DATATYPE  H5T_STRING {
+                  STRSIZE H5T_VARIABLE;
+                  STRPAD H5T_STR_NULLTERM;
+                  CSET H5T_CSET_ASCII;
+                  CTYPE H5T_C_S1;
+               }
+            DATASPACE  SCALAR
+            DATA {
+            (0): "Numerical ID number of observation site."
+            }
+         }
+      }
+      DATASET "sitename" {
+         DATATYPE  H5T_STRING {
+               STRSIZE H5T_VARIABLE;
+               STRPAD H5T_STR_NULLTERM;
+               CSET H5T_CSET_ASCII;
+               CTYPE H5T_C_S1;
+            }
+         DATASPACE  SCALAR
+         DATA {
+         (0): "golden"
+         }
+         ATTRIBUTE "description" {
+            DATATYPE  H5T_STRING {
+                  STRSIZE H5T_VARIABLE;
+                  STRPAD H5T_STR_NULLTERM;
+                  CSET H5T_CSET_ASCII;
+                  CTYPE H5T_C_S1;
+               }
+            DATASPACE  SCALAR
+            DATA {
+            (0): "Name of observation site."
+            }
+         }
+      }
+   }
+   DATASET "read_me" {
+      DATATYPE  H5T_STRING {
+            STRSIZE H5T_VARIABLE;
+            STRPAD H5T_STR_NULLTERM;
+            CSET H5T_CSET_ASCII;
+            CTYPE H5T_C_S1;
+         }
+      DATASPACE  SCALAR
+      DATA {
+      (0): "Contact:    Travis Knepp
+                        21 Langley Blvd.
+                        Mail Stop 401A, B1250
+                        Hampton, VA 23681
+           
+                        757-864-5558
+           
+                        travis.n.knepp@nasa.gov
+           
+           Secondary:   Jim Szykman
+                        james.j.szykman@nasa.gov
+           
+           Data Organization: NASA Langley Research Center.  
+           
+           Data Source:       Vaisala CL51 Ceilometer
+           
+           Data Resolution:    36 s
+                               The representation in the original BLVIEW files is
+                               somewhat misleading since BLVIEW logs a 
+                               profile every 16 s.  However, the CL51 only
+                               reports a profile every 36 s.  What BLVIEW is
+                               doing is reproducing profiles to yield 16 s 
+                               resolution, even though you may end up with 
+                               three or four identical profiles back-to-back.
+                               Therefore, while the BLVIEW data reported 
+                               herein have a MLH/cloud height value 
+                               every 16 s, you should realize that the "real"
+                               resolution is 36 s and most of the BLVIEW 
+                               profiles are duplicated.  These duplicate profiles 
+                               have been removed from the hdf files, leaving 
+                               only the reported 36 s data.
+           
+           Instrument Details:
+               Manufacturer:               Vaisala
+               Model:                      CL51
+               LASER Source:               Indium Gallium Arsenide Diode LASER
+               Center Wavelength:          910 nm (+/- 10nm)
+               Operation Mode:             Pulsed
+               Pulse Energy:               3.0 micro-watt seconds
+               Pulse Width:                110 ns
+               Pulse Rate:                 6.5 kHz
+               Beam Divergence:            +/- 0.15 x +/- 0.25 mrad
+               Receiver Bandwidth:         3 MHz
+               Field of View Divergence:   +/- 0.56 mrad
+               Full Measurement Range:     15.4 km
+               Cloud Detection Range:      0 - 13 km
+               Measurement Resolution:     10 m
+               Measurement Interval:       6 s (averaged into 36 s)
+               Measurement Units:          10^-9 m^-1 sr^-1
+           
+           Data Content:
+           
+                Data within this file are for one UTC day, with time stamps in UTC
+                time zone. Dates are reported in integers (YYYYMMDD, hence 27-February
+                2015 would be 20150227).  Times are reported in integers as well
+                (hence 15:35:01 would be 153501).
+           
+                The CL51 ceilometer logs data onto a laptop computer using Vaisala's
+                BLVIEW software.  BLVIEW logs the backscatter profile (up to 4500 m)
+                and estimates the mixed-layer height (up to three) and cloud heights
+                (up to three).  Since the profile data collection is truncated at
+                4500 m a serial splitter cable was used to split the incoming signal
+                to a second com port of the laptop where the full profiles were 
+                logged via a Python script.  The full-profile data should be used 
+                with the understanding that no calibration factors have been applied, 
+                while the truncated BLVIEW profiles have had some form of correction
+                applied (qualitatively, the two datasets are very similar).
+           
+           
+                altitude:
+                    Altitude values are AGL
+                        BLVIEW profiles:  10-4500 m (10 m resolution)
+                        Full profiles:    10-15400 m (10 m resolution)
+           
+                date:
+                    Date is reported as an integer (YYYYMMDD, UTC), corresponding to 
+                        the date/time when the data were transmitted from the CL51.  
+                        This is a representation of the average backscatter over the 
+                        previous 36 s sampling time.  SEE NOTE BELOW
+           
+                time:
+                    Time is reported as an integer (HHMMSS, UTC), corresponding to 
+                        the date/time when the data were transmitted from the CL51.  
+                        This is a representation of the average backscatter over the 
+                        previous 36 s sampling time.  SEE NOTE BELOW
+                        
+               full_profile:
+                   The full profile data (rows = time, columns = altitude) logged 
+                   using the split serial line and Python script.
+               
+               blview_profile:
+                   The truncated BLVIEW profile data (time x altitude).  Same 
+                   format as full_profile.
+               
+               blview_ch:
+                   All cloud heights are AGL.
+                   First three estimates of cloud height (cloud_1,cloud_2,cloud_3).
+                   If there are no cloud present then all values are -9999.  
+                   If only one cloud is present then values are (xxx,-9999,-9999) and 
+                   so forth.  Data values are in meters.  SEE NOTE BELOW
+           
+               blview_mlh:
+                   All mixing-layer heights are AGL.
+                   First three estimates of mixing-layer height (mlh_1,mlh_2,mlh_3)
+                   and follow same rule as blview_ch.  Data values are in meters.
+                   SEE NOTE BELOW
+               
+               NOTES:
+                   On MLH and cloud height (CH) estimates:
+                   Sometimes multiple MLH/CH layers will be present and, during the 
+                   course of the day, one of those layers will disappear, which can 
+                   make visual interpretation somewhat confusing.  A classic example 
+                   is a three-layer atmosphere where the first layer is at 
+                   approximately 500 m, with the second being a residual layer at 
+                   2000 m.  The first layer may burn off in the morning, at which 
+                   point the NEW "first layer" (as far as BLVIEW is concerned) is 
+                   now at 2000 m, causing an abrupt jump in mlh_1 from 500 m to 
+                   2000 m in a matter of seconds.
+                   
+                   On date and time stamps:
+                   It is necessary to make separate date and time arrays for the "full-
+                   profile" and "BLView-profile" data since the two datasets are logged 
+                   by differing softwares.  The two date/time stamps match up the vast 
+                   majority of the time.  However, there are rare instances where one 
+                   logging software will be stopped and the other will continue to log
+                   data, resulting in an unequal number of profiles between the two.
+           
+           
+           
+           Data Structures: 
+                Profile rows correspond to the date/time stamps, and columns
+               correspond to altitudes.  For MLH and cloud height (CH) data rows
+               correspond to the datetime array and columns correspond to
+               the first, second, and third MLH/CH estimates.
+           
+           
+           
+           "
+      }
+   }
+}
+}
+

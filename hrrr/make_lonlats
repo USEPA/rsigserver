@@ -1,0 +1,40 @@
+#!/bin/csh -f
+# Create lonlats.bin file from HRRR_lonlat.h5 file.
+
+set input_file  = HRRR_latlon.h5
+set output_file = HRRR_lonlat.bin
+
+if ( `hostname -s` == 'maple' ) then
+  set bindir =  '/rsig/current/code/bin/Linux.x86_64'
+else
+  set bindir = "$HOME/bin/Darwin"
+endif
+
+set ncdump = "$bindir/ncdump"
+set fdd    = "$bindir/fdd"
+
+$ncdump $input_file > $input_file.dump
+
+@ rows    = `head -4 HRRR_latlon.h5.dump | grep _dim_0 | awk '{ print $3 }'`
+@ columns = `head -4 HRRR_latlon.h5.dump | grep _dim_1 | awk '{ print $3 }'`
+
+echo 'Content-type: application/octet-stream; charset=iso-8859-1' > $output_file
+echo '# dimensions: variables rows columns' >> $output_file
+echo "2 $rows $columns" >> $output_file
+echo '# variable names:' >> $output_file
+echo 'longitude latitude' >> $output_file
+echo '# variable units:' >> $output_file
+echo 'deg deg' >> $output_file
+echo '# IEEE-754 64-bit real data[variables][rows][columns]:' >> $output_file
+
+awk '/^ longitude =/ { getline; while ( $NF != "}" ) { print ; getline } }' \
+< $input_file.dump | tr ',' '\n' | tr -d '[ ;]' | grep -v ^$ \
+| $fdd conv=ascii-real8 conv=swab8 >> $output_file
+
+awk '/^ latitude =/ { getline; while ( $NF != "=" ) { print ; getline } }' \
+< $input_file.dump | tr ',' '\n' | tr -d '[ ;]' | grep -v ^$ \
+| $fdd conv=ascii-real8 conv=swab8 >> $output_file
+
+ls -l $output_file
+head -8 $output_file
+

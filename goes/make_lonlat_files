@@ -1,0 +1,33 @@
+#!/bin/csh -f
+# make_lonlat_files - Convert ASCII longitude-latitude files to binary format.
+
+set FDD = '/home/plessel/bin/Linux.x86_64/fdd conv=ascii-real4 conv=swab4'
+
+if ( $#argv != 1 ) then
+  echo
+  echo "$0 - Convert ASCII longitude-latitude files to binary format."
+  echo "usage: $0 file.txt"
+  echo "example: $0 data/sport_goesImager_latLon_20130919.txt"
+  echo "ls -l       data/sport_goesImager_latLon_20130919.bin"
+  echo
+  exit 1
+endif
+
+set input_file   = $1
+set output_file  = $input_file:r.bin
+set header_lines = `head -1 $input_file | awk '{print $3}'`
+set columns      = `tail -1 $input_file | awk '{print $1}'`
+set rows         = `tail -1 $input_file | awk '{print $2}'`
+
+# Write 4-line ASCII header:
+
+echo 'Content-type: application/octet-stream; charset=iso-8859-1' > $output_file
+echo '# Dimensions: rows columns' >> $output_file
+echo "$rows $columns" >> $output_file
+echo '# IEEE-754/MSB 32-bit float longitudes[rows][columns]; float latitudes[rows][columns]:' >> $output_file
+
+# Write IEEE-754 32-bit floating-point arrays of longitude and latitude:
+
+cat $input_file | awk -vheader_lines=$header_lines '{ if ( NR > header_lines ) { print $4 } }' | $FDD >> $output_file
+cat $input_file | awk -vheader_lines=$header_lines '{ if ( NR > header_lines ) { print $5 } }' | $FDD >> $output_file
+

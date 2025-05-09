@@ -1,0 +1,25 @@
+#!/bin/csh -f
+
+## processRetigoWMSColorbar - A wrapper for returning the colorbar corresponding to
+##                            RETIGO WMS requests.
+##                            Called from /opt/Apache/cgi-bin/retigowmsserver
+##
+## args: - id
+#
+## e.g. processRetigoWMSColorbar 30608_1537291963
+
+
+#set server    = "http://rtpmeta.epa.gov/cgi-bin/rsigserver?"
+set server    = "http://YOUR_WEBSERVER_HOST/cgi-bin/rsigserver?"
+set scriptDir = "/rsig/WMS/scripts"
+set outputDir = "/rsig/WMS/data/output"
+
+
+## if we got this far, assume the parameters are in the correct order
+set id = $1
+
+## send back colorbar
+set colorbarFile = $outputDir/${id}_colorbar.png
+if (-e $colorbarFile) then
+  cat $colorbarFile
+endif

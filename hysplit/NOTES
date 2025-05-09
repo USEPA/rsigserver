@@ -1,0 +1,12 @@
+2017-01-13
+
+Todd,
+
+I just looked over my steps over how data was processed. There are multiple steps involved,  but in the first steps I had to multiply by   *1000000000 to convert the units into ug/m3.  Your email reminded me that there was some unit conversion. The units must have been in ug/cm3
+
+I think that may have to be done to the concentrations you have.
+
+Ana
+
+convert_hysplit_to_daily_files.R
+

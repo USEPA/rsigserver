@@ -1,0 +1,15 @@
+#!/bin/sh
+
+clear
+
+echo
+echo "Compiling ofssubset"
+gcc -m64 -Wall -D_FILE_OFFSET_BITS=64 -D_LARGEFILE_SOURCE -DNDEBUG -O -o ofssubset ofssubset.c -lm
+strip ofssubset
+ls -l ofssubset
+file  ofssubset
+ldd   ofssubset
+
+ls -Fsalt | head
+echo Done
+

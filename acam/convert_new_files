@@ -1,0 +1,24 @@
+#!/bin/csh -f
+# convert_new_files - Convert new files to renamed/sorted form.
+
+cd original_files.new
+touch junk.txt
+chmod 664 *.txt
+rm -f *.txt
+unzip *.zip
+mv *txt ../data
+cd ../data
+
+foreach input_file ( July*txt )
+  set output_file = `echo $input_file | sed 's/ML_F/_F/g' | sed 's/ACAMF/ACAM_F/g' | awk -F_ '{ dd = substr( $1, 5, 2 ); printf "201107%02d_%s_%s", dd, $2, $3 }'`
+  head -1 $input_file | sed 's/Mixing Ratio/NO2/g' | sed 's/HSRL //g' | sed 's/ (/(/g' | sed 's/,ML(/,MLH(/g' > $output_file
+  cat $input_file | \
+    awk -F, '{ if ( NR > 1 ) { printf "%d,%05.2f,%10.5f,%10.5f", $1, $2, $3, $4 ; for ( i = 5; i <= NF; ++i ) printf ",%e", $i ; printf "\n" } }' \
+    | sort >> $output_file
+end
+
+rm -f J*txt
+chmod 444 2*txt
+cd ..
+ls -l data/*
+

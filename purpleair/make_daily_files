@@ -1,0 +1,78 @@
+#!/bin/csh -f
+# make_daily_files - Create daily PurpleAir pm25_corrected files.
+
+set directory = /data/PurpleAir
+set data_directory = $directory/data
+set tmpdir = /data/tmp
+set temp_file_list = $tmpdir/purpleair_file_list.$$
+set subsetter = /rsig/current/code/bin/Linux.x86_64/PurpleAirSubset
+
+set bounds = '-180 -90 180 90'
+
+set variables = ( \
+  pm25_corrected \
+  humidity \
+  temperature \
+)
+
+set standard_options = "-files $temp_file_list -tmpdir $tmpdir -desc https://api.purpleair.com/,PurpleAirSubset -format xdr -out_in_flag 0 -default_humidity 50 -bounds $bounds"
+
+@ today = `date -u +%Y%m%d`
+
+if ( "$1" != '' ) then # Process specified YYYYMM only.
+  @ YYYYMM = "$1"
+  @ YYYY = $YYYYMM / 100
+  set directories = "$data_directory/$YYYY/${YYYYMM}??"
+  set monthly_directories = "$data_directory/${YYYYMM}01"
+else
+  set directories = "$data_directory/20??/20??????"
+  set monthly_directories = "$data_directory/20??/20????01"
+endif
+
+if ( "$2" != '' ) then # Process specified variable only.
+  set variables = ( $2 )
+endif
+
+@ overwrite = 0
+
+if ( "$3" == 'overwrite' ) then # Overwrite output file.
+  @ overwrite = 1
+endif
+
+# Make daily files in each daily directory:
+
+foreach dir ( $directories )
+  @ yyyymmdd = `echo $dir | awk '{ print substr( $0, length( $0 ) - 7, 8 ) }'`
+
+  if ( $yyyymmdd < $today ) then
+
+    foreach variable ( $variables )
+      set output_file = $dir/${variable}_daily.xdr
+ 
+      if ( $overwrite ) then
+        touch     $output_file
+        chmod 664 $output_file
+        rm        $output_file
+      endif
+ 
+      if ( ! -f $output_file ) then
+        ls -1 $dir/*.json > $temp_file_list
+
+        if ( $status == 0 ) then
+          $subsetter $standard_options -timerange ${yyyymmdd}000000 ${yyyymmdd}235959 -variable $variable -aggregate daily > $output_file
+
+          if ( $status ) then
+            echo "Failed to create $output_file"
+            rm $output_file
+          else
+            chmod 444 $output_file
+            ls -l $output_file
+          endif
+        endif
+      endif
+    end
+  endif
+end
+
+rm $temp_file_list
+

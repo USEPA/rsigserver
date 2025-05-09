@@ -1,0 +1,104 @@
+#!/bin/csh -f
+# make_hourly_files - Create hourly PurpleAir pm25_corrected files.
+# This script is run as a cronjob every hour so today's files are
+# updated 24 times - once at 10 minutes past each hour.
+# Or manually as:
+# make_hourly_files YYYYMM variable overwrite
+
+set directory = /data/PurpleAir
+set data_directory = $directory/data
+set tmpdir = /data/tmp
+set temp_file_list = $tmpdir/purpleair_file_list.$$
+set temp_output_file = $tmpdir/purpleair_file.$$
+set subsetter = /rsig/current/code/bin/Linux.x86_64/PurpleAirSubset
+
+set bounds = '-180 -90 180 90'
+
+# List variables to process:
+
+set variables = ( \
+  pm25_corrected \
+  humidity \
+  temperature \
+)
+
+set standard_options = "-files $temp_file_list -tmpdir $tmpdir -desc https://api.purpleair.com/,PurpleAirSubset -format xdr -out_in_flag 0 -default_humidity 50 -bounds $bounds"
+
+@ today = `date -u +%Y%m%d`
+@ seconds = `date -u "+%s"`
+@ seconds = $seconds - ( 24 * 60 * 60 )
+@ yesterday = `date -u --date="@$seconds" "+%Y%m%d"`
+
+if ( "$1" != '' ) then # Process specified YYYYMM only.
+  @ YYYYMM = "$1"
+  @ YYYY = $YYYYMM / 100
+  set directories = "$data_directory/$YYYY/${YYYYMM}??"
+else
+  set directories = "$data_directory/20??/20??????"
+endif
+
+if ( "$2" != '' ) then # Process specified variable only.
+  set variables = ( $2 )
+endif
+
+@ overwrite = 0
+
+if ( "$3" == 'overwrite' ) then # Overwrite output file.
+  @ overwrite = 1
+endif
+
+# Make one 24-hour file in each daily directory:
+
+foreach dir ( $directories )
+  @ yyyymmdd = `echo $dir | awk '{ print substr( $0, length( $0 ) - 7, 8 ) }'`
+
+  if ( $yyyymmdd < $today ) then
+    echo $yyyymmdd
+
+    foreach variable ( $variables )
+      echo $variable
+
+      set output_file = $dir/${variable}_hourly.xdr
+
+      if ( $overwrite ) then
+        touch     $output_file
+        chmod 664 $output_file
+        rm        $output_file
+      endif
+
+      #if ( ! -f $output_file || $yyyymmdd >= $yesterday ) then
+      if ( ! -f $output_file ) then
+        ls -1 $dir/*.json > $temp_file_list
+
+        if ( $status == 0 ) then
+          echo \
+          "$subsetter $standard_options -timerange ${yyyymmdd}000000 ${yyyymmdd}235959 -aggregate hourly -variable $variable > $temp_output_file"
+           $subsetter $standard_options -timerange ${yyyymmdd}000000 ${yyyymmdd}235959 -aggregate hourly -variable $variable > $temp_output_file
+
+          if ( $status ) then
+            echo "Failed to create $temp_output_file"
+            rm $temp_output_file
+          else
+
+            if ( -f $output_file ) then
+              chmod 664 $output_file
+              rm -f $output_file
+            endif
+
+            mv $temp_output_file $output_file
+
+            #if ( $yyyymmdd <= $yesterday ) then
+              chmod 444 $output_file
+            #endif
+
+            ls -l $output_file
+            rm $temp_file_list
+          endif
+        endif
+      endif
+    end
+  endif
+end
+
+rm $temp_file_list
+

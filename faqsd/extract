@@ -1,0 +1,146 @@
+#!/bin/csh -f
+# extract - Extract subset of data from FAQSD *.txt files.
+# http://www.epa.gov/esd/land-sci/lcb/lcb_faqsd.html
+
+set directory = '/data/FAQSD/data'
+set FDD = '/code/bin/Linux.x86_64/fdd'
+@ bytes_per_line = 65 # In *.txt files (including newline).
+
+@ ok = 0
+@ listfiles = 0
+
+if ( $#argv == 9 || $#argv == 6 ) then
+  set variable  = $1
+  @ std         = `echo "$1" | awk  -F_ '{ print ( $NF == "std" ) }'`
+  if ( $std ) set variable = `echo $variable | awk '{ print substr( $1, 1, length( $1 ) - 4 ) }'`
+  @ year        = "$2"
+  @ month       = "$3"
+  @ day         = "$4"
+  @ days        = "$5"
+
+  if ( "$6" == 'listfiles' ) then
+    @ listfiles = 1
+  else
+    set min_lon   = "$6"
+    set min_lat   = "$7"
+    set max_lon   = "$8"
+    set max_lat   = "$9"
+  endif
+
+  if ( ( "$variable" == "ozone_daily_8hour_maximum" || \
+         "$variable" == "ozone_daily_8hour_maximum_std" || \
+         "$variable" == "pm25_daily_average" || \
+         "$variable" == "pm25_daily_average_std" ) && \
+       $year >= 2001 && $year <= 2021 && \
+       $month >= 1 && $month <= 12 && \
+       $day >= 1 && $day <= 31 && \
+       $days >= 1 ) then
+    @ ok = 1
+  endif
+endif
+
+if ( ! $ok ) then
+  echo " "
+  echo "$0 - Extract selected subset of FAQSD data."
+  echo "usage: $0 variable year month day days [listfiles | min_lon min_lat max_lon max_lat]"
+  echo "example: $0 ozone_daily_8hour_maximum 2001 7 30 3 -76 35 -75 38"
+  echo "example: $0 pm25_daily_average_std 2007 7 30 3 -76 35 -75 38"
+  echo "example: $0 pm25_daily_average_std 2007 12 30 3 listfiles"
+  echo " "
+  exit 1
+endif
+
+set name = `echo "$variable" | tr '_' ' ' | awk '{ print $1 }'`
+
+if ( "$name" == "ozone" ) then
+  set units = "ppb"
+else
+  set units = "ug/m3"
+endif
+
+if ( $listfiles == 0 ) then
+  echo "SITE,LATITUDE,LONGITUDE,YEAR,JUL_DAY,GMT_HR,$variable,$units,SITE_NAME"
+endif
+
+@ is_first_year = 1
+
+while ( $days > 0 )
+
+  set input_file = "$directory/$year""_$variable.txt"
+
+  # Compute lines per day based on year:
+
+  # 30 days hath September, April, June and November,
+  # all the rest have 31 except February which has 28 or 29 on a leap year.
+
+  if ( $year % 4 == 0 && ! ( $year % 100 == 0 && ! $year % 400 == 0 ) ) then
+    @ leap = 1
+    set days_per_month = ( 31 29 31 30 31 30 31 31 30 31 30 31 )
+  else
+    @ leap = 0
+    set days_per_month = ( 31 28 31 30 31 30 31 31 30 31 30 31 )
+  endif
+
+  if ( $year == 2001 ) then
+    @ lines_per_day = 49171
+  else if ( $year >= 2020 ) then
+    @ lines_per_day = 83776
+  else
+    @ lines_per_day = 72283
+  endif
+ 
+## old files:  
+##if ( $year == 2001 ) then
+##  @ lines_per_day = 49171
+##else if ( $year >= 2002 && $year <= 2006 ) then
+##  @ lines_per_day = 53195
+##else if ( $year >= 2007 && $year <= 2008 ) then
+##  @ lines_per_day = 64890
+##else if ( $year >= 2009 ) then
+##  @ lines_per_day = 72283
+##endif
+
+  if ( $is_first_year ) then
+    @ skip_days = 0
+    @ m = 1
+
+    while ( $m < $month )
+      @ skip_days = $skip_days + $days_per_month[$m]
+      @ m = $m + 1
+    end
+
+    @ skip_days = $skip_days + $day - 1
+    @ start_line = 2 + $skip_days * $lines_per_day
+  endif
+
+  @ extract_lines = $days * $lines_per_day
+  @ extract_end = $start_line + $extract_lines - 1
+  @ file_lines = 1 + ( 365 + $leap ) * $lines_per_day
+
+  if ( $extract_end > $file_lines ) then
+    @ extract_lines = ( $file_lines - $start_line ) + 1
+    @ extract_days = $extract_lines / $lines_per_day
+    @ days = $days - $extract_days
+  else
+    @ days = 0
+  endif
+
+  @ header_bytes = `head -1 $input_file | wc -c`
+  @ seek_bytes = $header_bytes + ( $start_line - 2 ) * $bytes_per_line  
+  @ read_bytes = $extract_lines * $bytes_per_line
+
+  if ( $listfiles ) then
+    echo "$input_file"
+  else
+    $FDD if=$input_file iseek=$seek_bytes cbs=$read_bytes count=$read_bytes | \
+      awk -F, -v min_lon=$min_lon -v max_lon=$max_lon -v min_lat=$min_lat -v max_lat=$max_lat -v leap=$leap -v year=$year -v std=$std \
+        'BEGIN { split( "31 28 31 30 31 30 31 31 30 31 30 31", days_per_month, " " ); days_per_month[2] = 28 + leap; } { site = $2; lon = $3; lat = $4; if ( lon >= min_lon && lon <= max_lon && lat >= min_lat && lat <= max_lat ) { month = int( substr( $1, 6, 2 ) ); day = int( substr( $1, 9, 2 ) ); day_of_year = 0; for ( m = 1; m < month; ++m ) { day_of_year += days_per_month[m]; } day_of_year += day; abs_lon = lon < 0 ? -lon : lon; value = $(5 + std); if ( value < -999.0 ) value = -999.0; site_name = sprintf( "Downscaled CMAQ census track FIPS %s", $2 ); printf "%20s,%10.5f,%10.5f,%04d,%03d,00.5,%20.8e,%45s\n", site, lat, lon, year, day_of_year, value, site_name } }'
+  endif
+
+  @ is_first_year = 0
+  @ start_line = 2
+  @ year = $year + 1
+
+end
+
+

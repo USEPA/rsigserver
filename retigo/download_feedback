@@ -1,0 +1,47 @@
+#!/bin/csh -f
+
+# Place argument string into a uniquely named file.
+
+if ( $#argv != 1 ) then
+  echo
+  echo "Usage: download_feedback string"
+  echo
+  exit 1
+endif
+
+#echo start
+#set i = 0
+#while (i < length($1)) 
+#  set thisHexChar = substr($1,i*2,2)
+#  echo -n $thisHexChar  
+#end
+#echo done
+
+
+# Define untaint command. Remove all characters except:
+# octal 11: tab
+# octal 12: linefeed
+# octal 15: carriage return
+# octal 40: space
+# octal 42: double quote
+# octal 43: hash
+# octal 47-133: safe characters
+# octal 135-175: safe characters
+
+set untaint_cmd =  "/usr/bin/tr -cd '\11\12\15\40\42\43\47-\133\135-\175'"
+
+set feedback   = `/bin/echo "$1" | /bin/cut -c1-2048 | /usr/bin/xxd -r -p | $untaint_cmd`
+
+#set uniqueID   = `/bin/date '+%s'`
+
+set dir        = /rsig/retigo/feedback 
+
+#set uniqueFile = ${dir}/feedback_${uniqueID}.txt
+
+set appendFile = ${dir}/feedback.txt
+
+/bin/chmod 644 $appendFile
+/bin/echo '-----'     >> $appendFile
+/bin/echo `/bin/date` >> $appendFile
+/bin/echo "$feedback" >> $appendFile
+/bin/chmod 444 $appendFile

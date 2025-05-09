@@ -1,0 +1,1 @@
+0 23 * * * /data/GOESBB/get_goesbb_files > /dev/null 2>&1

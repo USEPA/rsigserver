@@ -1,0 +1,109 @@
+#!/usr/bin/perl -wT
+
+##############################################################################
+# PURPOSE: aqspw - Reset cws password on both datamart and aqs databases.
+#
+# NOTES:   See the aqsserver PERL-CGI script. The passwords in aqsserver must
+#          match those in this script.
+#          UGLY: Can this be integrated/automated?
+#          The aqsserver PERL-CGI script accesses the datamart database using
+#          read-only DB account cws. The password expires every 90 days. Ugh.
+#          Before this happens, this script can be edited/run to set the new
+#          cws account db password on both the datamart and aqs databases.
+#          It is necessary to set the cws account password on the aqs database
+#          whenever the cws password is changed on the datamart database
+#          because each weekend a maintenance process copies the aqs database
+#          to the datamart database. (If the aqs database cws old password
+#          does not match the current cws datamart password then aqsserver
+#          will fail to connect.)
+#          Furthermore, if the cws password on datamart expires and the hourly
+#          cron job that runs /data/check_server_status is called 3 times
+#          (each time failing to connect) then the cws account on datamart
+#          will be locked-out requiring Tom Conklin (see below) to reset and
+#          unlock the cws account password on datamart.
+#          Then edit/run this script to only reset the password on aqs.
+#          If it succeeds then copy the ol/new pw to the aqsserver script.
+#
+# HISTORY: 2016-06-14 plessel.todd@epa.gov
+##############################################################################
+
+
+use strict;
+package main;
+$| = 1; # Turn off output buffering so messages appear in correct order.
+alarm( 120 ); # Kill process if it hangs for 2 minutes.
+# Restrict PATH and ENV. (But before popen, ENV is cleared!)
+delete @ENV{ 'PATH', 'IFS', 'CDPATH', 'ENV', 'BASH_ENV' };
+
+
+############################## TUNABLE CONSTANTS #############################
+
+
+my $debugging = 0; # 1 = print debug messages to STDERR.
+
+# Database-specific parameters:
+
+my $database_env_variable = 'ORACLE_HOME';
+my $database_env_value = '/usr/lib/oracle/xe/app/oracle/product/10.2.0/client';
+# DB, account and password:
+my $aqs_database =
+  'DBI:Oracle:service_name=aqsprod.vmaqs7;' .
+  'host=vmaqs7.rtpnc.epa.gov;port=1521';
+my $datamart_database =
+  'DBI:Oracle:service_name=thor.vmaqsmart7;' .
+  'host=vmaqsmart7.rtpnc.epa.gov;port=1521';
+my $database_account = 'ACCOUNT'; # Read-only DB access.
+# DB PW expires every 90 days.
+my $old_database_password = 'OLD_PASSWORD'; # UGLY hard-coded, unencrypted pw!
+my $new_database_password = 'NEW_PASSWORD'; # UGLY hard-coded, unencrypted pw!
+# Call Tom Conklin 919-294-0120 conklin.tom@epa.gov to reset timed-out db pw.
+my $database_query =
+  "ALTER USER $database_account IDENTIFIED BY $new_database_password " .
+  "REPLACE $old_database_password"; # REPLACE clause is needed in Oracle 9.2+.
+
+################################## ROUTINES ##################################
+
+
+main();
+
+
+sub main {
+  %ENV = (); # Unset all environment variables.
+  reset_database_password( $datamart_database );
+  reset_database_password( $aqs_database );
+  delete $ENV{ $database_env_variable };
+  exit 0;
+}
+
+
+# reset_database_password( $database );
+
+sub reset_database_password {
+  my $database = shift;
+
+  # Connect to the database:
+
+  $ENV{ $database_env_variable } = $database_env_value;
+  use DBI;
+  print "$0 connecting to database: $database $database_account ...\n";
+  my $database_handle =
+    DBI->connect( $database, $database_account, $old_database_password,
+                  { AutoCommit => 1, RaiseError => 1 } )
+    or die "Failed to connect to database because $DBI::errstr\n";
+
+  # Compile and execute parameterized query:
+
+  my $statement_handle = $database_handle->prepare( $database_query )
+     or die "Failed to prepare statement '$database_query' because: " .
+            $database_handle->errstr;
+  print "$0 executing $database_query...\n";
+  $statement_handle->execute()
+     or die "Failed to execute prepared statement '$database_query' because: ".
+            $statement_handle->errstr;
+  $statement_handle->finish;
+  $database_handle->disconnect;
+  print "Done.\n";
+}
+
+
+

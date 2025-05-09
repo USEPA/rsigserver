@@ -1,0 +1,142 @@
+platform is Linux.x86_64
+ 
+===============================================================================
+                            Software Metrics Report
+===============================================================================
+ 
+Lines of source code:
+---------------------
+ 
+		Pure	Pure	Both		Total	Total	Total
+		Code	Comment	Cod&Com	Blank	Code	Comment	Lines	Pages
+
+CALIPSOSubset.c	685	225	39	197	724	264	1146	21
+ReadData.c	1266	298	62	312	1328	360	1938	35
+ReadData.h	49	12	3	21	52	15	85	2
+ReadFile.c	491	105	13	155	504	118	764	14
+ReadFile.h	19	11	2	18	21	13	50	1
+Utilities.c	572	250	18	250	590	268	1090	20
+Utilities.h	105	10	3	60	108	13	178	4
+
+ALL:		3187	911	140	1013	3327	1051	5251	97
+ 
+Fan-out: 0 
+ 
+Halstead Metrics:
+-----------------
+ 
+FileName                            Length     Volume  Level     Discr. Defect
+------------------------------------------------------------------------------
+CALIPSOSubset.c                       4295      34012  0.005    7194889     11
+ReadData.c                            7695      63021  0.003   20620781     21
+ReadData.h                             249       1505  0.047      31888      1
+ReadFile.c                            3128      23509  0.006    3748024      8
+ReadFile.h                             139        740  0.055      13537      0
+Utilities.c                           3452      27655  0.005    5341490      9
+Utilities.h                           1414      10302  0.018     560596      3
+
+ALL                                  20372     160744  0.139   37511205     54
+ 
+Per-function    LOC, Cyclomatic Complexity and Fan-out (function calls):
+------------------------------------------------------------------------
+ 
+File: Functions                                           LOC    Cyclo Fan-out
+------------------------------------------------------------------------------
+CALIPSOSubset.c:
+    allocateScanMetadata                                   32      4      5
+    dataFileTimestamp                                      40      5      5
+    deallocate                                             25      6      5
+    main                                                   18      4      6
+    parseArguments                                         87     14     10
+    printUsage                                             62      1      2
+    readData                                              110     12     15
+    readFileInfo                                           57     10     12
+    readListFileAndAllocateScanMetadata                    21      3      4
+    streamData                                             15      4      6
+    streamHeader                                           38      1      2
+    streamSwathBounds                                      14      2      4
+    streamSwathPointsAndLevels                             15      2      4
+    streamSwathTimestamps                                  15      2      4
+    streamTempFile                                         37      8      8
+    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~Totals:                 646     89     92
+    writeSubsetData                                        60     11      8
+ReadData.c:
+    aggregateCALIPSOData                                   43      4      4
+    aggregateDataAndElevations                             40      7      2
+    computeAggregateLevels                                 14      2      2
+    computeStride                                          11      2      1
+    copyWorstCADScore                                      27      7      1
+    filterCALIPSOData                                     301     10      6
+    filterData                                             43      9      2
+    filterDataByQC                                         57     11     13
+    filterDataNearSurface                                  22      4      2
+    propagateBadUncertaintyDownward                        22      5      2
+    propagateWorstCADScoreDownward                         34      9      2
+    propagateWorstQCFlagDownward                           33      7      2
+    readCALIPSOCoordinates                                 43      9      7
+    readCALIPSOData                                        33      5      7
+    readCALIPSOElevations                                 153     23     14
+    readCALIPSOTimestamps                                  45      8      9
+    readCALIPSOVariable                                   100     17     20
+    readCALIPSOVariableDimensions                          42      4      8
+    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~Totals:                1113    156    108
+    typeOfCALIPSOFile                                      23      9      1
+    uncertaintyVariable                                    27      4      5
+ReadData.h:
+    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~Totals:                   0      0      0
+ReadFile.c:
+    closeFile                                               5      1      2
+    dimensionsProduct                                      11      2      1
+    dimsMatch                                              10      2      1
+    fileVariableExists                                     30      4      7
+    lookupAttribute                                        45      8      5
+    openFile                                               12      2      4
+    readFileBounds                                         54     10      8
+    readFileData                                           82     14     19
+    readFileVData                                          38      7      8
+    readScaleFactorAttribute                               52     11      9
+    readTextAttribute                                      54     13      4
+    readVariableDimensions                                 42      6      6
+    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~Totals:                 435     80     69
+ReadFile.h:
+    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~Totals:                   0      0      0
+Utilities.c:
+    boundsOverlap                                          14      4      1
+    clampInvalidCoordinates                                39      9      1
+    compactPointsInSubset                                  74     10      2
+    computeBounds                                          30      6      2
+    controlMToSpace                                        10      3      1
+    convertTimestamp                                       27      2      2
+    copyMaximumComponent                                   18      4      1
+    copyMeanComponents                                     24      5      1
+    copyVectorComponent                                    12      2      1
+    expandInt16                                            10      2      1
+    expandInt32                                            10      2      1
+    expandInt8                                             10      2      1
+    expandReals                                            10      2      1
+    expandUint16                                           10      2      1
+    expandUint32                                           10      2      1
+    expandUint8                                            10      2      1
+    fileSize                                               16      3      2
+    isLeapYear                                              7      3      1
+    isValidBounds                                          12      5      1
+    isValidElevation                                        6      1      2
+    isValidLatitude                                         6      1      2
+    isValidLongitude                                        6      1      2
+    isValidYYYYDDDHHMM                                     15      4      3
+    isValidYYYYMMDDHH                                      15      4      3
+    isValidYYYYMMDDHHMM                                     9      2      3
+    linesInString                                          10      2      1
+    offsetTimestamp                                        38      6      2
+    offsetValues                                           10      2      1
+    readFile                                               33      5     10
+    reverseLevels                                          17      3      1
+    rotate8ByteArrayIfLittleEndian                         20      2      1
+    scaleValues                                            10      2      1
+    spacesToUnderscores                                    10      3      1
+    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~Totals:                 558    108     55
+Utilities.h:
+    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~Totals:                   0      0      0
+ 
+    ALL:                                                 2752    433    324
+ 

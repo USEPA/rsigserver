@@ -1,0 +1,25 @@
+#!/bin/csh -f
+# get_metar_files - Get METAR files from NOAA web site.
+# madis-support@noaa.gov
+
+set temp_file = "/data/tmp/get_metar_files.tmp.$$"
+set url = 'https://madis-data.ncep.noaa.gov/madisPublic1/data/point/metar/netcdf/'
+set CURL = '/usr/bin/curl -k --silent --retry 0 -L --tcp-nodelay --max-time 300'
+
+# Get list of files:
+
+$CURL "$url"| sed 's/.*href="//g' | tr '"' ' ' | awk '{ print $1 }' | grep '.gz' > $temp_file
+
+# HACK: just get the last 24 files since it takes too long otherwise:
+set files = `cat $temp_file | tail -24`
+##set files = `cat $temp_file`
+
+foreach file ( $files )
+  echo "retrieving file $file..."
+  set year = `echo $file | awk '{ print substr( $0, 1, 4 ) }'`
+  if ( ! -d /data/METAR/data/$year ) mkdir /data/METAR/data/$year
+ $CURL "$url/$file" | gzip -d > /data/METAR/data/$year/$file:r
+end
+
+\rm $temp_file
+

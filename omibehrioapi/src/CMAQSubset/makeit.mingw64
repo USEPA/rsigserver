@@ -1,0 +1,25 @@
+# Compile this program on MINGW32 Windows platform.
+# Run this script with the command:
+# C:\MinGW/msys/1.0/bin/sh ./makeit.mingw64
+
+PATH=/c/Users/tplessel/mingw64/bin:/c/MinGW/msys/1.0/bin:/c/MinGW/bin:/c/WINDOWS/System32:/c/WINDOWS
+cls
+echo "PATH = $PATH"
+
+# Verify MinGW versions of the following commands are used:
+
+which gcc
+gcc -m64 -v
+
+# In this directory run following commands:
+
+#gcc -m64 -static -g -DDEBUGGING -I. -c *.c
+gcc -m64 -static -O -DNO_ASSERTIONS -DNDEBUG -I. -c *.c
+gcc -m64 -static -o CMAQSubset *.o -Llib/Win64 libnetcdf.a libhdf5_hl.a libhdf5.a -lz
+
+rm *.o
+
+ls -l CMAQSubset.exe
+file  CMAQSubset.exe
+objdump -p CMAQSubset.exe | grep "DLL Name:"
+

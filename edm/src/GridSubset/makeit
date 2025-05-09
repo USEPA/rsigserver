@@ -1,0 +1,15 @@
+#!/bin/sh
+
+clear
+
+echo
+echo "Compiling GridSubset"
+gcc -m64 -Wall -D_FILE_OFFSET_BITS=64 -D_LARGEFILE_SOURCE -DNDEBUG -O -o GridSubset GridSubset.c -lm
+strip GridSubset
+ls -l GridSubset
+file  GridSubset
+ldd   GridSubset
+
+ls -Fsalt | head
+echo Done
+

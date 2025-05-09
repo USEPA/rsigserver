@@ -1,0 +1,15 @@
+#!/bin/sh
+
+clear
+
+echo
+echo "Compiling subsetcsv"
+gcc -m64 -Wall -D_FILE_OFFSET_BITS=64 -D_LARGEFILE_SOURCE -DNDEBUG -O -o subsetcsv subsetcsv.c -lm
+strip subsetcsv
+ls -l subsetcsv
+file  subsetcsv
+ldd   subsetcsv
+
+ls -Fsalt | head
+echo Done
+

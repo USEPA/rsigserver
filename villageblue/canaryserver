@@ -1,0 +1,755 @@
+#!/usr/bin/perl -wT
+
+##############################################################################
+# PURPOSE: canaryserver - Serve USGS CANARY requests.
+#
+# NOTES:   Used by Village Blue and the Online CANARY Model.
+#          Example usage:
+#
+#          wget -q -T 0 -O - 'https://ofmpub.epa.gov/rsig/canaryserver?\
+#             SERVICE=canary&REQUEST=run&SITEID=01480065
+#                                       &STARTDATE=20180301
+#                                       &ENDDATE=20180301
+#                                       &PARAMID=00065,00010,00095,00400,00300
+#                                       &PARAMDESC=temperature_upper,turbidity_upper,etc
+#                                       &EVALTYPE=WQ
+#                                       &ALGTYPE=LPCF
+#                                       &HISTWINDOW=432
+#                                       &OUTLIERTHRESH=0.9
+#                                       &EVENTTHRESH=0.85
+#                                       &EVENTTIMEOUT=15
+#                                       &BEDWINDOW=8
+#                                       &STEPSIZE=5
+#                                       &DOWNLOADID=30608_1537291963'
+#
+#
+# HISTORY: 2018-04-09 Matt Freeman
+#
+# STATUS:  unreviewed untested
+##############################################################################
+
+
+use strict;
+package main;
+$| = 1; # Turn off output buffering so messages appear in correct order.
+alarm( 3600 ); # Kill process after 1 hour. Legitimate usage could be an hour!
+# Restrict PATH and ENV. (But before popen, ENV is cleared!)
+delete @ENV{ 'PATH', 'IFS', 'CDPATH', 'ENV', 'BASH_ENV' };
+
+
+############################## TUNABLE CONSTANTS #############################
+
+
+my $debugging = 0; # 1 = print debug messages to STDERR logs/error_log.
+
+
+# CANARY programs:
+
+my $runmodel       = '/rsig/canary/model/runcanary';
+my $downloader     = '/rsig/canary/model/download';
+my $sendjonesfalls = '/rsig/canary/model/sendjonesfalls';
+
+# Server where this program is installed:
+
+my $server_path = 'https://YOUR_WEBSERVER_HOST/cgi-bin';
+
+# Query string parsing routine dispatch table:
+
+my %parsers = (
+  'service'       => \&parse_service_option,
+  'request'       => \&parse_request_option,
+  'siteid'        => \&parse_siteid_option,
+  'startdate'     => \&parse_startdate_option,
+  'enddate'       => \&parse_enddate_option,
+  #'ndays'         => \&parse_ndays_option,
+  'paramid'       => \&parse_paramid_option,
+  'paramdesc'     => \&parse_paramdesc_option,
+  #'evaltype'      => \&parse_evaltype_option,
+  'algtype'       => \&parse_algtype_option,
+  'histwindow'    => \&parse_histwindow_option,
+  'outlierthresh' => \&parse_outlierthresh_option,
+  'eventthresh'   => \&parse_eventthresh_option,
+  'eventtimeout'  => \&parse_eventtimeout_option,
+  'bedwindow'     => \&parse_bedwindow_option,
+  'stepsize'      => \&parse_stepsize_option,
+  'data'          => \&parse_data_option,
+  'downloadid'    => \&parse_downloadid_option,
+  'separateflag'  => \&parse_separateflag_option  
+  
+);
+
+# Full URL path to this program:
+
+my @pathed_program_parts = split( /\//, $0 );
+my $program_name = $pathed_program_parts[ @pathed_program_parts - 1 ];
+my $program = "$server_path/$program_name";
+
+    
+################################## VARIABLES #################################
+
+# Parsed from the URL query string, with examples:
+
+my $service       = ''; # canary.
+my $request       = ''; # run, download, latestjonesfalls.
+my $siteid        = ''; # 01589485 (USGS site number).
+my $startdate     = ''; # 201803011230
+my $enddate       = ''; # 201803011230
+#my $ndays         = ''; # 30
+my $paramid       = ''; # 00065,00010,00095,00400,00300
+my $paramdesc     = ''; # temperature_upper,turbidity_upper,etc
+#my $evaltype      = ''; # wq, op
+my $algtype       = ''; # lpcf, mvnn
+my $histwindow    = ''; # 432
+my $outlierthresh = ''; # 0.9
+my $eventthresh   = ''; # 0.85
+my $eventtimeout  = ''; # 15
+my $bedwindow     = ''; # 8
+my $stepsize      = ''; # 5
+my $data          = ''; 
+my $downloadid    = ''; # unique id for run to be downloaded
+my $separateflag  = ''; # set flag to 1 if variables should be processed independently
+
+
+################################## ROUTINES ##################################
+
+
+main();
+
+
+sub main {
+  my $result = 0;
+  #print "Content-type: text/plain; charset=iso-8859-1\n\n"; # Read by httpd.
+
+  if ( parse_url() ) {
+      
+      #if ($format eq '') {
+      #    $format = 'json' # default to send to the download program
+      #}
+
+      # Process RUN requests
+      if ( $request eq 'run' ) {
+          print "Content-type: text/plain; charset=iso-8859-1\n\n"; # Read by httpd.
+
+          my $uniqueID = $$ . "_" . time(); # can't use a passed in parameter in the filename below, so create a different uniqueID
+          #debug("unique_id = $uniqueID");
+          
+          # write data to file for later processing
+          my $filepath = '/rsig/canary/model/input/';
+          my $filename = 'input_' . $uniqueID;
+
+          open(my $fh, '>', $filepath . $filename) or die "Could not open file '$filename' $!";
+          print $fh $data;
+          close $fh;
+          
+          my $run_command = "";
+          if ( $separateflag eq 1 ) {
+              $run_command = "$runmodel $siteid $startdate $enddate $paramid $paramdesc $algtype $histwindow $outlierthresh $eventthresh $eventtimeout $bedwindow $stepsize $filename $downloadid $separateflag";
+          } else {
+              $run_command = "$runmodel $siteid $startdate $enddate $paramid $paramdesc $algtype $histwindow $outlierthresh $eventthresh $eventtimeout $bedwindow $stepsize $filename $downloadid";
+          }    
+
+      
+          #debug("run_command = $run_command");
+          $result = execute_command( $run_command );
+
+
+      # Process DOWNLOAD requests
+      } elsif ( $request eq 'download' ) {
+          print "Content-type: text/plain; charset=iso-8859-1\n\n"; # Read by httpd.
+
+          my $download_command = "$downloader $downloadid";
+          debug("download_command = $download_command");
+          $result = execute_command( $download_command );      
+          
+      # Process LATESTJONESFALLS requests
+      } elsif ( $request eq 'latestjonesfalls' ) {
+          print "Content-type: text/plain; charset=iso-8859-1\n\n"; # Read by httpd.
+
+          my $send_command = "$sendjonesfalls";
+          debug("send_command = $send_command");
+          $result = execute_command( $send_command );
+      }
+      
+            
+  } else {
+      print "CANARY parameters invalid";
+  }
+  
+  $result = 1 - $result; # UNIX: zero is success, non-zero is failure.
+  debug( "exit result = $result" );
+  exit $result;
+}
+
+
+
+# Parse URL parameters into variables.
+
+sub parse_url {
+  use CGI qw/ untaint /;     # Load Safe untainting CGI routines.
+  $CGI::DISABLE_UPLOADS = 1; # Disable uploads.
+  $CGI::POST_MAX = 10485760; # Limit posts to 10MB.
+  my $query = new CGI;       # Parse QUERY_STRING.
+  %ENV = ();                 # Unset all environment variables.
+  my @names = $query->param; # Extract names of parameters.
+  my $count = @names;
+  my $result = 0;
+  debug( "$program_name @names ($count)" );
+
+  for ( my $parameter = 0; $parameter < $count; ++$parameter) {
+    $_ = $names[ $parameter ];                # $_ is tainted.
+    s/[^A-Za-z]/_/go;                         # Untaint $_.
+    my $option = $_;                          # $option is untainted.
+    $_ = $query->param( $option );            # $_ is tainted.
+    s/[^\(\)\[\]\{\}\"\w\.#@,-:\s]/_/go;        # Untaint $_.
+    my $value = $_;                           # $value is untainted.
+    my $lowercase_option = lc( $option );
+    my $lowercase_value  = lc( $value );
+    debug( "$lowercase_option $lowercase_value" );
+
+    if ( $parsers{ $lowercase_option } ) {
+      $result = $parsers{ $lowercase_option }->( $lowercase_value );
+    } else {
+      print STDERR "\nInvalid option: '$option'\n";
+      $result = 0;
+    }
+
+    if ( ! $result ) {
+      $parameter = $count; # Finish looping.
+    }
+  }
+
+  $result = $result && required_options_specified();
+  return $result;
+}
+
+
+
+# Parse service option.
+
+sub parse_service_option {
+  my $value = shift;
+  my $result = parse_option( $service, $value, 'SERVICE', 'canary' );
+  return $result;
+}
+
+
+
+# Parse request option.
+
+sub parse_request_option {
+  my $value = shift;
+  my $result = parse_option( $request, $value, 'REQUEST', 'run download latestjonesfalls' );
+  return $result;
+}
+
+
+# Parse siteid option.
+
+sub parse_siteid_option {
+ 
+  # siteid should only contain numbers 0-9
+
+  my $value = shift;
+  my $result = 0;
+
+  if ( $siteid ne '' ) {
+    print STDERR "\nRedundant option: 'SITEID'\n";
+  #} elsif ( $value =~ m#^([\(\)\w\.\#,-_]+)$# ) {
+  } elsif ( $value =~ m#[0-9]$# ) {
+    $siteid = $value; # Re-assign first match, which is enough to satisfy -T.
+    $result = 1;
+  } else {
+      print STDERR "\n SITEID is invalid.\n" 
+  }
+
+  return $result;
+}
+
+
+# Parse startdate option.
+
+sub parse_startdate_option {
+ 
+  # startdate should only contain exactly twelve digits [0-9]
+
+  my $value = shift;
+  my $result = 0;
+
+  if ( $startdate ne '' ) {
+    print STDERR "\nRedundant option: 'STARTDATE'\n";
+  #} elsif ( $value =~ m#^([\(\)\w\.\#,-_]+)$# ) {
+  } elsif ( $value =~ m#^[0-9]{12}$# ) {
+    $startdate = $value; # Re-assign first match, which is enough to satisfy -T.
+    $result = 1;
+  } else {
+      print STDERR "\n STARTDATE is invalid.\n" 
+  }
+
+  return $result;
+}
+
+# Parse enddate option.
+sub parse_enddate_option {
+ 
+  # enddate should only contain exactly twelve digits [0-9]
+
+  my $value = shift;
+  my $result = 0;
+
+  if ( $enddate ne '' ) {
+    print STDERR "\nRedundant option: 'ENDDATE'\n";
+  #} elsif ( $value =~ m#^([\(\)\w\.\#,-_]+)$# ) {
+  } elsif ( $value =~ m#^[0-9]{12}$# ) {
+    $enddate = $value; # Re-assign first match, which is enough to satisfy -T.
+    $result = 1;
+  } else {
+      print STDERR "\n ENDDATE is invalid.\n" 
+  }
+
+  return $result;
+}
+
+
+# Parse ndays option.
+
+#sub parse_ndays_option {
+# 
+#  # ndays should only contain up to three digits [0-9]
+#
+#  my $value = shift;
+#  my $result = 0;
+#
+#  if ( $ndays ne '' ) {
+#    print STDERR "\nRedundant option: 'NDAYS'\n";
+#  #} elsif ( $value =~ m#^([\(\)\w\.\#,-_]+)$# ) {
+#  } elsif ( $value =~ m#^[0-9]{1,3}$# ) {
+#      $ndays = $value; # Re-assign first match, which is enough to satisfy -T.
+#      $result = 1;
+#  } else {
+#      print STDERR "\n NDAYS is invalid.\n" 
+#  }
+#
+#  return $result;
+#}
+
+
+
+# Parse paramid option.
+
+sub parse_paramid_option {
+
+  # paramid should only contain letters digits [0-9] and commas
+
+  my $value = shift;
+  my $result = 0;
+
+  if ( $paramid ne '' ) {
+    print STDERR "\nRedundant option: 'PARAMID'\n";
+  #} elsif ( $value =~ m#^([\(\)\w\.\#,-_]+)$# ) {
+  } elsif ( $value =~ m#^[0-9,_]+$# ) {
+    $paramid = $value; # Re-assign first match, which is enough to satisfy -T.
+    $result = 1;
+  } else {
+      print STDERR "\n PARAMID is invalid.\n" 
+  }
+
+  return $result;
+}
+
+# Parse paramdesc option.
+
+sub parse_paramdesc_option {
+
+  # paramdesc should only contain letters [A-Za-z] digits [0-9] and commas
+
+  my $value = shift;
+  my $result = 0;
+
+  if ( $paramdesc ne '' ) {
+    print STDERR "\nRedundant option: 'PARAMDESC'\n";
+  #} elsif ( $value =~ m#^([\(\)\w\.\#,-_]+)$# ) {
+  } elsif ( $value =~ m#^[A-Za-z0-9,_]+$# ) {
+    $paramdesc = $value; # Re-assign first match, which is enough to satisfy -T.
+    $result = 1;
+  } else {
+      print STDERR "\n PARAMDESC is invalid.\n" 
+  }
+
+  return $result;
+}
+
+
+# Parse evaltype option.
+#
+#sub parse_evaltype_option {
+# 
+#  # evaltype should only contain two letters
+#
+#
+#  my $value = shift;
+#  my $result = 0;
+#
+#  if ( $evaltype ne '' ) {
+#    print STDERR "\nRedundant option: 'EVALTYPE'\n";
+#  #} elsif ( $value =~ m#^([\(\)\w\.\#,-_]+)$# ) {
+#  } elsif ( $value =~ m#^[A-Za-z]{2}$# ) {
+#    $evaltype = $value; # Re-assign first match, which is enough to satisfy -T.
+#    $result = 1;
+#  } else {
+#      print STDERR "\n EVALTYPE is invalid.\n" 
+#  }
+#
+#  return $result;
+#}
+
+
+# Parse algtype option.
+
+sub parse_algtype_option {
+ 
+  # algtype should only contain four letters
+
+
+  my $value = shift;
+  my $result = 0;
+
+  if ( $algtype ne '' ) {
+    print STDERR "\nRedundant option: 'ALGTYPE'\n";
+  #} elsif ( $value =~ m#^([\(\)\w\.\#,-_]+)$# ) {
+  } elsif ( $value =~ m#^[A-Za-z]{4}$# ) {
+    $algtype = $value; # Re-assign first match, which is enough to satisfy -T.
+    $result = 1;
+  } else {
+      print STDERR "\n ALGTYPE is invalid.\n" 
+  }
+
+  return $result;
+}
+
+
+# Parse histwindow option.
+
+sub parse_histwindow_option {
+
+  # histwindow should only contain up to four digits [0-9]
+
+  my $value = shift;
+  my $result = 0;
+
+  if ( $histwindow ne '' ) {
+    print STDERR "\nRedundant option: 'HISTWINDOW'\n";
+  #} elsif ( $value =~ m#^([\(\)\w\.\#,-_]+)$# ) {
+  } elsif ( $value =~ m#^[0-9]{1,4}$# ) {
+    $histwindow = $value; # Re-assign first match, which is enough to satisfy -T.
+    $result = 1;
+  } else {
+      print STDERR "\n HISTWINDOW is invalid.\n" 
+  }
+
+  return $result;
+}
+
+# Parse outlierthresh option.
+
+sub parse_outlierthresh_option {
+
+  # outlierthresh should only contain digits [0-9] and optionally one deciml point
+
+  my $value = shift;
+  my $result = 0;
+
+  if ( $outlierthresh ne '' ) {
+    print STDERR "\nRedundant option: 'OUTLIERTHRESH'\n";
+  #} elsif ( $value =~ m#^([\(\)\w\.\#,-_]+)$# ) {
+  } elsif ( $value =~ m#^[0-9]+(\.[0-9]+)?$# ) {
+    $outlierthresh = $value; # Re-assign first match, which is enough to satisfy -T.
+    $result = 1;
+  } else {
+      print STDERR "\n OUTLIERTHRESH is invalid.\n" 
+  }
+
+  return $result;
+}
+
+# Parse eventthresh option.
+
+sub parse_eventthresh_option {
+
+  # eventthresh should only contain digits [0-9] and optionally one deciml point
+
+  my $value = shift;
+  my $result = 0;
+
+  if ( $eventthresh ne '' ) {
+    print STDERR "\nRedundant option: 'EVENTTHRESH'\n";
+  #} elsif ( $value =~ m#^([\(\)\w\.\#,-_]+)$# ) {
+  } elsif ( $value =~ m#^[0-9]+(\.[0-9]+)?$# ) {
+    $eventthresh = $value; # Re-assign first match, which is enough to satisfy -T.
+    $result = 1;
+  } else {
+      print STDERR "\n EVENTTHRESH is invalid.\n" 
+  }
+
+  return $result;
+}
+
+# Parse eventtimeout option.
+
+sub parse_eventtimeout_option {
+
+  # eventtimeout should only contain up to four digits [0-9]
+
+  my $value = shift;
+  my $result = 0;
+
+  if ( $eventtimeout ne '' ) {
+    print STDERR "\nRedundant option: 'EVENTTIMEOUT'\n";
+  #} elsif ( $value =~ m#^([\(\)\w\.\#,-_]+)$# ) {
+  } elsif ( $value =~ m#^[0-9]{1,4}$# ) {
+    $eventtimeout = $value; # Re-assign first match, which is enough to satisfy -T.
+    $result = 1;
+  } else {
+      print STDERR "\n EVENTTIMEOUT is invalid.\n" 
+  }
+
+  return $result;
+}
+
+# Parse eventtimeout option.
+
+sub parse_bedwindow_option {
+
+  # bedwindow should only contain up to four digits [0-9]
+
+  my $value = shift;
+  my $result = 0;
+
+  if ( $bedwindow ne '' ) {
+    print STDERR "\nRedundant option: 'BEDWINDOW'\n";
+  #} elsif ( $value =~ m#^([\(\)\w\.\#,-_]+)$# ) {
+  } elsif ( $value =~ m#^[0-9]{1,4}$# ) {
+    $bedwindow = $value; # Re-assign first match, which is enough to satisfy -T.
+    $result = 1;
+  } else {
+      print STDERR "\n BEDWINDOW is invalid.\n" 
+  }
+
+  return $result;
+}
+
+# Parse histwindow option.
+
+sub parse_stepsize_option {
+
+  # stepsize should only contain up to four digits [0-9]
+
+  my $value = shift;
+  my $result = 0;
+
+  if ( $stepsize ne '' ) {
+    print STDERR "\nRedundant option: 'STEPSIZE'\n";
+  #} elsif ( $value =~ m#^([\(\)\w\.\#,-_]+)$# ) {
+  } elsif ( $value =~ m#^[0-9]{1,4}$# ) {
+    $stepsize = $value; # Re-assign first match, which is enough to satisfy -T.
+    $result = 1;
+  } else {
+      print STDERR "\n STEPSIZE is invalid.\n" 
+  }
+
+  return $result;
+}
+
+# Parse data option.
+
+sub parse_data_option {
+  # data should only contain:
+  #   alphanumerics {A-Za-z0-9]
+  #   double quotes "
+  #   parens [] {}
+  #   colon :
+  #   space
+  #   newline
+
+  my $value = shift;
+  my $result = 0;
+
+  if ( $data ne '' ) {
+    print STDERR "\nRedundant option: 'DATA'\n";
+  #} elsif ( $value =~ m#^[a-zA-Z0-9\[\]\{\}\"\.:,]$# ) {
+  } elsif ( 1 ) {
+      $data = $value; # Re-assign first match, which is enough to satisfy -T.
+      $result = 1;
+  } else {
+      print STDERR "\n DATA is invalid.\n";
+  }
+  
+  return $result;
+}
+
+
+# Parse downloadid option.
+
+sub parse_downloadid_option {
+ 
+  # downloadid should only contain numbers 0-9 and one underscore
+
+  my $value = shift;
+  my $result = 0;
+
+  if ( $downloadid ne '' ) {
+    print STDERR "\nRedundant option: 'DOWNLOADID'\n";
+  } elsif ( $value =~ m#^[0-9_]+$# ) {
+    $downloadid = $value; # Re-assign first match, which is enough to satisfy -T.
+    $result = 1;
+  } else {
+      print STDERR "\n DOWNLOADID is invalid.\n" 
+  }
+
+  return $result;
+}
+
+# Parse downloadid option.
+
+sub parse_separateflag_option {
+ 
+  # separateflag should only contain numbers 0-9
+
+  my $value = shift;
+  my $result = 0;
+
+  if ( $separateflag ne '' ) {
+    print STDERR "\nRedundant option: 'SEPARATEFLAG'\n";
+  } elsif ( $value =~ m#^[0-9]+$# ) {
+    $separateflag = $value; # Re-assign first match, which is enough to satisfy -T.
+    $result = 1;
+  } else {
+      print STDERR "\n SEPARATEFLAG is invalid.\n" 
+  }
+
+  return $result;
+}
+
+
+
+
+# Check that all required 'options' have been specified:
+
+sub required_options_specified {
+  my $result = 0; # default failure
+
+  if ( $request eq '' ) {
+    print STDERR "\nMissing option: 'REQUEST'\n";
+  } elsif ( $request eq 'run' ) {
+    if ( $siteid eq '' ) {
+      print STDERR "\nMissing option: 'SITEID'\n";
+    } elsif ( $startdate eq '' ) {
+      print STDERR "\nMissing option: 'STARTDATE'\n";
+    } elsif ( $enddate eq '' ) {
+      print STDERR "\nMissing option: 'ENDDATE'\n";
+    } elsif ( $paramid eq '' ) {
+      print STDERR "\nMissing option: 'PARAMID'\n";
+    } elsif ( $paramdesc eq '' ) {
+      print STDERR "\nMissing option: 'PARAMDESC'\n";
+    } elsif ( $downloadid eq '' ) {
+      print STDERR "\nMissing option: 'DOWNLOADID'\n";
+    } else {
+      $result = 1;
+    }
+    debug( "required_options_specified result = $result, siteid = $siteid, paramid = $paramid, paramdesc = $paramdesc, downloadid = $downloadid" );
+
+  } elsif ( $request eq 'download' ) {
+    if ( $downloadid eq '' ) {
+      print STDERR "\nMissing option: 'DOWNLOADID'\n";
+    } else {
+        $result = 1;
+    }
+    debug( "required_options_specified result = $result, downloadid = $downloadid, paramid = $paramid, paramdesc = $paramdesc" );
+  
+  } else {
+    $result = 1;
+  }
+
+  return $result;
+}
+
+
+
+############################### HELPER ROUTINES ##############################
+
+
+
+# debug( message );
+
+sub debug {
+  my $message = shift;
+
+  if ( $debugging ) {
+    print STDERR "\n$message\n";
+####print STDOUT "\n$message\n";
+  }
+}
+
+
+
+# Execute command and echo its output to STDOUT. E.g., execute_command( 'ls' );
+
+sub execute_command {
+  my $command = shift;
+  my $result = 0;
+  my $the_pipe = 0;
+
+  # Untaint command (match expression is arbitrary as far as -T is concerned):
+
+  if ( $command =~ m#^(/[\w-]+/[\w -/\.@\#,:\"\[\]\{\}]+)$# ) {
+    $command = $1; # Re-assign first match, which is enough to satisfy -T.
+    #debug( "$0 executing command = $command" );
+    %ENV = (); # Unset all environment variables prior to popen.
+    # Complicated, supposedly safer way to open a readable pipe to command:
+    my $pid = open( the_pipe, "-|" );
+
+    if ( ! defined( $pid ) ) {
+      die "Couldn't open pipe to subprocess";
+    } elsif ( $pid ) { # Parent process.
+
+      while ( <the_pipe> ) {
+        print;
+      }
+
+      close( the_pipe ) or die $!;
+      $result = ! $?;
+    } else { # Child process.
+      exec( $command ) or die "can't exec program: $!";
+    }
+  } else {
+    print STDERR "\n$0: '$command' contains invalid characters.\n";
+  }
+
+  return $result;
+}
+
+
+
+# my $result = parse_option( $option, $value, $option_name, $valid_values );
+# my $result = parse_option( $variable, $value, 'SERVICE', 'nwis' );
+
+sub parse_option {
+  my ( $option, $value, $option_name, $valid_values ) = @_;
+  my $result = 0;
+
+  if ( $option ne '' ) {
+    print STDERR "\nRedundant $option_name option: '$value'\n";
+  } else {
+    $result = index( " $valid_values ", " $value " ) != -1;
+
+    if ( $result ) {
+      $_[ 0 ] = $value;
+    } else {
+      print STDERR "\nInvalid $option_name option: '$value'\n";
+    }
+  }
+
+  return $result;
+}
+
+
+

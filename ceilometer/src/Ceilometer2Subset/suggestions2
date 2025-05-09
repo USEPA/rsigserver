@@ -1,0 +1,169 @@
+
+
+
+
+ncdump CL51_PRW_20190926.nc
+
+netcdf CL51_PRW_20190926 {
+dimensions:
+        range = 1540 ;
+        time = 144 ;
+        cloudlayers = 3 ;
+variables:
+        float attenuated_backscatter(time, range) ;
+                attenuated_backscatter:Info = "10-minute averaged backscatter profiles" ;
+        double time(time) ;
+                time:Info = "10-minute timestamp (UTC) in Unix Time" ;
+        double range(range) ;
+                range:Info = "vertical range AGL" ;
+        float Cloud_base_heights(time, cloudlayers) ;
+                Cloud_base_heights:Info = "10-minute cloud height retrievals; (3) layers" ;
+        float cML(time) ;
+                cML:Info = "Cloud-topped ML height / cloud-base height during ML detection periods" ;
+        float Precip_flag(time) ;
+                Precip_flag:Info = "Precip. Detected = 1; Precip. Not Detected = 0;" ;
+        float NSL_ML_mAGL(time) ;
+                NSL_ML_mAGL:Info = "10-minute near-surface PBL retrievals (NSL - ML) in meters above ground level" ;
+        float RL_mAGL(time) ;
+                RL_mAGL:Info = "10-minute residual layer retrievals (RL) in meters above ground level" ;
+        float NSL_ML_stdv_mAGL(time) ;
+                NSL_ML_stdv_mAGL:Info = "10-minute standard deviations for near-surface PBL retrievals (NSL - ML)" ;
+        float RL_stdv_mAGL(time) ;
+                RL_stdv_mAGL:Info = "10-minute standard deviations for residual layer retrievals (RL)" ;
+
+// global attributes:
+                :Project = "NOAA CHEESEHEAD" ;
+                :Site = "ARV" ;
+                :DataSet_Contacts = "C. Herrera (christian.herrera@noaa.gov), J. Sedlar (joseph.Sedlar@noaa.gov), L. Riihimaki (laura.riihimaki@noaa.gov); K. Lantz (kathy.o.lantz@noaa.gov)" ;
+                :Retrieval_Contact = "Vanessa Caicedo (vacaiced@umbc.edu)" ;
+                :Latitude = 45.927 ;
+                :Longitude = -89.73 ;
+                :Elevation\ ASL = "494m" ;
+                :Instrument = "Vaisala CL51" ;
+                :Input\ File\ Used = "L2_PRW_201909260000_R1350815.nc" ;
+                :Missing\ Values = -9999. ;
+                :Maximum\ Haar\ Dilation\ \(a\) = 200. ;
+                :Height\ Limit\ \(hl\) = "3000m" ;
+                :Sunrise\ Time\ UTC = "26-Sep-2019 11:50:00" ;
+                :Sunset\ Time\ UTC = "26-Sep-2019 23:50:58" ;
+                :Retrieval\ Info = "Caicedo et al.,(2020) https://doi.org/10.1175/JTECH-D-20-0050.1" ;
+                :Notes = "v1 reprocess: cwthaar4 processed" ;
+data:
+
+ attenuated_backscatter =
+  378.4737, 374.7368, 402.7368, 398.4737, 347.5263, 347.6316, 387.9211, 
+    395.0526, 375.5263, 370.1316, 366.4474, 355.8684, 356.4737, 362.8421, 
+...skipping...
+ time = 1569456000, 1569456600, 1569457200, 1569457800, 1569458400, 
+    1569459000, 1569459600, 1569460200, 1569460800, 1569461400, 1569462000, 
+...skipping...
+ range = 10, 20, 30, 40, 50, 60, 70, 80, 90, 100, 110, 120, 130, 140, 150, 
+    160, 170, 180, 190, 200, 210, 220, 230, 240, 250, 260, 270, 280, 290, 
+    2080, 2090, 2100, 2110, 2120, 2130, 2140, 2150, 2160, 2170, 2180, 2190, 
+...skipping...
+ Cloud_base_heights =
+  1650, 4350, NaNf,
+  -9999, -9999, -9999,
+  ...skipping...
+ cML = -9999, -9999, -9999, -9999, -9999, -9999, -9999, -9999, -9999, -9999, 
+    -9999, 1690, 1680, -9999, -9999, -9999, -9999, -9999, 1500, 1460, -9999, 
+    -9999, -9999, -9999, -9999, -9999, -9999, -9999, -9999, -9999, -9999, 
+    -9999, -9999 ;
+
+ Precip_flag = 0, 0, 0, 0, 1, 1, 1, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 1, 1, 0, 
+    0, 0, 0 ;
+
+ NSL_ML_mAGL = 430, 420, -9999, -9999, -9999, -9999, -9999, -9999, 400, 420, 
+    -9999, 470, 400, -9999, -9999, -9999, -9999, -9999, -9999, -9999, 400, 
+    400, 360, 310, 310, 270, 270, 370, -9999, 370, 320, 360, 360, 270, 220, 
+    -9999, -9999, 410, 470, 420, 470, 420, 410, 400, 400, 380 ;
+
+ RL_mAGL = -9999, 2380, -9999, -9999, -9999, -9999, -9999, -9999, -9999, 
+    -9999, -9999, -9999, -9999, -9999, -9999, -9999, -9999, -9999, 1910, 
+    2060, 2170, -9999, 1980, 2040, 2130, -9999, 2020, -9999, 1930, -9999, 
+    -9999, -9999, -9999, -9999, 1460, -9999, -9999, 1390, -9999, 1270, -9999, 
+    1230, 1230, -9999, 1240, 1100, 1050, 960 ;
+
+ NSL_ML_stdv_mAGL = 28.82459, 93.19297, -9999, -9999, -9999, -9999, -9999, 
+    -9999, 9.175166, 15.66559, -9999, 39.78201, 7.015247, -9999, -9999, 
+    16.06746, 31.93452, 22.75272, 11.56043, 8.762463, 7.12089, 5.645402, 
+    12.33221, 23.80383, 158.3716, -9999, 59.39727, 21.35753, 84.60677, -9999, 
+
+ RL_stdv_mAGL = -9999, 360.6355, -9999, -9999, -9999, -9999, -9999, -9999, 
+    -9999, -9999, -9999, -9999, -9999, -9999, -9999, -9999, -9999, -9999, 
+    98.31307, 143.6142, 145.4279, -9999, 114.0753, 110.0067, 98.05293, -9999, 
+     246.364, 190.5718, 204.6202, -9999, 241.1403, 196.3451, 271.7253, -9999, 
+    -9999, -9999, -9999, -9999, -9999, -9999, 305.7187, 178.054, -9999, 
+    193.6735, 384.8147, 241.9372, 297.2311 ;
+
+============================================================================
+
+Suggestions (round 2):
+----------------------
+
+1. Add unique integer ids at the front of the file name for each unique ceilometer.
+E.g., 001554_CL51_STMA_20211007.nc
+
+
+2. Rename dimension 'range' to 'z'.
+dimensions:
+        time = 144 ;
+        z = 1540 ;
+        cloudlayers = 3 ;
+
+
+3. Add attributes to all array variables, for example:
+        float attenuated_backscatter(time, z) ;
+              attenuated_backscatter:description = "10-minute averaged backscatter profiles" ;
+              attenuated_backscatter:units = "/km/sr" ;
+              attenuated_backscatter:_FillValue = -9999.0 ;
+              attenuated_backscatter:valid_minimum = 0.0 ;
+              attenuated_backscatter:valid_maximum = 5000.0 ;
+
+Should units be /m/sr? or 10^-9/m/sr?
+What are the valid minimum and maximum values of ceilometer-measured attenuated backscatter?
+
+        double seconds(time) ;
+               seconds:description = "Seconds since UTC 1970-01-01T00:00:00-0000." ;
+               Seconds:units = "s" ;
+               seconds:_FillValue = -9999.0 ;
+               seconds:valid_minimum = 0.0 ;
+               seconds:valid_maximum = 4000000000.0 ;
+
+
+4. Rename variable 'range' to 'elevation' and type NC_FLOAT:
+        float elevation(z) ;
+              elevation:description = "Elevation of measurement above the surface." ;
+              elevation:units = "m" ;
+              elevation:_FillValue = -9999.0 ;
+              elevation:valid_minimum = -500.0 ;
+              elevation:valid_maximum = 15400.0 ;
+
+
+5. Rename other array variables, for example, 'precipitation_flag'.
+
+
+6. Is array variable 'cML' actually 'mixing_layer_height'?
+If so, rename the array variable mixing_layer_height.
+
+
+7. Rename each of these global attributes with no spaces and type NC_DOUBLE
+                :latitude = 45.927 ;
+                :longitude = -89.73 ;
+                :elevation_m_asl = 11.0 ;
+
+(Note file CL51_STMA_20211007.nc has invalid attribute value :Elevation\ ASL = "m" ;)
+
+
+8. Add global attribute that matches file name prefix:
+                :instrument_id = 1544 ;
+
+9. Use lowercase names and underscore (_) instead of spaces in global attribute names.
+   E.g., :input_file_used = "L2_PRW_201909260000_R1350815.nc" ;
+         :site_name = "ID 98765432; Edgewood-MDE Monitoring Site; Edgewood, MD." ;
+
+
+10. Note the Cloud_base_heights array data contains both -9999.0 and NaNf values.
+
+
+

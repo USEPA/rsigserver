@@ -1,0 +1,10 @@
+#!/bin/sh
+
+# Compile TEMPOSubset:
+
+gcc -m64 -Wall -D_FILE_OFFSET_BITS=64 -D_LARGEFILE_SOURCE -DNDEBUG -O -I. -o TEMPOSubset TEMPOSubset.c ReadData.c Utilities.c -L. -lnetcdf4 -lhdf5_hl -lhdf5 -lcurl -lz -ldl -lm -lc
+strip TEMPOSubset
+ls -l TEMPOSubset
+file  TEMPOSubset
+ldd   TEMPOSubset
+

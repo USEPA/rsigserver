@@ -1,0 +1,23 @@
+
+2018-11-26
+
+From: Hai Zhang <hai.zhang@noaa.gov> 
+
+Hi, Todd, 
+
+GASP and GASP-WEST data have been replaced by GOES-R AOD.
+Now GOES-16 is GOES-East and GOES-17 is GOES-West.
+We are now providing near-real-time data from GOES-East (GOES-16) at
+ftp://ftp.star.nesdis.noaa.gov/pub/smcd/hzhang/GOES-16/NRT/
+
+You can find the lat-lon information at
+ftp://ftp.star.nesdis.noaa.gov/pub/smcd/hzhang/GOES-16/sample_aod/latlon_files_updated/
+
+Thanks,
+
+Hai Zhang
+I. M. Systems Group
+5825 University Research Ct, Suite 3250
+College Park, MD 20740
+Tel: 301-683-2572
+

@@ -1,0 +1,70 @@
+
+2025-02-28
+plessel.todd@epa.gov 919-541-5500
+
+This directory contains the C source code for the TEMPOSubset program.
+
+It uses the following external libraries: netcdf4 hdf5_hl hdf5 curl z
+and Standard C libraries: dl m c.
+To compile: ./makeit
+
+Files:
+------
+README     - This file.
+*.[hc]     - C source files for TEMPOSubset program.
+makeit     - C Shell script to compile the program.
+example1.xdr - Sample swath output file of a subset.
+example2.xdr - Sample grid output file of a subset.
+
+
+Running and Program Usage Documentation:
+----------------------------------------
+For TEMPOSubset program usage documentation simply execute 
+TEMPOSubset |& more
+to see what command-line options are required/available and
+the format of the resulting output files.
+
+
+Notes:
+------
+1. Use the ncdump utility (from NetCDF library) to examine an input file:
+
+ncdump TEMPO_NO2_L2_V01_20231017T111336Z_S001G01.nc | more
+
+2. Use 'head' to examine the headers of the binary output files:
+
+head -14  example1.xdr
+Swath 2.0
+http://tempo.si.edu/,TEMPOSubset
+2023-10-17T00:00:00-0000
+# Dimensions: variables timesteps scans:
+11 24 1
+# Variable names:
+Longitude Latitude no2_vertical_column_total Longitude_SW Longitude_SE Longitude_NW Longitude_NE Latitude_SW Latitude_SE Latitude_NW Latitude_NE
+# Variable units:
+deg deg molecules/cm2 deg deg deg deg deg deg deg deg
+# Domain: <min_lon> <min_lat> <max_lon> <max_lat>
+-180 40 -20 50
+# MSB 64-bit integers (yyyydddhhmm) timestamps[scans] and
+# MSB 64-bit integers points[scans] and
+# IEEE-754 64-bit reals data_1[variables][points_1] ... data_S[variables][points_S]:
+
+head -17 example2.xdr
+SUBSET 9.0 CMAQ
+TEMPO_L3
+http://tempo.si.edu/,TEMPOSubset
+2024-05-15T16:00:00-0000
+# data dimensions: timesteps variables layers rows columns:
+1 1 1 6 6
+# subset indices (0-based time, 1-based layer/row/column): first-timestep last-timestep first-layer last-layer first-row last-row first-column last-column:
+0 0 1 1 1300 1305 3900 3905
+# Variable names:
+vertical_column_sum
+# Variable units:
+molecules/cm2
+# lonlat projection: major_semiaxis minor_semiaxis
+6370000 6370000
+# Grid: ncols nrows xorig yorig xcell ycell vgtyp vgtop vglvls[2]:
+7750 2950 -167.990005 14.010000 0.020000 0.020000 6 40000 0 1
+# IEEE-754 64-bit reals data[variables][timesteps][layers][rows][columns]:
+

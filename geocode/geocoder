@@ -1,0 +1,32 @@
+#!/bin/bash -f
+
+## geocoder - a wrapper for Google Maps Geocoding API.
+##
+##
+## args: - zipcode
+##
+## e.g.  geocoder 27278
+
+if [ $# != 1 ]; then
+  /bin/echo
+  /bin/echo "Usage: geocoder zipcode"
+  /bin/echo
+  exit 1
+fi
+
+zipcode=${1:0:10}
+
+countryCodes="US,CA" # https://en.wikipedia.org/wiki/ISO_3166-1_alpha-2
+
+if [[ $zipcode =~ ^[0-9-]+$ ]]; then
+
+  webservice="https://api.mapbox.com/geocoding/v5/mapbox.places/";
+  key="pk.eyJ1IjoiZW12bG1hcHBlciIsImEiOiJjbDBneHU5cncwMzcxM2hxZHAyb25hY2VsIn0.S8Vw0zKC1IS1oG9a2p7KIw";
+
+  url="${webservice}${zipcode}.json?types=postcode&country=${countryCodes}&access_token=${key}"
+  #echo "$url"
+
+  /usr/bin/curl -s "${url}" | tee
+
+fi
+

@@ -1,0 +1,51 @@
+
+2005-11-01
+plessel.todd@epa.gov 919-541-5500
+
+This directory contains the C source code for the CALIPSOSubset program.
+
+It uses the following external libraries:
+hdfeos mfhdf df sz z jpeg
+and Standard C libraries: m c.
+See makeit.
+
+Files:
+------
+README     - This file.
+*.[hc]     - C source files for CALIPSOSubset program.
+makeit     - C Shell script to compile the program.
+subset.xdr - Sample output file of a subset.
+
+
+Running and Program Usage Documentation:
+----------------------------------------
+For CALIPSOSubset program usage documentation simply execute 
+CALIPSOSubset |& more
+to see what command-line options are required/available and
+the format of the resulting output files.
+
+
+Notes:
+------
+1. Use the hdp utility (from HDF library) to examine an input file:
+hdp dumpsds ./testdata/2006/0704/CAL_LID_L1-Prov-V1-10.2006-07-04T23-21-01ZN.hdf | more
+
+2. Use 'head' to examine the headers of the binary output files:
+head -15 subset.xdr
+CALIPSO 1.0
+https://eosweb.larc.nasa.gov/project/calipso/calipso_table,CALIPSOSubset
+2006-07-04T00:00:00-0000
+# Dimensions: variables timesteps profiles:
+5 24 1
+# Variable names:
+Profile_UTC_Time Longitude Latitude Elevation Total_Attenuated_Backscatter_532
+# Variable units:
+yyyymmdd.f deg deg m per_kilometer_per_steradian
+# Domain: <min_lon> <min_lat> <max_lon> <max_lat>
+47.97 56.299 48 56.4
+# MSB 64-bit integers (yyyydddhhmm) profile_timestamps[profiles] and
+# IEEE-754 64-bit reals profile_bounds[profiles][2=<lon,lat>][2=<min,max>] and
+# MSB 64-bit integers profile_dimensions[profiles][2=<points,levels>] and
+# IEEE-754 64-bit reals profile_data_1[variables][points_1][levels] ... profile_data_S[variables][points_S][levels]:
+
+

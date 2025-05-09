@@ -1,0 +1,175 @@
+#!/bin/csh -f
+# listfiles - List TROPOMI data files for given starting YYYYMMDDHH and HOURS.
+# 2018-04-03 plessel.todd@epa.gov 919-541-5500
+
+# Parallelize the bounds_filter program instances. 1 = No concurrency.
+@ processes = 16
+set directory = '/data/TROPOMI'
+set tmpdir = '/data/tmp'
+set data_directory = "$directory/data"
+#set bounds = "$directory/bounds"
+set bounds_filter = "$directory/bounds_filter"
+set temp  = "$tmpdir/listfiles.$$"
+set temp2 = "$tmpdir/listfiles2.$$"
+set temp_file_input_template  = "$tmpdir/listfiles_input_PROCESS.$$"
+set temp_file_output_template = "$tmpdir/listfiles_output_PROCESS.$$"
+set temp_run_file = "$tmpdir/listfiles_run_file.$$"
+set url = `grep '^set url' $directory/get_tropomi_files | awk '{ print $NF }' | tr -d "'"`
+
+# Make tail +N work!
+setenv _POSIX2_VERSION 199209
+set _POSIX_VERSION=199209
+
+touch $temp ; \rm $temp
+
+@ yyyymmddhh = 0
+@ hours      = 0
+@ ok = 0
+
+if ( $#argv == 8 ) then
+  set type     = $1
+  set variable = $2
+  @ yyyymmddhh = $3
+  @ hours      = $4
+  set lonmin   = $5
+  set latmin   = $6
+  set lonmax   = $7
+  set latmax   = $8
+
+  @ ok = ( ( $type == 'NRTI' || $type == 'OFFL' || $type == 'RPRO' ) && \
+           ( $variable == 'NO2' || $variable == 'CO' || $variable == 'HCHO' || $variable == 'CH4' ) && \
+           $yyyymmddhh >= 1990010100 && $yyyymmddhh <= 2147123123 && \
+           $hours >= 1 )
+
+
+  if ( $ok ) then
+    @ ok = `echo $lonmin $lonmax $latmin $latmax | awk '{ if ( $1 >= -180.0 && $1 <= 180.0 && $2 >= $1 && $2 <= 180.0 && $3 >= -90.0 && $3 <= 90.0 && $4 >= $3 && $4 <= 90.0 ) print 1; else print 0 }'`
+  endif
+
+  if ( ! $ok ) then
+    echo "$0 Invalid command-line arguments $*"
+  endif
+endif
+
+if ( ! $ok ) then
+  echo
+  echo "$0 - List TROPOMI data files for given SOURCE, VARIABLE and starting YYYYMMDDHH and HOURS and LONMIN LATMIN LONMAX LATMAX."
+  echo "usage: $0 SOURCE VARIABLE YYYYMMDDHH HOURS LONMIN LATMIN LONMAX LATMAX"
+  echo 'SOURCE is NRTI or OFFL or RPRO.'
+  echo "example: $0 OFFL NO2 2017112800 24 -90 30 -89 31"
+  echo '/data/TROPOMI/data/20171128/S5P_OFFL_L2__NO2____20171128T163259_20171128T181628_00657_03_001108_20171220T145115.nc'
+  echo '/data/TROPOMI/data/20171128/S5P_OFFL_L2__NO2____20171128T181428_20171128T195758_00658_03_001108_20171220T152321.nc'
+  echo '/data/TROPOMI/data/20171128/S5P_OFFL_L2__NO2____20171128T195558_20171128T213928_00659_03_001108_20171220T164054.nc'
+  echo '/data/TROPOMI/data/20171128/S5P_OFFL_L2__NO2____20171128T213728_20171128T232057_00660_03_001108_20171220T160903.nc'
+  echo '/data/TROPOMI/data/20171128/S5P_OFFL_L2__NO2____20171128T231857_20171129T010227_00661_03_001108_20171220T170153.nc'
+  echo
+  exit 1
+endif
+
+# Construct variable name with length = 6 and zero or more trailing underscores:
+# E.g., CO => CO____, NO2 => NO2___, HCHO => HCHO__
+
+set variable_ = `echo $variable | awk '{ v = $1; n = length( v ); while ( n++ < 6 ) v = v "_"; print v }'`
+
+set days_per_month = ( 31 28 31 30 31 30 31 31 30 31 30 31 )
+@ yyyy =   $yyyymmddhh / 1000000
+@ mm   = ( $yyyymmddhh / 10000 ) % 100
+@ dd   = ( $yyyymmddhh / 100 ) % 100
+@ hh   =   $yyyymmddhh % 100
+
+@ leap = ( $yyyy % 4 == 0 && ! ( $yyyy % 100 == 0 && ! $yyyy % 400 == 0 ) )
+
+@ h = 1
+while ( $h <= $hours )
+
+  # List files matching yyyymmdd hh:
+
+  @ yyyymmdd = `printf "%04d%02d%02d" $yyyy $mm $dd`
+  set hh0 = `printf "%02d" $hh`
+
+  ls $data_directory/$yyyymmdd/S5P_${type}_L2__${variable_}_${yyyymmdd}T$hh0*.nc |& grep -v 'ls: ' >> $temp
+
+  @ hh += 1
+
+  if ( $hh == 24 ) then
+    @ hh = 0
+    @ dd += 1
+
+    @ days_this_month = $days_per_month[$mm]
+
+    if ( $mm == 2 ) then
+      @ days_this_month += $leap
+    endif
+
+    if ( $dd > $days_this_month ) then
+      @ dd = 1
+      @ mm += 1
+
+      if ( $mm > 12 ) then
+        @ mm = 1
+        @ yyyy += 1
+        @ leap = ( $yyyy % 4 == 0 && ! ( $yyyy % 100 == 0 && ! $yyyy % 400 == 0 ) )
+      endif
+    endif
+  endif
+
+  @ h += 1
+end
+
+cat $temp | sort | uniq > $temp2
+mv $temp2 $temp
+
+
+# If NRTI then filter time-based list of files by BBOX (SLOW).
+# OFFL/RPRO files bounds are global.
+
+if ( $type == 'NRTI' ) then
+#  set files = `cat $temp`
+
+#  foreach file ( $files )
+#    set file_bounds = `$bounds $file`
+####echo $file $file_bounds
+#    @ outside = `echo "$lonmin $lonmax $latmin $latmax $file_bounds" | awk '{ lonmin = $1; lonmax = $2; latmin = $3; latmax = $4; bound_lonmin = $5; bound_lonmax = $6; bound_latmin = $7; bound_latmax = $8; if ( latmin > bound_latmax || latmax < bound_latmin || lonmin > bound_lonmax || lonmax < bound_lonmin ) print 1; else print 0 }'`
+#    if ( ! $outside ) echo $file
+#  end
+
+  @ file_count = `cat $temp | wc -l`
+
+  if ( $processes < 2 || $file_count <= $processes ) then
+    $bounds_filter -files $temp -domain $lonmin $latmin $lonmax $latmax
+  else # Run concurrent instances of bounds_filter each on a subset of files:
+    @ count_per_process = $file_count / $processes
+    @ process = 1
+    @ offset = 1
+    echo '#\!/bin/sh' > $temp_run_file
+
+    while ( $process <= $processes )
+      set temp_file_input  = `echo $temp_file_input_template  | sed "s/PROCESS/$process/"`
+      set temp_file_output = `echo $temp_file_output_template | sed "s/PROCESS/$process/"`
+
+      if ( $process == $processes ) then # Last process:
+        tail +$offset $temp > $temp_file_input
+      else
+        tail +$offset $temp | head -$count_per_process > $temp_file_input
+      endif
+
+      echo "$bounds_filter -files $temp_file_input -domain $lonmin $latmin $lonmax $latmax >& $temp_file_output &" >> $temp_run_file
+
+      @ offset += $count_per_process
+      @ process += 1
+    end
+
+    echo "wait" >> $temp_run_file
+    chmod +x $temp_run_file
+    $temp_run_file >& /dev/null
+    set temp_file_inputs  = `echo $temp_file_input_template  | sed "s/PROCESS/*/"`
+    set temp_file_outputs = `echo $temp_file_output_template | sed "s/PROCESS/*/"`
+    cat $temp_file_outputs | sort
+    rm  $temp_file_outputs $temp_file_inputs $temp_run_file
+  endif
+else
+  cat $temp
+endif
+
+\rm $temp
+

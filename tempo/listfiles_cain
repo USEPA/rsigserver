@@ -99,7 +99,7 @@ if ( ! $ok ) then
   echo
   echo "$0 - List TEMPO data files for given PRODUCT and starting YYYYMMDDHH and HOURS and lon-lat bounds."
   echo "usage: $0 PRODUCT YYYYMMDDHH HOURS LONMIN LATMIN LONMAX LATMAX [KEY]"
-  echo "example: $0 l2.no2 2023101716 24 -73 42 -72 43 TEMPOST"
+  echo "example: $0 l2.no2 2023101716 24 -73 42 -72 43 KEY"
   echo /data/TEMPO/data/2023/10/TEMPO_NO2_L2_V01_20231017T160036Z_S007G02.nc
   echo /data/TEMPO/data/2023/10/TEMPO_NO2_L2_V01_20231017T160716Z_S007G03.nc
   echo /data/TEMPO/data/2023/10/TEMPO_NO2_L2_V01_20231017T170036Z_S008G02.nc

@@ -1609,12 +1609,19 @@ sub construct_command {
           $regrid_aggregate_option = "-aggregate $hours";
         }
 
+        my $minimum_valid_value_option = '';
+
+        if ( $allow_negative_counts ne '' && $allow_negative_counts == 1 ) {
+          $minimum_valid_value_option = ' -minimum_valid_value -1e29 ';
+        }
+
         $regrid_args =
           "-regrid $regrid " .
           $projection_args .
           "-ellipsoid $major_semiaxis $minor_semiaxis " .
           $grid_args .
-          $regrid_aggregate_option;
+          $regrid_aggregate_option .
+          $minimum_valid_value_option;
       }
 
       $my_xdrconvert = " | $xdrconvert $regrid_args -$xdrconvert_format";

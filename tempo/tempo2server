@@ -43,7 +43,7 @@ delete @ENV{ 'PATH', 'IFS', 'CDPATH', 'ENV', 'BASH_ENV' };
 
 my $debugging = 0; # 1 = print debug messages to STDERR logs/error_log.
 my $run_parallel_tasks = 24; # Maximum concurrent Subset tasks. 0 or 1 = serial.
-my $valid_non_proxy_key = "TEMPOST"; # PI's chosen key on 2023-10-20.
+my $valid_non_proxy_key = "KEY_GOES_HERE"; # PI's chosen key on 2023-10-20.
 
 # Internal server where this program is installed:
 
@@ -2449,9 +2449,9 @@ sub construct_command {
 
       if ( $regrid ne '' ) {
         my $projection_args =
-          $lambert ne '' ? "-lambert $lambert "
-          : $stereographic ne '' ? "-stereographic $stereographic "
-          : $mercator ne '' ? "-mercator $mercator "
+          $lambert ne '' ? " -lambert $lambert "
+          : $stereographic ne '' ? " -stereographic $stereographic "
+          : $mercator ne '' ? " -mercator $mercator "
           : "-lonlat ";
         
         $projection_args =~ tr/,/ /;
@@ -2460,15 +2460,21 @@ sub construct_command {
         my $major_semiaxis = $ellipsoid_args[ 0 ];
         my $minor_semiaxis =
           $ellipsoid_args_count == 1 ? $major_semiaxis : $ellipsoid_args[ 1 ];
-        my $grid_args = "-grid $grid ";
+        my $grid_args = " -grid $grid ";
         $grid_args =~ tr/,/ /;
 
         my $regrid_aggregate_option = '';
 
         if ( $regrid_aggregate eq 'daily' ) {
-          $regrid_aggregate_option = '-aggregate 24';
+          $regrid_aggregate_option = ' -aggregate 24 ';
         } elsif ( $regrid_aggregate eq 'all' ) {
-          $regrid_aggregate_option = "-aggregate $hours";
+          $regrid_aggregate_option = " -aggregate $hours ";
+        }
+
+        my $minimum_valid_value_option = '';
+
+        if ( $allow_negative_counts ne '' && $allow_negative_counts == 1 ) {
+          $minimum_valid_value_option = ' -minimum_valid_value -1e29 ';
         }
 
         $regrid_args =
@@ -2476,7 +2482,8 @@ sub construct_command {
           $projection_args .
           "-ellipsoid $major_semiaxis $minor_semiaxis " .
           $grid_args .
-          $regrid_aggregate_option;
+          $regrid_aggregate_option .
+          $minimum_valid_value_option;
       }
 
       $my_xdrconvert = " | $xdrconvert $regrid_args -$xdrconvert_format";

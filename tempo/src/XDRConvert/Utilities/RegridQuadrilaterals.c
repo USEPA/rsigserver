@@ -31,6 +31,7 @@ https://stackoverflow.com/questions/15490795/determine-if-a-2d-point-is-within-a
 #include <stdio.h>  /* For stderr, fprintf(). */
 #endif
 
+#include <Grid.h>  /* For AMISS3. */
 #include <RegridQuadrilaterals.h>  /* For public interface. */
 
 /*================================= MACROS ==================================*/
@@ -383,7 +384,8 @@ void projectAndOrReorderQuadrilateralVertices2( const size_t count,
 /******************************************************************************
 PURPOSE: binQuadrilateralData - Bin 2D quadrilaterals onto a regular 2D grid
          and return the number of cells updated with data.
-INPUTS:  const size_t count           Number of quadrilaterals.
+INPUTS:  const double minimumValidValue  Minimum valid data value to not filter.
+         const size_t count           Number of quadrilaterals.
          const double data[  count ]  Data values of quadrilaterals.
          const double x[ 4 * count ]  X-coordinates of counter-clockwise
                                       vertices of quadrilaterals.
@@ -411,7 +413,8 @@ OUTPUTS: size_t cellCounts[ rows * columns ]  Updated array of counts.
 RETURNS: size_t number of quadrilaterals that were binned.
 ******************************************************************************/
 
-size_t binQuadrilateralData( const size_t count,
+size_t binQuadrilateralData( const double minimumValidValue,
+                             const size_t count,
                              const double data[],
                              const double x[],
                              const double y[],
@@ -430,6 +433,7 @@ size_t binQuadrilateralData( const size_t count,
   long long result0 = 0; /* Must use signed type for OpenMP. */
   size_t result = 0;
 
+  assert( minimumValidValue > AMISS3 );
   assert( count ); assert( data ); assert( x ); assert( y );
   assert( rows ); assert( columns );
   assert( cellWidth > 0.0 ); assert( cellHeight > 0.0 );
@@ -445,13 +449,17 @@ size_t binQuadrilateralData( const size_t count,
 #pragma omp parallel for reduction ( + : result0 )
 
   for ( index = 0; index < count0; ++index ) {
-    const long long index2 = index + index;
-    const long long index4 = index2 + index2;
-    result0 +=
-      regridQuadrilateral( data[ index ], x + index4, y + index4,
-                           rows, columns, gridXMinimum, gridYMinimum,
-                           cellWidth, cellHeight,
-                           cellCounts, cellWeights, cellSums );
+    const double value = data[ index ];
+
+    if ( value >= minimumValidValue ) {
+      const long long index2 = index + index;
+      const long long index4 = index2 + index2;
+      result0 +=
+        regridQuadrilateral( value, x + index4, y + index4,
+                             rows, columns, gridXMinimum, gridYMinimum,
+                             cellWidth, cellHeight,
+                             cellCounts, cellWeights, cellSums );
+    }
   }
 
   result = result0;
@@ -487,6 +495,7 @@ size_t computeCellMeans( const double minimumValidValue,
   long long result0 = 0; /* Must use signed type for OpenMP. */
   long long cell = 0;
 
+  assert( minimumValidValue > AMISS3 );
   assert( count >= 1 );
   assert( cellCounts );
   assert( cellSums );

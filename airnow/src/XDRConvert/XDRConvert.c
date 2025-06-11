@@ -112,6 +112,9 @@ static void parseFormat( int argc, char* argv[], Integer* arg,
 static void parseAggregate( int argc, char* argv[], Integer* arg,
                             Parameters* parameters );
 
+static void parseMinimumValidValue( int argc, char* argv[], Integer* arg,
+                                    Parameters* parameters );
+
 static void parseCompare( int argc, char* argv[], Integer* arg,
                           Parameters* parameters );
 
@@ -230,10 +233,12 @@ Integer isValidParameters( const Parameters* parameters ) {
           parameters->input->isReadable( parameters->input ),
           IS_VALID_FORMAT( parameters->format ),
           IMPLIES( parameters->regrid,
-                   AND4( IS_VALID_AGGREGATE_METHOD( parameters->regrid ),
+                   AND6( IS_VALID_AGGREGATE_METHOD( parameters->regrid ),
+                         parameters->grid,
                          parameters->grid->invariant( parameters->grid ),
                          parameters->temporaryDirectory,
-                         parameters->temporaryDirectory[ 0 ] ) ),
+                         parameters->temporaryDirectory[ 0 ],
+                         parameters->minimumValidValue >= BADVAL3 ) ),
           IMPLIES_ELSE( OR2( parameters->format == FORMAT_COARDS,
                              parameters->format == FORMAT_IOAPI ),
                         parameters->netcdfFileName[ 0 ] != '\0',
@@ -354,6 +359,7 @@ static void printUsage( const char* programName ) {
   fprintf( stderr, " [-compare difference | absolute_difference | " );
   fprintf( stderr, "percent_difference | ratio | convert compare_file]\n" );
   fprintf( stderr, " [-aggregate timesteps ]\n" );
+  fprintf( stderr, " [-minimum_valid_value value ]\n" );
   fprintf( stderr, " -xdr | -ascii | -ioapi | -coards | -mcmc\n\n" );
   fprintf( stderr, "Note the following constants are from MM5:\n");
   fprintf( stderr, "g   = 9.81     Gravitational force m/s^2.\n" );
@@ -407,6 +413,7 @@ static void parseParameters( int argc, char* argv[], Parameters* parameters ) {
   } else {
     Integer argument = 1; /* Index of argument to parse. */
     parameters->ok = 1;
+    parameters->minimumValidValue = BADVAL3;
     parseTmpdir( argc, argv, &argument, parameters );
 
     if ( parameters->ok ) {
@@ -416,10 +423,14 @@ static void parseParameters( int argc, char* argv[], Parameters* parameters ) {
         parseAggregate( argc, argv, &argument, parameters );
 
         if ( parameters->ok ) {
-          parseCompare( argc, argv, &argument, parameters );
+          parseMinimumValidValue( argc, argv, &argument, parameters );
 
           if ( parameters->ok ) {
-            parseFormat( argc, argv, &argument, parameters );
+            parseCompare( argc, argv, &argument, parameters );
+
+            if ( parameters->ok ) {
+              parseFormat( argc, argv, &argument, parameters );
+            }
           }
         }
       }
@@ -434,7 +445,8 @@ static void parseParameters( int argc, char* argv[], Parameters* parameters ) {
           IMPLIES( parameters->ok,
                    AND2( IS_VALID_FORMAT( parameters->format ),
                          IMPLIES( parameters->regrid,
-                           AND2( IS_VALID_AGGREGATE_METHOD(parameters->regrid),
+                           AND3( IS_VALID_AGGREGATE_METHOD(parameters->regrid),
+                                 parameters->grid,
                                  parameters->grid->invariant(
                                    parameters->grid ) ) ) ) ) );
 }
@@ -630,6 +642,45 @@ static void parseAggregate( int argc, char* argv[], Integer* argument,
   POST03( *argument <= argc,
           IS_BOOL( parameters->ok ),
           IMPLIES( parameters->ok, parameters->aggregationTimesteps >= 0 ) );
+}
+
+
+
+/******************************************************************************
+PURPOSE: parseMinimumValidValue - Parse minimum valid value command-line
+         argument into parameters.
+INPUTS:  int argc           Number of command-line arguments.
+         char* argv[]       Command-line argument strings.
+         Integer* argument  Index of argument to parse.
+OUTPUTS: Integer* argument  Updated index of argument to parse.
+         Parameters* parameters  Updated parameters.
+******************************************************************************/
+
+static void parseMinimumValidValue( int argc, char* argv[], Integer* argument,
+                                    Parameters* parameters ) {
+
+  PRE05( isValidArgs( argc, (const char**) argv ),
+         argument, *argument > 0,
+         parameters, parameters->ok );
+
+  if ( AND2( *argument + 2 < argc,
+             ! strcmp( argv[ *argument ], "-minimum_valid_value" ) ) ) {
+    parameters->minimumValidValue = atof( argv[ *argument + 1 ] );
+    parameters->ok = parameters->minimumValidValue > AMISS3;
+
+    if ( ! parameters->ok ) {
+      failureMessage( "Invalid -minimum_valid_value argument '%s'\n",
+                      argv[ *argument + 1 ] );
+    } else {
+      *argument += 2;
+    }
+  }
+
+  POST03( *argument <= argc,
+          IS_BOOL( parameters->ok ),
+          IMPLIES( parameters->ok,
+                   OR2( parameters->minimumValidValue == BADVAL3,
+                        parameters->minimumValidValue > AMISS3 ) ) );
 }
 
 

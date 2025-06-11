@@ -359,12 +359,29 @@ static Integer isVectorVariable( const Data* data ) {
   PRE05( data, data->variables > 0, data->variable,
          data->variable[ 0 ], data->variable[ data->variables ] );
 
-  const Integer result =
-    AND2( data->variables >= 2,
-          OR2( AND2( ! strcmp( data->variable[ data->variables - 2 ], "windU" ),
-                     ! strcmp( data->variable[ data->variables - 1 ], "windV" ) ),
-               AND2( ! strcmp( data->variable[ data->variables - 2 ], "wind_u" ),
-                     ! strcmp( data->variable[ data->variables - 1 ], "wind_v" ) ) ) );
+  Integer result = 0;
+
+  if ( data->variables >= 2 ) {
+    const char* variable = data->variable[ data->variables - 2 ];
+
+    if ( strstr( variable, "wind" ) == variable ) {
+      size_t length = strlen( variable );
+      char end = variable[ length - 1 ];
+
+      if ( IN3( end, 'u', 'U' ) ) {
+        variable = data->variable[ data->variables - 1 ];
+
+        if ( strstr( variable, "wind" ) == variable ) {
+          length = strlen( variable );
+          end = variable[ length - 1 ];
+
+          if ( IN3( end, 'v', 'V' ) ) {
+            result = 1;
+          }
+        }
+      }
+    }
+  }
 
   POST0( IS_BOOL( result ) );
   return result;

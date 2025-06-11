@@ -53,7 +53,8 @@ projectAndOrReorderQuadrilateralVertices2( const size_t count,
                                            double vx[],
                                            double vy[] );
 
-extern size_t binQuadrilateralData( const size_t count,
+extern size_t binQuadrilateralData( const double minimumValidValue,
+                                    const size_t count,
                                     const double data[],
                                     const double x[],
                                     const double y[],

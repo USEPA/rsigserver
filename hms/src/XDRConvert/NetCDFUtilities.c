@@ -565,9 +565,11 @@ Integer createVariable( Integer file, const char* name,
     if ( writeTextAttribute( file, id, "units", renamedUnits ) ) {
 
       if ( hasMissingValues ) {
+        const double missingValue =
+          ! strcmp( units, "molecules/cm2" ) ? BADVAL3 : -9999.0;
 
         if ( writeRealAttribute( file, id, NC_FLOAT, "missing_value",
-                                 -9999.0 ) ) {
+                                 missingValue ) ) {
           if  ( writeTextAttribute( file, id, "grid_mapping", "crs" ) ) {
             result = id;
           }

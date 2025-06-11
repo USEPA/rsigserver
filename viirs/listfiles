@@ -190,7 +190,7 @@ else # Run concurrent instances of bounds_filter each on a subset of files:
   $temp_run_file >& /dev/null
   set temp_file_inputs  = `echo $temp_file_input_template  | sed "s/PROCESS/*/"`
   set temp_file_outputs = `echo $temp_file_output_template | sed "s/PROCESS/*/"`
-  cat $temp_file_outputs | sort
+  cat $temp_file_outputs | sort -t _ -k 5,5 | uniq
   rm  $temp_file_outputs $temp_file_inputs
 endif
 

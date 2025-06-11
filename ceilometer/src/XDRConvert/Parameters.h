@@ -50,6 +50,7 @@ typedef struct {
   Integer lastRow;        /* 1-based subset row number. */
   Integer firstColumn;    /* 1-based subset column number. */
   Integer lastColumn;     /* 1-based subset column number. */
+  Real minimumValidValue; /* Or BADVAL3 for default. */
   Real* data;             /* data[ timesteps ][ rows ][ columns ]. */
   Real* data2;            /* data2[ timesteps ][ rows ][ columns ]. */
 } Parameters;

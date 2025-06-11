@@ -36,7 +36,7 @@ typedef long long omp_lock_t;
 #include <Mercator.h>      /* For Mercator. */
 #include <Stereographic.h> /* For Stereographic. */
 #include <Utilities.h>     /* For appendNote(). */
-#include <RegridQuadrilaterals.h> /* For regridQuadrilaterals(). */
+#include <RegridQuadrilaterals.h> /* For binQuadrilateralData(). */
 #include <Grid.h>          /* For public interface. */
 
 #ifndef MIN
@@ -1470,7 +1470,7 @@ static void regridSwath( Grid* self,
       /* Bin the swath data into grid cells: */
 
       const size_t binnedPoints =
-        binQuadrilateralData( points, inputData, vx, vy,
+        binQuadrilateralData( minimumValidValue, points, inputData, vx, vy,
                               rows, columns,
                               gridXMinimum, gridYMinimum, cellWidth, cellHeight,
                               cellCounts, cellWeights, cellMeans );

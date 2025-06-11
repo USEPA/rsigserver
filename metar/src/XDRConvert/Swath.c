@@ -974,7 +974,7 @@ static Integer writeASCIIData( Data* data, Stream* input, Stream* output ) {
 
   Integer result = 0;
   const Integer variables = data->variables;
-  const char* const dataFormat = "\t%28.6e";
+  const char* const dataFormat = "\t%28.12e";
   const Integer scans = data->scans;
   Integer scan = 0;
 
@@ -1563,8 +1563,8 @@ static Integer writeRegriddedASCII( Data* data, const Parameters* parameters ) {
       "\tCOLUMN(-)\tROW(-)\tCOUNT(-)";
     const char* const headerFormat = "\t%s(%s)\n";
     const char* const dataFormat =
-      "%s\t%10.4lf\t%10.4lf"
-      "\t%9"INTEGER_FORMAT"\t%9"INTEGER_FORMAT"\t%9"INTEGER_FORMAT"\t%10.4le\n";
+      "%s\t%10.5f\t%10.5f"
+      "\t%9"INTEGER_FORMAT"\t%9"INTEGER_FORMAT"\t%9"INTEGER_FORMAT"\t%28.12e\n";
     const Integer hasCorners = IN3( data->variables, 11, 12 );
     Stream* tempFile =
       hasCorners ? newFileStream( parameters->regridFileName, "rb" ) : 0;
@@ -1617,22 +1617,23 @@ static Integer writeRegriddedASCII( Data* data, const Parameters* parameters ) {
             }
 
             if ( ok ) {
-
               for ( point = 0; point < points; ++point ) {
-                const Real longitude = *longitudes++;
-                const Real latitude  = *latitudes++;
-                const Integer column = *columns++;
-                const Integer row    = *rows++;
-                const Integer count  = *counts++;
-                const Real value     = *gridData++;
+                const Real longitude = longitudes[ point ];
+                const Real latitude  = latitudes[ point ];
+                const Integer column = columns[ point ];
+                const Integer row    = rows[ point ];
+                const Integer count  = counts[ point ];
+                const Real value     = gridData[ point ];
 
-                output->writeString( output, dataFormat,
-                                     timestamp, longitude, latitude,
-                                     column, row, count, value );
+                if ( count > 0 ) {
+                  output->writeString( output, dataFormat,
+                                       timestamp, longitude, latitude,
+                                       column, row, count, value );
 
-                if ( ! output->ok( output ) ) {
-                  point = points;
-                  timestep = timesteps;
+                  if ( ! output->ok( output ) ) {
+                    point = points;
+                    timestep = timesteps;
+                  }
                 }
               }
             }
@@ -1717,7 +1718,6 @@ static Integer writeRegriddedCOARDSHeader( Integer file,
   Integer dimensionId = -1;
   const Integer dimension = data->totalRegriddedPoints;
   Integer result = 0;
-
 
   if ( createDimensions( file, 1, &dimensionName, &dimension, &dimensionId ) ) {
 
@@ -1848,13 +1848,14 @@ static Integer writeBufferedRegriddedCOARDSData( Integer file,
   Integer result = tempFile != 0;
 
   if ( result ) {
+    const Integer timesteps = data->timesteps;
+    Integer timestep = 0;
+    Integer offset = 0;
     const Integer hoursPerTimestep =
       parameters->aggregationTimesteps ? parameters->aggregationTimesteps : 1;
     Name variable = "";
     const Integer index = dataVariableIndex( data );
     aggregateName( data->variable[ index ], hoursPerTimestep, variable );
-    const Integer timesteps = data->timesteps;
-    Integer timestep = 0;
 
     for ( timestep = 0; AND2( result, timestep < timesteps ); ++timestep ) {
       const Integer count = data->outputPoints[ timestep ];
@@ -1863,34 +1864,34 @@ static Integer writeBufferedRegriddedCOARDSData( Integer file,
         result = readRegriddedXDRDataFromTempFile( tempFile, timestep, data );
 
         if ( result ) {
-
           result =
-            writeSomeIntegerData( file, "column", timestep, count, 1, 1, 1,
+            writeSomeIntegerData( file, "column", offset, count, 1, 1, 1,
                                   data->columns );
-
           if ( result ) {
             result =
-              writeSomeIntegerData( file, "row", timestep, count, 1, 1, 1,
+              writeSomeIntegerData( file, "row", offset, count, 1, 1, 1,
                                     data->rows );
 
             if ( result ) {
               result =
-                writeSomeIntegerData( file, "count", timestep, count, 1, 1, 1,
+                writeSomeIntegerData( file, "count", offset, count, 1, 1, 1,
                                       data->counts );
 
               if ( result ) {
                 result =
-                  writeSomeData( file, "longitude", timestep, count, 1, 1, 1,
+                  writeSomeData( file, "longitude", offset, count, 1, 1, 1,
                                  data->gridLongitudes );
+
+
 
                 if ( result ) {
                   result =
-                    writeSomeData( file, "latitude", timestep, count, 1, 1, 1,
+                    writeSomeData( file, "latitude", offset, count, 1, 1, 1,
                                    data->gridLatitudes );
 
                   if ( result ) {
                     result =
-                      writeSomeData( file, variable, timestep, count, 1, 1, 1,
+                      writeSomeData( file, variable, offset, count, 1, 1, 1,
                                      data->gridData );
                   }
                 }
@@ -1898,6 +1899,8 @@ static Integer writeBufferedRegriddedCOARDSData( Integer file,
             }
           }
         }
+
+        offset += count;
       }
     }
 
@@ -1934,13 +1937,13 @@ RETURNS: Integer 1 if successful, else 0 and failureMessage is called.
 static Integer writeRegriddedIOAPI( Data* data,
                                     const Parameters* parameters ) {
 
-  PRE02( isValidData( data ), isValidParameters( parameters ) );
+  PRE03( isValidData( data ), isValidParameters( parameters ),
+         parameters->grid );
 
   Integer result = 0;
   const Integer layers = 1;
-  const Integer rows = maximumItemI( data->rows, data->totalRegriddedPoints );
-  const Integer columns =
-    maximumItemI( data->columns, data->totalRegriddedPoints );
+  const Integer rows = parameters->grid->rows( parameters->grid );
+  const Integer columns = parameters->grid->columns( parameters->grid );
   const Integer fileSizeEstimate =
     data->timesteps * layers * rows * columns * 4 * 4 + 10000;
     /* lon,lat,count,var */
@@ -2078,10 +2081,10 @@ static Integer writeRegriddedIOAPIData( Integer file,
         if ( result ) {
           Integer* const iExpandedGridData = (Integer*) expandedGridData;
           copyIntDataToGrid( points,
-                            data->rows    + offset2,
-                            data->columns + offset2,
-                            data->counts  + offset2,
-                            1, rows, columns, iExpandedGridData );
+                             data->rows    + offset2,
+                             data->columns + offset2,
+                             data->counts  + offset2,
+                             1, rows, columns, iExpandedGridData );
 
           result =
             writeM3IOData( file, "COUNT", timestep, 1, rows, columns,
@@ -2136,12 +2139,17 @@ static void regridDataWithCorners( Parameters* const parameters, Data* data ) {
   assert_static( sizeof (size_t) == sizeof (Integer ) );
 
   const Integer dataVariable = dataVariableIndex( data );
-  const Real minimumValidValue =
+  const Real defaultMinimumValidValue =
     OR4( ! strcmp( data->units[ dataVariable ], "m" ),
          ! strcmp( data->units[ dataVariable ], "m/s" ),
          ! strcmp( data->units[ dataVariable ], "degC" ),
          ! strcmp( data->units[ dataVariable ], "degrees" ) ) ?
     -900.0 : 0.0;
+  const double minimumValidValue =
+    AND2( parameters->minimumValidValue > AMISS3,
+          ! strcmp( data->units[ dataVariable ], "molecules/cm2" ) ) ?
+      parameters->minimumValidValue
+    : defaultMinimumValidValue;
 
   Integer ok = 0;
 
@@ -2350,7 +2358,8 @@ static void regridDataWithCorners( Parameters* const parameters, Data* data ) {
             /* Bin the swath data into grid cells: */
 
             binnedPoints =
-              binQuadrilateralData( inputPoints,
+              binQuadrilateralData( minimumValidValue,
+                                    inputPoints,
                                     data->data,
                                     vx, vy,
                                     rows, columns,
@@ -2392,7 +2401,6 @@ static void regridDataWithCorners( Parameters* const parameters, Data* data ) {
 
             DEBUG(fprintf(stderr, "mean outputPoints = %lld\n", outputPoints);)
 
-
             if ( outputPoints ) {
 
               /*
@@ -2400,7 +2408,7 @@ static void regridDataWithCorners( Parameters* const parameters, Data* data ) {
                * data->gridLongitudes, data->gridLatitudes,
                * data->columns, data->rows and
                * data->counts, data->gridData
-               * so afterwards, all these arrays have length outputCells.
+               * so afterwards, all these arrays have length outputPoints.
                */
 
               compactCells( projector,

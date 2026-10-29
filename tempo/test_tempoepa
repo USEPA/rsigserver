@@ -1,0 +1,107 @@
+#!/bin/csh -f
+
+echo ; echo TEST TEMPOEPA ; echo
+
+if ( 0 ) then
+
+sleep 2 ; echo ; echo TEST GetCapabilities ; echo
+curl --silent --retry 0 'https://maple.hesc.epa.gov/rsig/rsigserver?SERVICE=wcs&VERSION=1.0.0&REQUEST=GetCapabilities' > junk ; head junk ; echo '...' ; grep -i tempoepa junk
+
+sleep 2 ; echo ; echo TEST DescribeCoverage ; echo
+curl --silent --retry 0 'https://maple.hesc.epa.gov/rsig/rsigserver?SERVICE=wcs&VERSION=1.0.0&REQUEST=DescribeCoverage' > junk ; head junk ; echo '...' ; grep -i tempoepa junk
+
+endif
+
+
+# DescribeCoverage:
+
+sleep 2 ; echo ; echo TEST DescribeCoverage tempoepa.l2.aodalh.aod550 ; echo
+curl --silent --retry 0 'https://maple.hesc.epa.gov/rsig/rsigserver?SERVICE=wcs&VERSION=1.0.0&REQUEST=DescribeCoverage&COVERAGE=tempoepa.l2.aodalh.aod550' > junk ; echo $? ; cat junk
+
+sleep 2 ; echo ; echo TEST DescribeCoverage tempoepa.l3.pm25.aod_ge ; echo
+curl --silent --retry 0 'https://maple.hesc.epa.gov/rsig/rsigserver?SERVICE=wcs&VERSION=1.0.0&REQUEST=DescribeCoverage&COVERAGE=tempoepa.l3.pm25.aod_ge' > junk ; echo $? ; cat junk
+
+sleep 2 ; echo ; echo TEST DescribeCoverage tempoepa.l3.pm25.aod_ge ; echo
+curl --silent --retry 0 'https://maple.hesc.epa.gov/rsig/rsigserver?SERVICE=wcs&VERSION=1.0.0&REQUEST=DescribeCoverage&COVERAGE=tempoepa.l2.adp.deepblue_aai' > junk ; echo $? ; cat junk
+
+
+# GetMetadata:
+
+sleep 2 ; echo ; echo TEST GetMetadata tempoepa.l2.aodalh.aod550 ; echo
+curl --silent --retry 0 'https://maple.hesc.epa.gov/rsig/rsigserver?SERVICE=wcs&VERSION=1.0.0&REQUEST=GetMetadata&COVERAGE=tempoepa.l2.aodalh.aod550&FORMAT=xdr&TIME=2023-08-02T00:00:00Z/2023-08-03T23:59:59Z&BBOX=-77,36,-75,38&CORNERS=1' > junk ; echo $? ; cat junk
+
+sleep 2 ; echo ; echo TEST GetMetadata tempoepa.l3.pm25.aod_ge ; echo
+curl --silent --retry 0 'https://maple.hesc.epa.gov/rsig/rsigserver?SERVICE=wcs&VERSION=1.0.0&REQUEST=GetMetadata&COVERAGE=tempoepa.l3.pm25.aod_ge&FORMAT=xdr&TIME=2023-08-02T00:00:00Z/2023-08-03T23:59:59Z&BBOX=-77,36,-75,38&CORNERS=1' > junk ; echo $? ; cat junk
+
+sleep 2 ; echo ; echo TEST GetMetadata tempoepa.l2.adp.deepblue_aai ; echo
+curl --silent --retry 0 'https://maple.hesc.epa.gov/rsig/rsigserver?SERVICE=wcs&VERSION=1.0.0&REQUEST=GetMetadata&COVERAGE=tempoepa.l2.adp.deepblue_aai&FORMAT=xdr&TIME=2023-08-02T00:00:00Z/2023-08-03T23:59:59Z&BBOX=-77,36,-75,38&CORNERS=1' > junk ; echo $? ; cat junk
+
+
+# Original:
+
+sleep 2 ; echo ; echo TEST tempoepa.l2.aodalh.aod550 original ; echo
+curl --silent --retry 0 'https://maple.hesc.epa.gov/rsig/rsigserver?SERVICE=wcs&VERSION=1.0.0&REQUEST=GetCoverage&COVERAGE=tempoepa.l2.aodalh.aod550&FORMAT=original&TIME=2023-08-15T00:00:00Z/2023-08-15T23:59:59Z&BBOX=-77,36,-75,38&CORNERS=1' > junk ; echo $? ; tar -ztf junk
+
+
+# Check KEY:
+
+sleep 2 ; echo ; echo TEST CheckKey ; echo
+curl --silent --retry 0 'https://maple.hesc.epa.gov/rsig/rsigserver?CHECK_TEMPO_KEY=WRONG'
+
+sleep 2 ; echo ; echo TEST CheckKey ; echo
+curl --silent --retry 0 'https://maple.hesc.epa.gov/rsig/rsigserver?CHECK_TEMPO_KEY=TEMPOST'
+
+
+# XDR:
+
+sleep 2 ; echo ; echo TEST tempoepa.l2.aodalh.aod550 xdr ; echo
+curl --silent --retry 0 'https://maple.hesc.epa.gov/rsig/rsigserver?SERVICE=wcs&VERSION=1.0.0&REQUEST=GetCoverage&COVERAGE=tempoepa.l2.aodalh.aod550&FORMAT=xdr&TIME=2023-08-02T00:00:00Z/2023-08-03T23:59:59Z&BBOX=-77,36,-75,38&CORNERS=1' > junk ; echo $? ; /rsig/current/code/bin/Linux.x86_64/xdrdump junk | head -30
+
+sleep 2 ; echo ; echo TEST tempoepa.l2.aodalh.aod550 xdr ; echo
+curl --silent --retry 0 'https://maple.hesc.epa.gov/rsig/rsigserver?SERVICE=wcs&VERSION=1.0.0&REQUEST=GetCoverage&COVERAGE=tempoepa.l2.aodalh.aod550&FORMAT=xdr&TIME=2023-08-02T00:00:00Z/2023-08-03T23:59:59Z&BBOX=-77,36,-75,38&CORNERS=1' > junk ; echo $? ; /rsig/current/code/bin/Linux.x86_64/xdrdump junk | head -30
+
+sleep 2 ; echo ; echo TEST tempoepa.l3.pm25.aod_ge xdr; echo
+curl --silent --retry 0 'https://maple.hesc.epa.gov/rsig/rsigserver?SERVICE=wcs&VERSION=1.0.0&REQUEST=GetCoverage&COVERAGE=tempoepa.l3.pm25.aod_ge&FORMAT=xdr&TIME=2023-08-02T00:00:00Z/2023-08-03T23:59:59Z&BBOX=-77,36,-75,38&CORNERS=1' > junk ; echo $? ; /rsig/current/code/bin/Linux.x86_64/xdrdump junk | head -30
+
+sleep 2 ; echo ; echo TEST tempoepa.l2.adp.deepblue_aai minimum_quality xdr; echo
+curl --silent --retry 0 'https://maple.hesc.epa.gov/rsig/rsigserver?SERVICE=wcs&VERSION=1.0.0&REQUEST=GetCoverage&COVERAGE=tempoepa.l2.adp.deepblue_aai&FORMAT=xdr&TIME=2023-08-02T00:00:00Z/2023-08-03T23:59:59Z&BBOX=-77,36,-75,38&CORNERS=1&MINIMUM_QUALITY=normal&MAXIMUM_CLOUD_FRACTION=0.15&MAXIMUM_SOLAR_ZENITH_ANGLE=70&ALLOW_NEGATIVE_COUNTS=1' > junk ; echo $? ; /rsig/current/code/bin/Linux.x86_64/xdrdump junk | head -30
+
+
+# ASCII:
+
+sleep 2 ; echo ; echo TEST tempoepa.l2.aodalh.aod550 ascii ; echo
+curl --silent --retry 0 'https://maple.hesc.epa.gov/rsig/rsigserver?SERVICE=wcs&VERSION=1.0.0&REQUEST=GetCoverage&COVERAGE=tempoepa.l2.aodalh.aod550&FORMAT=ascii&TIME=2023-08-02T00:00:00Z/2023-08-03T23:59:59Z&BBOX=-77,36,-75,38&CORNERS=1' > junk ; echo $? ; head -30 junk
+
+sleep 2 ; echo ; echo TEST tempoepa.l3.pm25.aod_ge ascii ; echo
+curl --silent --retry 0 'https://maple.hesc.epa.gov/rsig/rsigserver?SERVICE=wcs&VERSION=1.0.0&REQUEST=GetCoverage&COVERAGE=tempoepa.l3.pm25.aod_ge&FORMAT=ascii&TIME=2023-08-02T00:00:00Z/2023-08-03T23:59:59Z&BBOX=-77,36,-75,38&CORNERS=1' > junk ; echo $? ; head -30 junk
+
+sleep 2 ; echo ; echo TEST tempoepa.l2.adp.deepblue_aai minimum_quality ascii ; echo
+curl --silent --retry 0 'https://maple.hesc.epa.gov/rsig/rsigserver?SERVICE=wcs&VERSION=1.0.0&REQUEST=GetCoverage&COVERAGE=tempoepa.l2.adp.deepblue_aai&FORMAT=ascii&TIME=2023-08-02T00:00:00Z/2023-08-03T23:59:59Z&BBOX=-77,36,-75,38&CORNERS=1&MINIMUM_QUALITY=normal&MAXIMUM_CLOUD_FRACTION=0.15&MAXIMUM_SOLAR_ZENITH_ANGLE=70&ALLOW_NEGATIVE_COUNTS=1' > junk ; echo $? ; head -30 junk
+
+
+# NetCDF-COARDS:
+
+sleep 2 ; echo ; echo TEST tempoepa.l2.aodalh.aod550 netcdf-coards ; echo
+curl --silent --retry 0 'https://maple.hesc.epa.gov/rsig/rsigserver?SERVICE=wcs&VERSION=1.0.0&REQUEST=GetCoverage&COVERAGE=tempoepa.l2.aodalh.aod550&FORMAT=netcdf-coards&TIME=2023-08-02T00:00:00Z/2023-08-03T23:59:59Z&BBOX=-77,36,-75,38&CORNERS=1' > junk ; echo $? ; /rsig/current/code/bin/Linux.x86_64/ncdump -h junk
+
+sleep 2 ; echo ; echo TEST tempoepa.l3.pm25.aod_ge netcdf-coards ; echo
+curl --silent --retry 0 'https://maple.hesc.epa.gov/rsig/rsigserver?SERVICE=wcs&VERSION=1.0.0&REQUEST=GetCoverage&COVERAGE=tempoepa.l3.pm25.aod_ge&FORMAT=netcdf-coards&TIME=2023-08-02T00:00:00Z/2023-08-03T23:59:59Z&BBOX=-77,36,-75,38&CORNERS=1' > junk ; echo $? ; /rsig/current/code/bin/Linux.x86_64/ncdump -h junk
+
+sleep 2 ; echo ; echo TEST tempoepa.l2.adp.deepblue_aai minimum_quality netcdf-coards ; echo
+curl --silent --retry 0 'https://maple.hesc.epa.gov/rsig/rsigserver?SERVICE=wcs&VERSION=1.0.0&REQUEST=GetCoverage&COVERAGE=tempoepa.l2.adp.deepblue_aai&FORMAT=netcdf-coards&TIME=2023-08-02T00:00:00Z/2023-08-03T23:59:59Z&BBOX=-77,36,-75,38&CORNERS=1&MINIMUM_QUALITY=normal&MAXIMUM_CLOUD_FRACTION=0.15&MAXIMUM_SOLAR_ZENITH_ANGLE=70&ALLOW_NEGATIVE_COUNTS=1' > junk ; echo $? ; /rsig/current/code/bin/Linux.x86_64/ncdump -h junk
+
+
+# NetCDF-IOAPI:
+
+sleep 2 ; echo ; echo TEST tempoepa.l2.aodalh.aod550 netcdf-ioapi ; echo
+curl --silent --retry 0 'https://maple.hesc.epa.gov/rsig/rsigserver?SERVICE=wcs&VERSION=1.0.0&REQUEST=GetCoverage&COVERAGE=tempoepa.l2.aodalh.aod550&FORMAT=netcdf-ioapi&TIME=2023-08-02T00:00:00Z/2023-08-03T23:59:59Z&BBOX=-77,36,-75,38&CORNERS=1&REGRID=weighted&LAMBERT=33,45,-97,40&ELLIPSOID=6370000,6370000&GRID=459,299,-2556000,-1728000,12000,12000&COMPRESS=1' | gzip -d > junk ; echo $? ; /rsig/current/code/bin/Linux.x86_64/ncdump -h junk
+
+sleep 2 ; echo ; echo TEST tempoepa.l3.pm25.aod_ge netcdf-ioapi ; echo
+curl --silent --retry 0 'https://maple.hesc.epa.gov/rsig/rsigserver?SERVICE=wcs&VERSION=1.0.0&REQUEST=GetCoverage&COVERAGE=tempoepa.l3.pm25.aod_ge&FORMAT=netcdf-ioapi&TIME=2023-08-02T00:00:00Z/2023-08-03T23:59:59Z&BBOX=-77,36,-75,38&CORNERS=1&REGRID=weighted&LAMBERT=33,45,-97,40&ELLIPSOID=6370000,6370000&GRID=459,299,-2556000,-1728000,12000,12000&COMPRESS=1' | gzip -d > junk ; echo $? ; /rsig/current/code/bin/Linux.x86_64/ncdump -h junk
+
+sleep 2 ; echo ; echo TEST tempoepa.l2.adp.deepblue_aai minimum_quality netcdf-ioapi ; echo
+curl --silent --retry 0 'https://maple.hesc.epa.gov/rsig/rsigserver?SERVICE=wcs&VERSION=1.0.0&REQUEST=GetCoverage&COVERAGE=tempoepa.l2.adp.deepblue_aai&FORMAT=netcdf-ioapi&TIME=2023-08-02T00:00:00Z/2023-08-03T23:59:59Z&BBOX=-77,36,-75,38&CORNERS=1&MINIMUM_QUALITY=normal&MAXIMUM_CLOUD_FRACTION=0.15&MAXIMUM_SOLAR_ZENITH_ANGLE=70&ALLOW_NEGATIVE_COUNTS=1&REGRID=weighted&LAMBERT=33,45,-97,40&ELLIPSOID=6370000,6370000&GRID=459,299,-2556000,-1728000,12000,12000&COMPRESS=1' | gzip -d > junk ; echo $? ; /rsig/current/code/bin/Linux.x86_64/ncdump -h junk
+
+
+/bin/rm -f junk
+echo ; echo DONE TEMPOEPA ; echo

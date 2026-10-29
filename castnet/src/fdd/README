@@ -1,0 +1,20 @@
+
+2025-02-28
+plessel.todd@epa.gov 919-541-5500
+
+This directory contains the C source code for the fdd programs.
+The fdd program is used by the run_parallel_swaths C-Shell program.
+
+To compile: ./makeit
+
+Files:
+------
+README           - This file.
+fdd.c            - C source file for fdd.c program (for run_parallel_swaths).
+makeit           - C Shell script to compile the programs.
+
+Running and Program Usage Documentation:
+----------------------------------------
+For fdd program usage documentation simply execute 
+fdd help
+

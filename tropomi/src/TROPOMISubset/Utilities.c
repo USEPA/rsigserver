@@ -12,8 +12,19 @@ STATUS: unreviewed tested
 #include <assert.h>    /* For assert(). */
 #include <stdio.h>     /* For FILE, stderr, fprintf(). */
 #include <stdlib.h>    /* For malloc(), free(). */
+#include <string.h>    /* For memset(). */
+#include <time.h>      /* For time(), gmtime_r(). */
 #include <sys/types.h> /* For struct stat. */
 #include <sys/stat.h>  /* For stat(). */
+
+#ifdef _WIN32
+/* gmtime_r() is missing, just take a chance on using gmtime(). */
+static struct tm* gmtime_r( const time_t* clock, struct tm* result ) {
+  const struct tm* const copy = gmtime( clock ); /* HACK: not thread-safe! */
+  memcpy( result, copy, sizeof (struct tm) );
+  return result;
+}
+#endif
 
 #include "Utilities.h" /* For public interface. */
 
@@ -893,6 +904,53 @@ int isValidYYYYMMDDHH( const int yyyymmddhh ) {
 
 
 
+/******************************************************************************
+PURPOSE: incrementHours - Increment yyyymmddhh by hours.
+INPUTS:  const int yyyymmddhh   Timestamp to increment.
+         const int hours        Number of hours to increment.
+RETURNS: int incremented timestamp.
+******************************************************************************/
+
+int incrementHours( const int yyyymmddhh, const int hours ) {
+  int result = yyyymmddhh;
+  assert( isValidYYYYMMDDHH( yyyymmddhh ) ); assert( hours >= 0 );
+
+  if ( hours > 0 ) {
+    int hour = 0;
+    int yyyy = yyyymmddhh / 1000000;
+    int mm   = yyyymmddhh / 10000 % 100;
+    int dd   = yyyymmddhh / 100 % 100;
+    int hh   = yyyymmddhh % 100;
+    int leap = isLeapYear( yyyy );
+
+    for ( hour = 0; hour < hours; ++hour ) {
+      ++hh;
+
+      if ( hh > 23 ) {
+        hh = 0;
+        ++dd;
+
+        if ( dd > daysPerMonth[ leap ][ mm - 1 ] ) {
+          dd = 1;
+          ++mm;
+
+          if ( mm > 12 ) {
+            mm = 1;
+            ++yyyy;
+            leap = isLeapYear( yyyy );
+          }
+        }
+      }
+    }
+
+    result = yyyy * 1000000 + mm * 10000 + dd * 100 + hh;
+  }
+
+  assert( isValidYYYYMMDDHH( result ) );
+  return result;
+}
+
+
 
 /******************************************************************************
 PURPOSE: isValidYYYYMMDDHHMM - Is the timestamp valid?
@@ -966,6 +1024,79 @@ long long convertTimestamp( const long long yyyymmddhhmm ) {
   }
 
   assert( isValidYYYYDDDHHMM( result ) );
+  return result;
+}
+
+
+
+/******************************************************************************
+PURPOSE: secondsFrom1970 - Convert yyyymmddhh to seconds from 1970-01-01 UTC.
+INPUTS:  const int yyyymmddhh  Timestamp to convert.
+RETURNS: long long  Seconds since 1970-01-01T00:00:00-0000.
+******************************************************************************/
+
+long long secondsFrom1970( const int yyyymmddhh ) {
+  long long result = 0;
+  assert( isValidYYYYMMDDHH( yyyymmddhh ) );
+
+  {
+    const int yyyy = yyyymmddhh / 1000000;
+    const int mm = yyyymmddhh / 10000 % 100;
+    const int dd = yyyymmddhh / 100 % 100;
+    const int hh = yyyymmddhh % 100;
+    time_t tSeconds = 0;
+    struct tm t;
+    memset( &t, 0, sizeof t );
+    t.tm_hour = hh;
+    t.tm_mday = dd;
+    t.tm_mon = mm - 1;
+    t.tm_year = yyyy - 1900;
+    t.tm_zone = "UTC";
+    tSeconds = timegm( &t );
+
+    if ( tSeconds > 0 ) {
+      result = (long long) tSeconds;
+    }
+  }
+
+  return result;
+}
+
+
+
+/******************************************************************************
+PURPOSE: yyyymmddhhmmFromSeconds - Convert seconds from 1970 to date-time.
+INPUTS:  const long long seconds  Seconds to convert.
+RETURNS: long long yyyymmddhhmm timestamp.
+******************************************************************************/
+
+long long yyyymmddhhmmFromSeconds( const long long seconds ) {
+  long long result = 0;
+  assert( seconds > 0 );
+
+  {
+    time_t tSeconds = (time_t) seconds;
+    struct tm t;
+    memset( &t, 0, sizeof t );
+
+    if ( gmtime_r( &tSeconds, &t ) ) {
+      const int yyyy = t.tm_year + 1900;
+      const int mm   = t.tm_mon + 1;
+      const int dd   = t.tm_mday;
+      const int hh   = t.tm_hour;
+      const int min  = t.tm_min;
+      result = yyyy;
+      result *= 100;
+      result += mm;
+      result *= 100;
+      result += dd;
+      result *= 100;
+      result += hh;
+      result *= 100;
+      result += min;
+    }
+  }
+
   return result;
 }
 

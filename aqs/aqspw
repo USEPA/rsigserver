@@ -39,24 +39,23 @@ delete @ENV{ 'PATH', 'IFS', 'CDPATH', 'ENV', 'BASH_ENV' };
 ############################## TUNABLE CONSTANTS #############################
 
 
-my $debugging = 0; # 1 = print debug messages to STDERR.
+my $debugging = 1; # 1 = print debug messages to STDERR.
 
 # Database-specific parameters:
 
 my $database_env_variable = 'ORACLE_HOME';
 my $database_env_value = '/usr/lib/oracle/xe/app/oracle/product/10.2.0/client';
 # DB, account and password:
-my $aqs_database =
-  'DBI:Oracle:service_name=aqsprod.vmaqs7;' .
-  'host=vmaqs7.rtpnc.epa.gov;port=1521';
-my $datamart_database =
-  'DBI:Oracle:service_name=thor.vmaqsmart7;' .
-  'host=vmaqsmart7.rtpnc.epa.gov;port=1521';
-my $database_account = 'ACCOUNT'; # Read-only DB access.
+my $database =
+  'DBI:Oracle:service_name=aqsprod.ncceastdb02;' .
+  'host=ncceastdb02-vip.rtpnc.epa.gov;port=1521';
+
+my $database_account = 'cws'; # Read-only DB access.
 # DB PW expires every 90 days.
-my $old_database_password = 'OLD_PASSWORD'; # UGLY hard-coded, unencrypted pw!
-my $new_database_password = 'NEW_PASSWORD'; # UGLY hard-coded, unencrypted pw!
+my $old_database_password = 'ResetJun032026'; # UGLY hard-coded, unencrypted pw!
+my $new_database_password = 'ResetAug262026'; # UGLY hard-coded, unencrypted pw!
 # Call Tom Conklin 919-294-0120 conklin.tom@epa.gov to reset timed-out db pw.
+# Or   Nick Mangus 919-541-5549 mangus.nick@epa.gov
 my $database_query =
   "ALTER USER $database_account IDENTIFIED BY $new_database_password " .
   "REPLACE $old_database_password"; # REPLACE clause is needed in Oracle 9.2+.
@@ -69,8 +68,7 @@ main();
 
 sub main {
   %ENV = (); # Unset all environment variables.
-  reset_database_password( $datamart_database );
-  reset_database_password( $aqs_database );
+  reset_database_password( $database );
   delete $ENV{ $database_env_variable };
   exit 0;
 }

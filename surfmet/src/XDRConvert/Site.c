@@ -1542,8 +1542,13 @@ static Integer writeRegriddedIOAPI( const Site* site,
   PRE02( isValidSite( site ), isValidParameters( parameters ) );
 
   Integer result = 0;
+  const Grid* const grid = parameters->grid;
+  const Integer totalGridCells =
+    grid->layers( grid ) * grid->rows( grid ) * grid->columns( grid );
   const Integer fileSizeEstimate =
-    site->totalRegriddedPoints * 4 * 4 + 10000; /* lon, lat, var, var2 + hdr */
+    site->timesteps * totalGridCells *
+    ( 4 + 1 + 2 ) * 4 + 10000;
+    /* lon,lat,elv,var,var2,tflag,hdr */
   const Integer create64BitFile = fileSizeEstimate > TWO_GB;
   Integer file =
     createNetCDFFile( parameters->netcdfFileName, create64BitFile );

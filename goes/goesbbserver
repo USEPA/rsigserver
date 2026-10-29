@@ -1,0 +1,507 @@
+#!/usr/bin/perl -wT
+
+##############################################################################
+# PURPOSE: goesbbserver - Serve GOESBB site data, subsetted by date/time range,
+#          variable, and longitude-latitude box, in ASCII, XDR, original,
+#          NetCDF-COARDS, and NetCDF-IOAPI formats for use by other programs
+#          (e.g., via curl).
+#
+# NOTES:   Server is WCS-compliant:
+#          https://www.opengeospatial.org/standards/wcs
+#          https://datafed.net/xs/OpenGIS/wcs/1.0.0/
+#          and modeled after a similar webserver application:
+#          https://webapps.datafed.net/ogc_EPA.wsfl
+#
+#          Launches the C program GOESBBSubset which streams data on STDOUT.
+#
+#          Data comes from:
+#          https://satepsanone.nesdis.noaa.gov/pub/FIRE/BBEP-geo
+#
+#          Example:
+#
+#          curl -k --silent --retry 0 'https://ofmpub.epa.gov/rsig/rsigserver?\
+#                    SERVICE=wcs&\
+#                    VERSION=1.0.0&\
+#                    REQUEST=GetCoverage&\
+#                    COVERAGE=goesbb.pm25_emission\
+#                    TIME=2018-11-09T00:00:00Z/2018-11-10T23:59:59Z&\
+#                    BBOX=-126,24,-60,50&\
+#                    FORMAT=ascii'
+#
+# HISTORY: 2007-10-22 plessel.todd@epa.gov 1-919-541-5500
+#
+# STATUS:  unreviewed tested
+##############################################################################
+
+use strict;
+#BEGIN { push @INC, '/Users/plessel/projects/rsig/code/perl'; }
+BEGIN { push @INC, '/data/Apache/cgi-bin'; }
+use emvl; # Local OGC-WCS query string parsing and printing utility functions.
+pop @INC;
+
+package main;
+$| = 1; # Turn off output buffering so messages appear in correct order.
+alarm( 3600 ); # Kill process after 1 hour. Legitimate usage could be an hour!
+# Restrict PATH and ENV. (But before popen, ENV is cleared!)
+delete @ENV{ 'PATH', 'IFS', 'CDPATH', 'ENV', 'BASH_ENV' };
+
+############################## TUNABLE CONSTANTS #############################
+
+emvl::set_debugging( 0 ); # 1 = print debug messages to STDERR logs/error_log
+
+my @pathed_program_parts = split( /\//, $0 );
+my $program_name = $pathed_program_parts[ @pathed_program_parts - 1 ];
+
+my $data_source = 'GOESBB';
+my $desc = 'https://satepsanone.nesdis.noaa.gov/pub/FIRE/BBEP-geo,GOESBBSubset';
+my $data_directory  = '/data/GOESBB/data';
+my $temp_directory = '/data/tmp';
+my $temp_file_name = "$temp_directory/junk_goesbb.$$"; # List of data files.
+my $bindir     = '/rsig/current/code/bin/Linux.x86_64';
+my $subsetter  = "$bindir/GOESBBSubset";
+my $xdrconvert = "$bindir/XDRConvert";
+my $compressor = "/usr/bin/gzip -c -1";
+my $tar        = "/usr/bin/tar -zcO";
+my $xargs      = "/usr/bin/xargs";
+my $cat        = "/bin/cat";
+
+# Output messages when REQUEST=GetMegoesbbata.
+# Print this message first:
+
+my $metadata_content = '
+NOAA GOESBB global satellite measured fire pollutant data accessed using RSIG.
+NOAA: https://satepsanone.nesdis.noaa.gov/pub/FIRE/BBEP-geo
+RSIG: https://www.epa.gov/rsig
+';
+
+# If FORMAT=original then print this message second:
+
+my $metadata_content_original = '
+The list of original data files are shown below.
+';
+
+# Else FORMAT!=original then print this message second:
+
+my $metadata_content_processed = '
+Data processing was done using the RSIG programs GOESBBSubset and XDRConvert.
+GOESBBSubset is used to subset (by variable, lon-lat box and time range)
+and reorganize/reformat and filter the data.
+XDRConvert is optionally used to regrid, aggregate and reformat the data
+to other file formats.
+The list of original data files and the RSIG command used to process them
+are shown below.
+';
+
+# All data variables are available within this date range and bounds:
+
+my $begin_date = '2018-11-08';
+my $end_date   = '2022-10-31';
+my $west_bound = -180;
+my $east_bound = -50;
+my $south_bound = 0;
+my $north_bound = 70;
+
+my @coverage_metadata  = (
+  {
+    name => 'Burned_area',
+    units => 'km2',
+    description =>
+      'UTC hourly satellite-derived surface ' .
+      'burned area ' .
+      'in km2.',
+    begin_date => $begin_date,
+    end_date => $end_date,
+    west_bound => $west_bound,
+    east_bound => $east_bound,
+    south_bound => $south_bound,
+    north_bound => $north_bound
+  },
+  {
+    name => 'PM25_emission',
+    units => 'kg',
+    description =>
+      'UTC hourly satellite-derived surface ' .
+      'aerosol particulates (not more than 2.5 microns in diameter) ' .
+      'emissions from fire' .
+      'in kg.',
+    begin_date => $begin_date,
+    end_date => $end_date,
+    west_bound => $west_bound,
+    east_bound => $east_bound,
+    south_bound => $south_bound,
+    north_bound => $north_bound
+  },
+  {
+    name => 'CO_emission',
+    units => 'kg',
+    description =>
+      'UTC hourly satellite-derived surface ' .
+      'carbon monoxide ' .
+      'emissions from fire ' .
+      'in kg.',
+    begin_date => $begin_date,
+    end_date => $end_date,
+    west_bound => $west_bound,
+    east_bound => $east_bound,
+    south_bound => $south_bound,
+    north_bound => $north_bound
+  },
+  {
+    name => 'CO2_emission',
+    units => 'kg',
+    description =>
+      'UTC hourly satellite-derived surface ' .
+      'carbon dioxide ' .
+      'emissions from fire ' .
+      'in kg.',
+    begin_date => $begin_date,
+    end_date => $end_date,
+    west_bound => $west_bound,
+    east_bound => $east_bound,
+    south_bound => $south_bound,
+    north_bound => $north_bound
+  },
+  {
+    name => 'CO2_emission',
+    units => 'kg',
+    description =>
+      'UTC hourly satellite-derived surface ' .
+      'carbon dioxide ' .
+      'emissions from fire ' .
+      'in kg.',
+    begin_date => $begin_date,
+    end_date => $end_date,
+    west_bound => $west_bound,
+    east_bound => $east_bound,
+    south_bound => $south_bound,
+    north_bound => $north_bound
+  },
+  {
+    name => 'CH4_emission',
+    units => 'kg',
+    description =>
+      'UTC hourly satellite-derived surface ' .
+      'methane ' .
+      'emissions from fire ' .
+      'in kg.',
+    begin_date => $begin_date,
+    end_date => $end_date,
+    west_bound => $west_bound,
+    east_bound => $east_bound,
+    south_bound => $south_bound,
+    north_bound => $north_bound
+  },
+  {
+    name => 'TNMHC_emission',
+    units => 'kg',
+    description =>
+      'UTC hourly satellite-derived surface ' .
+      'Total Non-Methane Hydrocarbons ' .
+      'emissions from fire ' .
+      'in kg.',
+    begin_date => $begin_date,
+    end_date => $end_date,
+    west_bound => $west_bound,
+    east_bound => $east_bound,
+    south_bound => $south_bound,
+    north_bound => $north_bound
+  },
+  {
+    name => 'NH3_emission',
+    units => 'kg',
+    description =>
+      'UTC hourly satellite-derived surface ' .
+      'ammonia ' .
+      'emissions from fire ' .
+      'in kg.',
+    begin_date => $begin_date,
+    end_date => $end_date,
+    west_bound => $west_bound,
+    east_bound => $east_bound,
+    south_bound => $south_bound,
+    north_bound => $north_bound
+  },
+  {
+    name => 'N2O_emission',
+    units => 'kg',
+    description =>
+      'UTC hourly satellite-derived surface ' .
+      'nitrous oxide ' .
+      'emissions from fire ' .
+      'in kg.',
+    begin_date => $begin_date,
+    end_date => $end_date,
+    west_bound => $west_bound,
+    east_bound => $east_bound,
+    south_bound => $south_bound,
+    north_bound => $north_bound
+  },
+  {
+    name => 'NOX_emission',
+    units => 'kg',
+    description =>
+      'UTC hourly satellite-derived surface ' .
+      'nitrogen oxides ' .
+      'emissions from fire ' .
+      'in kg.',
+    begin_date => $begin_date,
+    end_date => $end_date,
+    west_bound => $west_bound,
+    east_bound => $east_bound,
+    south_bound => $south_bound,
+    north_bound => $north_bound
+  },
+  {
+    name => 'SO2_emission',
+    units => 'kg',
+    description =>
+      'UTC hourly satellite-derived surface ' .
+      'sulfur dioxide ' .
+      'emissions from fire ' .
+      'in kg.',
+    begin_date => $begin_date,
+    end_date => $end_date,
+    west_bound => $west_bound,
+    east_bound => $east_bound,
+    south_bound => $south_bound,
+    north_bound => $north_bound
+  },
+  {
+    name => 'Ecosystem',
+    units => '-',
+    description =>
+      'UTC satellite-derived surface ' .
+      'ecosystem code number.',
+    begin_date => $begin_date,
+    end_date => $end_date,
+    west_bound => $west_bound,
+    east_bound => $east_bound,
+    south_bound => $south_bound,
+    north_bound => $north_bound
+  },
+  {
+    name => 'Fuel_loading',
+    units => 'Mg/km2',
+    description =>
+      'UTC hourly satellite-derived surface ' .
+      'fire fuel loading in megagrams per square kilometer.',
+    begin_date => $begin_date,
+    end_date => $end_date,
+    west_bound => $west_bound,
+    east_bound => $east_bound,
+    south_bound => $south_bound,
+    north_bound => $north_bound
+  },
+  {
+    name => 'Pixel_size',
+    units => 'km2',
+    description =>
+      'UTC hourly satellite-derived surface ' .
+      'pixel size of detecting instrument.',
+    begin_date => $begin_date,
+    end_date => $end_date,
+    west_bound => $west_bound,
+    east_bound => $east_bound,
+    south_bound => $south_bound,
+    north_bound => $north_bound
+  }
+);
+
+
+################################## VARIABLES #################################
+
+my $data_files = ''; # List of pathed names of data files read by subsetter.
+
+################################## ROUTINES ##################################
+
+
+main();
+
+
+sub main {
+  my $result = 0;
+
+  # Before calling emvl::parse_url(), specify various options so the default
+  # functions work:
+
+  emvl::set_source( $data_source );
+  emvl::set_coverage_metadata( \@coverage_metadata );
+
+  if ( ! emvl::parse_url() ) {
+    print "Content-type: text/plain; charset=iso-8859-1\n\n"; # For webserver
+  } else {
+    my $request = emvl::get_request();
+    my $format = emvl::get_format();
+
+    if ( $request eq 'getcapabilities' ) {
+      print "Content-type: text/xml; charset=iso-8859-1\n\n"; # For webserver
+      emvl::print_capabilities();
+      $result = 1;
+    } elsif ( $request eq 'describecoverage' ) {
+      print "Content-type: text/xml; charset=iso-8859-1\n\n"; # For webserver
+      emvl::print_coverage_description();
+      $result = 1;
+    } elsif ( $request eq 'getcoverage' ) {
+      my $header = emvl::get_content_type_header(); # Based on parsed FORMAT.
+      print "$header\n\n";
+      compute_data_files(); # Initializes global $data_files.
+
+      my $temp_file = 0;
+      open( temp_file, ">$temp_file_name" );
+
+      if ( $temp_file >= 0 ) {
+        print temp_file $data_files;
+        close( temp_file );
+
+
+        my $command = construct_command();
+        $result = execute_command( $command );
+
+        if ( ! emvl::get_debugging() ) {
+          unlink( $temp_file_name ); # Remove temporary file.
+        }
+      }
+    } elsif ( $request eq 'getmetadata' ) {
+      print "Content-type: text/plain; charset=iso-8859-1\n\n"; # For webserver
+      compute_data_files(); # Initializes global $data_files.
+      my $command = construct_command();
+      print $metadata_content;
+
+      if ( $format eq 'original' ) {
+        print $metadata_content_original;
+        $data_files =~ tr/ /\n/;
+        print "$data_files\n";
+      } else {
+        print $metadata_content_processed;
+        $data_files =~ tr/ /\n/;
+        print "$data_files\n";
+        print "$command\n\n";
+      }
+
+      $result = 1;
+    }
+  }
+
+  $result = 1 - $result; # UNIX: zero is success, non-zero is failure.
+  emvl::debug( "exit result = $result" );
+
+  # Must return some bytes to avoid 30 second timeout delay when unsuccessful:
+
+  if ( $result != 0 ) {
+    print STDOUT "\nFAILED\n";
+  }
+
+  exit $result;
+}
+
+
+
+# Compute data_files from data_directory and time range.
+
+sub compute_data_files {
+  my $yyyymmdd = emvl::get_yyyymmdd1();
+  my $yyyymmdd2 = emvl::get_yyyymmdd2();
+
+  while ( $yyyymmdd <= $yyyymmdd2 ) {
+    my ($yyyy, $mm0, $dd0) = emvl::split_yyyymmdd( $yyyymmdd );
+
+    foreach my $hh_hh ( '00_05', '06_11', '12_17', '18_23' ) {
+      my $file_name  =
+        sprintf( "biomass_burning_%04d%02d%02d_%s.nc",
+                 $yyyy, $mm0, $dd0, $hh_hh );
+      my $data_file = "$data_directory/$yyyy/$file_name";
+
+      if ( -f $data_file ) {
+        $data_files .= "$data_file\n";
+      }
+
+      $yyyymmdd = emvl::increment_date( $yyyymmdd );
+    }
+  }
+}
+
+
+
+# Construct command.
+
+sub construct_command {
+  my $command = '';
+  my $format = emvl::get_format();
+
+  if ( $format eq 'original' ) {
+    $command = "$cat $temp_file_name | $xargs $tar";
+  } else {
+    my $my_xdrconvert = '';
+    my $regrid = emvl::get_regrid();
+
+    if ( $regrid ne '' || $format ne 'xdr' ) {
+      my $xdrconvert_format = emvl::xdrconvert_format();
+      my $regrid_args = emvl::xdrconvert_regrid_args( 0 );
+      $my_xdrconvert = " | $xdrconvert $regrid_args -$xdrconvert_format";
+    }
+
+    my $yyyymmddhh1 = emvl::get_yyyymmddhh1();
+    my $hours = emvl::get_hours();
+    my $bbox = emvl::get_bbox();
+    my $domain_option = "-domain $bbox";
+    $domain_option =~ tr/,/ /;
+    my $variable = emvl::get_coverage();
+    $variable =~ s/PM25/PM2.5/g; # Change PM25_emission to PM2.5_emission.
+    my $my_compressor = emvl::get_compress() ? " | $compressor" : '';
+
+    $command =
+      $subsetter .
+      " -files $temp_file_name " .
+      " -tmpdir $temp_directory" .
+      " -desc $desc " .
+      " -timestamp $yyyymmddhh1 -hours $hours " .
+      " -variable $variable " .
+      " $domain_option " .
+      "$my_xdrconvert$my_compressor";
+  }
+
+  return $command;
+}
+
+
+
+# Execute command and echo its output to STDOUT.
+# E.g., execute_command( '/bin/ls' );
+
+sub execute_command {
+  my $command = shift;
+  my $result = 0;
+  my $the_pipe = 0;
+
+  # -T flag requires untainting $command by matching a minimal regex needed for
+  # system commands used by this program.
+
+  if ( $command =~ m#^(/[\w-]+/[\w -/.:,'@|]+)$# )
+  {
+    $command = $1; # Re-assign first match, which is enough to satisfy -T.
+    emvl::debug( "$0 executing command = $command" );
+    %ENV = (); # Unset all environment variables prior to popen.
+    # Complicated, supposedly safer way to open a readable pipe to command:
+    my $pid = open( the_pipe, "-|" );
+
+    if ( ! defined( $pid ) ) {
+      die "Couldn't open pipe to subprocess";
+    } elsif ( $pid ) { # Parent process.
+
+      while ( <the_pipe> ) {
+        print;
+      }
+
+      close( the_pipe );
+      $result = ! $?;
+    } else { # Child process.
+      exec( $command ) or die "can't exec program: $!";
+    }
+  } else {
+    print STDERR "\n$0: command contains invalid characters.\n";
+  }
+
+  return $result;
+}
+
+

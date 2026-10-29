@@ -46,7 +46,7 @@ my $debugging = 0; # 1 = print debug messages to STDERR logs/error_log.
 
 # Server where this program is installed:
 
-my $server_path = 'https://YOUR_WEBSERVER_HOST/cgi-bin';
+my $server_path = 'https://maple.hesc.epa.gov/cgi-bin';
 my $curl = '/usr/bin/curl --silent --retry 0 -L --tcp-nodelay --max-time 3600';
 my $curl_command =
   "$curl '$server_path/airnowserver?SERVICE=wcs&VERSION=1.0.0&" .
@@ -156,6 +156,13 @@ sub main {
 
   $result = 1 - $result; # UNIX: zero is success, non-zero is failure.
   debug( "exit result = $result" );
+
+  # Must return some bytes to avoid 30 second timeout delay when unsuccessful:
+
+  if ( $result != 0 ) {
+    print STDOUT "\nFAILED\n";
+  }
+
   exit $result;
 }
 
@@ -693,7 +700,7 @@ sub execute_airnow_command {
         $result = 1;
       }
 
-      close( the_pipe ) or die $!;
+      close( the_pipe );
     } else { # Child process.
       exec( $command ) or die "can't exec program: $!";
     }
@@ -764,7 +771,7 @@ sub execute_command {
         print;
       }
 
-      close( the_pipe ) or die $!;
+      close( the_pipe );
       $result = ! $?;
     } else { # Child process.
       exec( $command ) or die "can't exec program: $!";

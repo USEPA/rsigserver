@@ -1,0 +1,58 @@
+#!/bin/csh -f
+
+echo ; echo TEST SMAP ; echo
+
+if ( 0 ) then
+
+sleep 2 ; echo ; echo TEST GetCapabilities ; echo
+curl --silent --retry 0 'https://maple.hesc.epa.gov/rsig/rsigserver?SERVICE=wcs&VERSION=1.0.0&REQUEST=GetCapabilities' > junk ; head junk ; echo '...' ; grep -i smap junk
+
+sleep 2 ; echo ; echo TEST DescribeCoverage ; echo
+curl --silent --retry 0 'https://maple.hesc.epa.gov/rsig/rsigserver?SERVICE=wcs&VERSION=1.0.0&REQUEST=DescribeCoverage' > junk ; head junk ; echo '...' ; grep -i smap junk
+
+endif
+
+
+
+# DescribeCoverage:
+
+sleep 2 ; echo ; echo TEST DescribeCoverage smap.daily_salinity ; echo
+curl --silent --retry 0 'https://maple.hesc.epa.gov/rsig/rsigserver?SERVICE=wcs&VERSION=1.0.0&REQUEST=DescribeCoverage&COVERAGE=smap.daily_salinity' > junk ; echo $? ; cat junk
+
+sleep 2 ; echo ; echo TEST DescribeCoverage smap.monthly_salinity ; echo
+curl --silent --retry 0 'https://maple.hesc.epa.gov/rsig/rsigserver?SERVICE=wcs&VERSION=1.0.0&REQUEST=DescribeCoverage&COVERAGE=smap.monthly_salinity' > junk ; echo $? ; cat junk
+
+
+
+# GetMetadata:
+
+sleep 2 ; echo ; echo TEST GetMetadata smap.daily_salinity ; echo
+curl --silent --retry 0 'https://maple.hesc.epa.gov/rsig/rsigserver?SERVICE=wcs&VERSION=1.0.0&REQUEST=GetMetadata&FORMAT=original&COVERAGE=smap.daily_salinity&TIME=2025-07-15T00:00:00Z/2025-07-15T23:59:59Z&BBOX=-75,30,-65,50' > junk ; echo $? ; cat junk
+
+sleep 2 ; echo ; echo TEST GetMetadata smap.daily_salinity ; echo
+curl --silent --retry 0 'https://maple.hesc.epa.gov/rsig/rsigserver?SERVICE=wcs&VERSION=1.0.0&REQUEST=GetMetadata&FORMAT=bin&COVERAGE=smap.daily_salinity&TIME=2025-07-15T00:00:00Z/2025-07-15T23:59:59Z&BBOX=-75,30,-65,50' > junk ; echo $? ; cat junk
+
+sleep 2 ; echo ; echo TEST GetMetadata smap.monthly_salinity ; echo
+curl --silent --retry 0 'https://maple.hesc.epa.gov/rsig/rsigserver?SERVICE=wcs&VERSION=1.0.0&REQUEST=GetMetadata&FORMAT=bin&COVERAGE=smap.monthly_salinity&TIME=2025-07-15T00:00:00Z/2025-07-15T23:59:59Z&BBOX=-75,30,-65,50' > junk ; echo $? ; cat junk
+
+
+
+# Original:
+
+sleep 2 ; echo ; echo TEST smap.daily_salinity original ; echo
+curl --silent --retry 0 'https://maple.hesc.epa.gov/rsig/rsigserver?SERVICE=wcs&VERSION=1.0.0&REQUEST=GetCoverage&FORMAT=original&COVERAGE=smap.daily_salinity&TIME=2025-07-15T00:00:00Z/2025-07-15T23:59:59Z&BBOX=-75,30,-65,50' > junk ; echo $? ; tar -ztf junk
+
+
+
+# BIN:
+
+sleep 2 ; echo ; echo TEST smap.daily_salinity bin ; echo
+curl --silent --retry 0 'https://maple.hesc.epa.gov/rsig/rsigserver?SERVICE=wcs&VERSION=1.0.0&REQUEST=GetCoverage&FORMAT=bin&COVERAGE=smap.daily_salinity&TIME=2025-07-15T00:00:00Z/2025-07-15T23:59:59Z&BBOX=-75,30,-65,50' > junk ; echo $? ; head -7 junk
+
+sleep 2 ; echo ; echo TEST smap.monthly_salinity bin ; echo
+curl --silent --retry 0 'https://maple.hesc.epa.gov/rsig/rsigserver?SERVICE=wcs&VERSION=1.0.0&REQUEST=GetCoverage&FORMAT=bin&COVERAGE=smap.monthly_salinity&TIME=2025-07-15T00:00:00Z/2025-07-15T23:59:59Z&BBOX=-75,30,-65,50' > junk ; echo $? ; head -7 junk
+
+
+
+/bin/rm -f junk
+echo ; echo DONE SMAP ; echo

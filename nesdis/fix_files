@@ -1,0 +1,16 @@
+#!/bin/csh -f
+# Process pm25satYYYYMMDD.nc files to M3IO-compliant pm25satYYYYMMDD.ncf
+
+foreach input_file ( /data/NESDIS/pm25sat/????/*.nc )
+  set output_file =  ${input_file}f
+  echo "Processing $input_file into $output_file"
+  /data/NESDIS/hack_pm25sat/hack_pm25sat $input_file
+
+  if ( $status ) then
+    echo "FAILED. Removing $output_file"
+    rm $output_file
+  else
+    ls -l $output_file
+  endif
+end
+

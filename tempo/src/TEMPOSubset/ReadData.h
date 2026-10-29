@@ -29,12 +29,14 @@ extern void closeFile( const int file );
 extern int readFileDimensions( const int file,
                                const char* const product,
                                const char* const variable,
+                               size_t* const layers,
                                size_t* const rows,
                                size_t* const columns );
 
 extern size_t readFileData( const int file,
                             const char* const product,
                             const char* const variable,
+                            const size_t layer,
                             const size_t rows,
                             const size_t columns,
                             const size_t gridSubsetIndices[2][2],

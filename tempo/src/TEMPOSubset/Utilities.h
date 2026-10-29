@@ -106,6 +106,8 @@ extern int fillAndWriteArray( const double value, const size_t count,
 
 extern void rotate8ByteArrayIfLittleEndian( void* array, const size_t count);
 
+extern int fileExists( const char* name );
+
 extern size_t fileSize( const char* name );
 
 extern char* readFile( const char* name, size_t* length );

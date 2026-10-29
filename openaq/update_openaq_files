@@ -1,0 +1,25 @@
+#!/bin/csh -f
+
+###############################################################################
+# PURPOSE: update_openaq_files - Downloads all pathed openaq data file from AWS
+#          that are not already downloaded.
+# NOTES:   The result is a directory structure (under /data/OpenAQ/data/) that
+#          matches the data files on the AWS server.
+#          usage: update_openaq_files
+#          example: nohup update_openaq_file &
+#          Creates the directories and files:
+#          /data/OpenAQ/data/locationid=ID/year=YYYY/month=MM/location-ID-YYYYMMDD.csv.gz
+#          See https://docs.openaq.org/aws/about
+#          The initial run may take a few weeks to finish but, after that,
+#          it should only take a few hours to retrieve the new files that are
+#          added each day.
+#          The downloaded files must remain compressed (to match sync).
+#          The OpenAQSubset program will read and decompress them in-menmory.
+# HISTORY: 2026-01-21 plessel.todd@epa.gov
+###############################################################################
+
+date -u
+/data/TROPOMI/aws/dist/aws s3 sync s3://openaq-data-archive/records/csv.gz/ /data/OpenAQ/data --no-sign-request --exclude "*" --include "locationid=*/year=????/month=??/location-*-????????.csv.gz"
+date -u
+echo Done
+

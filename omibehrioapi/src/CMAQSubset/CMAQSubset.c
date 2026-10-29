@@ -94,6 +94,7 @@ typedef struct {
   int          aggregateMode;               /* 0, ... AGGREGATE_DAILY_MAX8.  */
   int          lonlat;                      /* Output LONGITUDE, LATITUDE?   */
   int          elevation;                   /* Output ELEVATION?             */
+  int          corners;                     /* Output cell lonlat corners?   */
   int          variables;                   /* Count of variables to output. */
   int          subset[DIMENSIONS][2];  /* 1-based [COLUMN..TIME][MIN/MAXIMUM]*/
   const char*  fileNames[ MAX_FILES ];      /* Array of input files.         */
@@ -130,7 +131,7 @@ typedef struct {
   float* heights;        /* " " " height in meters above mean sea level [r*c]*/
   char variableUnits[ MXVARS3 ][ NAMLEN3 + 1 ]; /* Output variable units. */
   char variableDescriptions[ MXVARS3 ][ MXDLEN3 + 1 ]; /* Output var desc. */
-  char* wwindVariable;   /* Input either "WWIND" or "W_VEL". Output "WWIND". */
+  const char* wwindVariable;   /* Input "WWIND" or "W_VEL". Output "WWIND". */
 } Data;
 
 /* Aggregation options: */
@@ -650,6 +651,7 @@ static void printUsage( const char* programName ) {
   fprintf( stderr, "[-integrate_layers]\\\n" );
   fprintf( stderr, "[-lonlat] \\\n" );
   fprintf( stderr, "[-elevation] \\\n" );
+  fprintf( stderr, "[-corners] \\\n" );
   fprintf( stderr, "[-edit] \\\n" );
   fprintf( stderr, "[-list] \\\n" );
   fprintf( stderr, "[-ellipsoid <major_semiaxis> <minor_semiaxis>] \\\n" );
@@ -666,6 +668,7 @@ static void printUsage( const char* programName ) {
   fprintf( stderr, " cannot be used.\n");
   fprintf( stderr, "-lonlat adds variables LONGITUDE LATITUDE in output.\n");
   fprintf( stderr, "-elevation adds variable ELEVATION in output.\n");
+  fprintf( stderr, "-corners outputs variables LONGITUDE_SW .. LATITUDE_NE.\n");
   fprintf( stderr, "-edit enables rename of variable names/units/descriptions\n");
   fprintf( stderr, "of CMAQ EQUATES files (using a built-in table).\n");
   fprintf( stderr, "-list lists variable names\n" );
@@ -813,6 +816,7 @@ static int parseCommandLineOptions( int argc, char* argv[],
     { "-bounds",             0, BOUNDS_TYPE,         4, 0, 0, 0, 0 },
     { "-lonlat",             0, INT_TYPE,            0, 0, 0, 0, 0 },
     { "-elevation",          0, INT_TYPE,            0, 0, 0, 0, 0 },
+    { "-corners",            0, INT_TYPE,            0, 0, 0, 0, 0 },
     { "-aggregate",          0, ENUM_TYPE,           1, 0,AGGREGATE_STRING,0,0},
     { "-list",               0, INT_TYPE,            0, 0, 0, 0, 0 },
     { "-edit",               0, INT_TYPE,            0, 0, 0, 0, 0 },
@@ -859,14 +863,14 @@ static int parseCommandLineOptions( int argc, char* argv[],
     options[ 14 ].values = &arguments->bounds[ 0 ][ 0 ];
     options[ 15 ].values = 0;
     options[ 16 ].values = 0;
-    options[ 17 ].values = &arguments->aggregateMode;
-    options[ 18 ].values = 0;
+    options[ 17 ].values = 0;
+    options[ 18 ].values = &arguments->aggregateMode;
     options[ 19 ].values = 0;
-    options[ 20 ].values = &arguments->outputFileName;
-
-    options[ 21 ].values = 0;
-    options[ 22 ].values = &arguments->lsDir;
-    options[ 23 ].values = 0;
+    options[ 20 ].values = 0;
+    options[ 21 ].values = &arguments->outputFileName;
+    options[ 22 ].values = 0;
+    options[ 23 ].values = &arguments->lsDir;
+    options[ 24 ].values = 0;
 
     result =
       parseOptions( argc, argv, sizeof options / sizeof *options, options );
@@ -874,13 +878,13 @@ static int parseCommandLineOptions( int argc, char* argv[],
     {
       int hack = 0; /* -files is required unless -pwd, -ls, -version options.*/
 
-      if ( options[ 21 ].parsed ) {
+      if ( options[ 22 ].parsed ) {
         arguments->auxMode = PRINT_WORKING_DIRECTORY;
         hack = 1;
-      } else if ( options[ 22 ].parsed ) {
+      } else if ( options[ 23 ].parsed ) {
         arguments->auxMode = DIRECTORY_LISTING;
         hack = 1;
-      } else if ( options[ 23 ].parsed ) {
+      } else if ( options[ 24 ].parsed ) {
         arguments->auxMode = VERSION;
         hack = 1;
       }
@@ -908,15 +912,16 @@ static int parseCommandLineOptions( int argc, char* argv[],
         arguments->format = FORMAT_IOAPI; /* Default to IOAPI. */
       }
 
-      if ( options[ 18 ].parsed ) {
+      if ( options[ 19 ].parsed ) {
         arguments->auxMode = LIST;
       } else if ( options[ 8 ].parsed ) {
         arguments->auxMode = INTEGRATE;
       }
 
-      edit = options[ 19 ].parsed;
+      edit = options[ 20 ].parsed;
       arguments->lonlat    = options[ 15 ].parsed;
       arguments->elevation = options[ 16 ].parsed;
+      arguments->corners   = AND2( arguments->lonlat, options[ 17 ].parsed );
 
       CHECK( options[ 4 ].parsed >= 2 ); /* -files file_name is required. */
       arguments->fileCount = options[ 4 ].parsed - 1;
@@ -1034,6 +1039,7 @@ static int isValidArguments( const Arguments* const arguments ) {
   if ( result ) {
     result = AND2( result, IS_BOOL( arguments->lonlat ) );
     result = AND2( result, IS_BOOL( arguments->elevation ) );
+    result = AND2( result, IS_BOOL( arguments->corners ) );
     result = AND2( result, IN_RANGE( arguments->format, 0, FORMATS - 1 ) );
     result = AND2( result, IN4( arguments->auxMode, 0, INTEGRATE, WIND ) );
     result = AND2( result,
@@ -3215,10 +3221,24 @@ static int writeXDRData( Data* const data, FILE* const output ) {
       aggregateAllSize ? subsetData + subsetSize : 0;
     int* const aggregateAllCounts =
       aggregateAllSize ? (int*) aggregateAllData + aggregateAllSize : 0;
-    const int variables = arguments->variables + (arguments->auxMode == WIND);
+    const char* const coordinateNames[] = {
+      "LONGITUDE",
+      "LATITUDE",
+      "LONGITUDE_SW",
+      "LONGITUDE_SE",
+      "LONGITUDE_NW",
+      "LONGITUDE_NE",
+      "LATITUDE_SW",
+      "LATITUDE_SE",
+      "LATITUDE_NW",
+      "LATITUDE_NE",
+      "ELEVATION"
+    };
     const int coordinateVariables =
-      2 * arguments->lonlat + arguments->elevation;
-    int variable = -coordinateVariables;
+      sizeof coordinateNames / sizeof *coordinateNames;
+    const int variables =
+      coordinateVariables + arguments->variables + (arguments->auxMode == WIND);
+    int variable = 0;
     const int outputTimesteps = data->outputTimesteps;
 
     DEBUG( fprintf( stderr, "\n====writeXDRData(): "
@@ -3226,53 +3246,75 @@ static int writeXDRData( Data* const data, FILE* const output ) {
                     "outputTimesteps = %d\n",
                     arguments->auxMode, timestepHours, outputTimesteps ); )
     do {
+      const int dataVariable = variable - coordinateVariables;
       const char* const variableName =
-        variable == -3 ? "LONGITUDE" :
-        variable == -2 ?
-          ( coordinateVariables == 2 ? "LONGITUDE" : "LATITUDE" ) :
-        variable == -1 ?
-          ( coordinateVariables == 2 ? "LATITUDE" : "ELEVATION" ) :
-        ( variable < arguments->variables ?
-            arguments->variableNames[ variable ] : data->wwindVariable );
-      int yyyymmddhh = yyyymmddhh1;
-      int timestep = 0;
+        variable < coordinateVariables ? coordinateNames[ variable ]
+        : dataVariable < arguments->variables ?
+          arguments->variableNames[ dataVariable ]
+        : data->wwindVariable;
+      int writeVariable = 1;
 
-      do {
+      if ( variable < coordinateVariables ) {
 
-        if ( ! data->isHourlyTimesteps ) {
-          yyyymmddhh =
-            data->fileTimeRange[ timestep + data->skipFileCount ][ 0 ];
-        }
+        if ( ! arguments->lonlat ) {
 
-        result =
-          readSubset( data, variableName, yyyymmddhh,
-                      subsetData, subsetZF, subsetDENS );
-
-        if ( result ) {
-
-          if ( AND3( arguments->aggregateMode,
-                     strcmp( variableName, "LONGITUDE" ),
-                     strcmp( variableName, "LATITUDE" ) ) ) {
-            aggregateData( arguments->aggregateMode, subsetHours,
-                           writeSubsetCells, subsetData,
-                           aggregateAllData, aggregateAllCounts );
+          if ( strstr( variableName, "TUDE" ) ) {
+            writeVariable = 0;
           }
-
-          if ( ! aggregateAllData ) {
-            result = writeFloats( writeSubsetCells, subsetData, output );
-            ++timestep;
-          }
+        } else if ( AND2( ! arguments->corners,
+                            strchr( variableName, '_' ) ) ) {
+          writeVariable = 0;
         }
 
-        if ( data->isHourlyTimesteps ) {
-          yyyymmddhh = incrementHours( yyyymmddhh, timestepHours );
+        if ( AND2( ! arguments->elevation,
+                   ! strcmp( variableName, "ELEVATION" ) ) ) {
+          writeVariable = 0;
         }
-      } while ( AND3( result, timestep < outputTimesteps,
-                     yyyymmddhh <= yyyymmddhh2 ) );
-
-      if ( aggregateAllData ) {
-        result = writeFloats( writeSubsetCells, aggregateAllData, output );
       }
+
+      DEBUG( fprintf( stderr, "write %s = %d\n", variableName, writeVariable);)
+
+      if ( writeVariable ) {
+        int yyyymmddhh = yyyymmddhh1;
+        int timestep = 0;
+
+        do {
+
+          if ( ! data->isHourlyTimesteps ) {
+            yyyymmddhh =
+              data->fileTimeRange[ timestep + data->skipFileCount ][ 0 ];
+          }
+
+          result =
+            readSubset( data, variableName, yyyymmddhh,
+                        subsetData, subsetZF, subsetDENS );
+
+          if ( result ) {
+
+            if ( AND3( arguments->aggregateMode,
+                       ! strstr( variableName, "LONGITUDE" ),
+                       ! strstr( variableName, "LATITUDE" ) ) ) {
+              aggregateData( arguments->aggregateMode, subsetHours,
+                             writeSubsetCells, subsetData,
+                             aggregateAllData, aggregateAllCounts );
+            }
+
+            if ( ! aggregateAllData ) {
+              result = writeFloats( writeSubsetCells, subsetData, output );
+              ++timestep;
+            }
+          }
+
+          if ( data->isHourlyTimesteps ) {
+            yyyymmddhh = incrementHours( yyyymmddhh, timestepHours );
+          }
+        } while ( AND3( result, timestep < outputTimesteps,
+                       yyyymmddhh <= yyyymmddhh2 ) );
+
+        if ( aggregateAllData ) {
+          result = writeFloats( writeSubsetCells, aggregateAllData, output );
+        }
+      } /* If writeVariable. */
 
       ++variable;
     } while ( AND2( result, variable < variables ) );
@@ -3339,8 +3381,8 @@ static int writeXDRHeader( const Data* const data, FILE* const output ) {
         COUNT_IN_RANGE( arguments->subset[ COLUMN ][ MINIMUM ],
                         arguments->subset[ COLUMN ][ MAXIMUM ] );
       const int outputVariables =
-        arguments->lonlat * 2 + arguments->elevation + arguments->variables +
-        ( arguments->auxMode == WIND );
+        arguments->lonlat * 2 + arguments->corners * 8 + arguments->elevation +
+        arguments->variables + ( arguments->auxMode == WIND );
       const int yyyymmddhh = data->yyyymmddhh;
       const int timesteps  = data->outputTimesteps;
 
@@ -3607,7 +3649,8 @@ static int writeXDRGrid( const Data* const data, FILE* const output ) {
 
 
 /******************************************************************************
-PURPOSE: writeXDRVariableNamesAndUnits - Write part of XDR header for variable
+PURPOSE:
+ - Write part of XDR header for variable
          names and units.
 INPUTS:  const Data* const data    Data structure to write.
 OUTPUTS: FILE* const output        File to write to.
@@ -3626,6 +3669,15 @@ static int writeXDRVariableNamesAndUnits( const Data* const data,
 
     if ( arguments->lonlat ) {
       result = fputs( "LONGITUDE LATITUDE ", output ) != EOF;
+
+      if ( result ) {
+
+        if ( arguments->corners ) {
+          result = fputs( "LONGITUDE_SW LONGITUDE_SE LONGITUDE_NW LONGITUDE_NE "
+                          "LATITUDE_SW LATITUDE_SE LATITUDE_NW LATITUDE_NE ",
+                          output ) != EOF;
+        }
+      }
     }
 
     if ( result ) {
@@ -3664,6 +3716,14 @@ static int writeXDRVariableNamesAndUnits( const Data* const data,
 
           if ( arguments->lonlat ) {
             result = fputs( "deg deg ", output ) != EOF;
+
+            if ( result ) {
+
+              if ( arguments->corners ) {
+                result =
+                  fputs( "deg deg deg deg deg deg deg deg ", output ) != EOF;
+              }
+            }
           }
 
           if ( result ) {
@@ -3867,10 +3927,10 @@ static int readSubset( Data* const data,
           variableName, *variableName, isValidYYYYMMDDHH( yyyymmddhh ),
           data->readTimesteps > 0,
           IMPLIES( AND2( data->arguments->lonlat,
-                         OR4( ! strcmp( variableName, "LONGITUDE" ),
-                              ! strcmp( variableName, "longitude" ),
-                              ! strcmp( variableName, "LATITUDE" ),
-                              ! strcmp( variableName, "latitude" ) ) ),
+                         OR4( strstr( variableName, "LONGITUDE" ),
+                              strstr( variableName, "longitude" ),
+                              strstr( variableName, "LATITUDE" ),
+                              strstr( variableName, "latitude" ) ) ),
                    AND2( data->longitudes, data->latitudes ) ),
           IMPLIES( AND2( data->arguments->elevation,
                          OR2( ! strcmp( variableName, "ELEVATION" ),
@@ -3888,10 +3948,10 @@ static int readSubset( Data* const data,
                   variableName, yyyymmddhh,
                   subsetData, subsetZF, subsetDENS ); )
 
-  if ( OR4( ! strcmp( variableName, "LONGITUDE" ),
-            ! strcmp( variableName, "longitude" ),
-            ! strcmp( variableName, "LATITUDE" ),
-            ! strcmp( variableName, "latitude" ) ) ) {
+  if ( OR4( strstr( variableName, "LONGITUDE" ),
+            strstr( variableName, "longitude" ),
+            strstr( variableName, "LATITUDE" ),
+            strstr( variableName, "latitude" ) ) ) {
     copySubsetCoordinates( data, variableName, subsetData );
     result = 1;
   } else if ( OR2( ! strcmp( variableName, "ELEVATION" ),
@@ -4469,10 +4529,10 @@ static void copySubsetCoordinates( const Data* const data,
   PRE010( data, data->arguments, isValidArguments( data->arguments ),
           data->readTimesteps > 0,
           variableName,
-          OR4( ! strcmp( variableName, "LONGITUDE" ),
-               ! strcmp( variableName, "longitude" ),
-               ! strcmp( variableName, "LATITUDE" ),
-               ! strcmp( variableName, "latitude" ) ),
+          OR4( strstr( variableName, "LONGITUDE" ),
+               strstr( variableName, "longitude" ),
+               strstr( variableName, "LATITUDE" ),
+               strstr( variableName, "latitude" ) ),
           data->columns, data->longitudes, data->latitudes, subsetData );
 
   const Arguments* const arguments = data->arguments;
@@ -4489,11 +4549,19 @@ static void copySubsetCoordinates( const Data* const data,
   const int subsetColumns = COUNT_IN_RANGE( firstColumn, lastColumn );
   const size_t subsetCount = subsetRows * subsetColumns;
   const double* const input =
-    OR2( ! strcmp( variableName, "LONGITUDE" ),
-         ! strcmp( variableName, "longitude" ) ) ? data->longitudes
+    OR2( strstr( variableName, "LONGITUDE" ),
+         strstr( variableName, "longitude" ) ) ? data->longitudes
     : data->latitudes;
   float* output = subsetData;
   const int columns1 = data->columns + 1;
+  const int isSW = OR2( strstr( variableName, "SW" ),
+                        strstr( variableName, "sw" ) );
+  const int isSE = OR2( strstr( variableName, "SE" ),
+                        strstr( variableName, "se" ) );
+  const int isNW = OR2( strstr( variableName, "NW" ),
+                        strstr( variableName, "nw" ) );
+  const int isNE = OR2( strstr( variableName, "NE" ),
+                        strstr( variableName, "ne" ) );
   int row = 0;
 
   for ( row = firstRow - 1; row < lastRow; ++row ) {
@@ -4521,9 +4589,20 @@ static void copySubsetCoordinates( const Data* const data,
         const double coordinate2 = input[ index2 ];
         const double coordinate3 = input[ index3 ];
         const double coordinate4 = input[ index4 ];
-        const double centerCoordinate =
-          0.25 * ( coordinate1 + coordinate2 + coordinate3 + coordinate4 );
-        *output++ = centerCoordinate;
+
+        if ( isNW ) {
+          *output++ = coordinate1;
+        } else if ( isNE ) {
+          *output++ = coordinate2;
+        } else if ( isSE ) {
+          *output++ = coordinate3;
+        } else if ( isSW ) {
+          *output++ = coordinate4;
+        } else {
+          const double centerCoordinate =
+            0.25 * ( coordinate1 + coordinate2 + coordinate3 + coordinate4 );
+          *output++ = centerCoordinate;
+        }
       }
     }
   }
@@ -4551,8 +4630,8 @@ static void copySubsetCoordinates( const Data* const data,
     }
   }
 
-  POST0( IMPLIES_ELSE( OR2( ! strcmp( variableName, "LONGITUDE" ),
-                            ! strcmp( variableName, "longitude" ) ),
+  POST0( IMPLIES_ELSE( OR2( strstr( variableName, "LONGITUDE" ),
+                            strstr( variableName, "longitude" ) ),
                        AND2( isValidLongitude( subsetData[ 0 ] ),
                              isValidLongitude(subsetData[ subsetCount - 1 ])),
                        AND2( isValidLatitude( subsetData[ 0 ] ),
@@ -4969,9 +5048,9 @@ static int writeASCII(  Data* const data ) {
 
       /* Write spreadsheet header row: */
 
-      printf( headerStart );
+      fputs( headerStart, stdout );
 
-      for ( ;  variable < variables; ++variable ) {
+      for ( ; variable < variables; ++variable ) {
         printf( headerFormat,
                 variableNames[ variable ], variableUnits[ variable ] );
 
@@ -5322,6 +5401,29 @@ static int createCOARDSStandardVariables( Data* const data,
                                       "range", "[-180, 180]", 2, dimids + 2 ),
                 createNetCDFVariable( file, "latitude",  "degrees_north",
                                       "range", "[-90, 90]", 2, dimids + 2 ) );
+
+    if ( result ) {
+
+      if ( arguments->corners ) {
+        result =
+          GE_ZERO8( createNetCDFVariable( file, "longitude_sw", "degrees_east",
+                                          "range", "[-180, 180]", 2, dimids + 2),
+                    createNetCDFVariable( file, "longitude_se", "degrees_east",
+                                          "range", "[-180, 180]", 2, dimids + 2),
+                    createNetCDFVariable( file, "longitude_nw", "degrees_east",
+                                          "range", "[-180, 180]", 2, dimids +2),
+                    createNetCDFVariable( file, "longitude_ne", "degrees_east",
+                                          "range", "[-180, 180]", 2, dimids + 2),
+                    createNetCDFVariable( file, "latitude_sw",  "degrees_north",
+                                          "range", "[-90, 90]", 2, dimids + 2 ),
+                    createNetCDFVariable( file, "latitude_se",  "degrees_north",
+                                          "range", "[-90, 90]", 2, dimids + 2 ),
+                    createNetCDFVariable( file, "latitude_nw",  "degrees_north",
+                                          "range", "[-90, 90]", 2, dimids + 2 ),
+                    createNetCDFVariable( file, "latitude_ne",  "degrees_north",
+                                          "range", "[-90, 90]", 2, dimids + 2));
+      }
+    }
   }
 
   if ( result ) {
@@ -5453,112 +5555,136 @@ static int writeCOARDSData( Data* const data, const int file) {
       aggregateAllSize ? subsetData + subsetSize : 0;
     int* const aggregateAllCounts =
       aggregateAllSize ? (int*) aggregateAllData + aggregateAllSize : 0;
-    const int variables = arguments->variables + (arguments->auxMode == WIND);
+    const char* const coordinateNames[] = {
+      "longitude",
+      "latitude",
+      "longitude_sw",
+      "longitude_se",
+      "longitude_nw",
+      "longitude_ne",
+      "latitude_sw",
+      "latitude_se",
+      "latitude_nw",
+      "latitude_ne",
+      "elevation"
+    };
     const int coordinateVariables =
-      2 * arguments->lonlat + arguments->elevation;
-    int variable = -coordinateVariables;
+      sizeof coordinateNames / sizeof *coordinateNames;
+    const int variables =
+      coordinateVariables + arguments->variables + (arguments->auxMode == WIND);
+    int variable = 0;
     const int outputTimesteps = data->outputTimesteps;
     const int writeLayers = integrate ? 1 : subsetLayers;
-    int wroteLongitudes = 0;
-    int wroteLatitudes = 0;
+    int wroteTime = 0;
 
     do {
+      const int dataVariable = variable - coordinateVariables;
       const char* const variableName =
-        variable == -3 ? "longitude" :
-        variable == -2 ?
-          ( coordinateVariables == 2 ? "longitude" : "latitude" ) :
-        variable == -1 ?
-          ( coordinateVariables == 2 ? "latitude" : "elevation" ) :
-        ( variable < arguments->variables ?
-            arguments->variableNames[ variable ] : data->wwindVariable );
+        variable < coordinateVariables ? coordinateNames[ variable ]
+        : dataVariable < arguments->variables ?
+          arguments->variableNames[ dataVariable ]
+        : data->wwindVariable;
+      int writeVariable = 1;
       const char* const writeVariableName =
-        AND2( variable >= arguments->variables,
+        AND2( dataVariable >= arguments->variables,
               ! strcmp( variableName, data->wwindVariable ) ) ? "WWIND"
         : variableName;
-      const int isLongitude = ! strcmp( variableName, "longitude" );
-      const int isLatitude  = ! strcmp( variableName, "latitude" );
-      int yyyymmddhh = yyyymmddhh1;
-      int timestep = 0;
+      const int isLongitude = strstr( variableName, "longitude" ) != 0;
+      const int isLatitude  = strstr( variableName, "latitude" ) != 0;
+      const int is2DVariable = OR2( isLongitude, isLatitude );
 
-      do {
+      if ( variable < coordinateVariables ) {
 
-        if ( ! data->isHourlyTimesteps ) {
-          yyyymmddhh =
-            data->fileTimeRange[ timestep + data->skipFileCount ][ 0 ];
-        }
+        if ( ! arguments->lonlat ) {
 
-        result =
-          readSubset( data, variableName, yyyymmddhh,
-                      subsetData, subsetZF, subsetDENS );
-
-        if ( result ) {
-
-          if ( isLongitude ) {
-
-            if ( ! wroteLongitudes ) {
-              result =
-                writeCOARDS2DVariable( file, variableName,
-                                       subsetRows,
-                                       subsetColumns,
-                                       subsetData );
-              wroteLongitudes = 1;
-            }
-          } else if ( isLatitude ) {
-
-            if ( ! wroteLatitudes ) {
-              result =
-                writeCOARDS2DVariable( file, variableName,
-                                       subsetRows,
-                                       subsetColumns,
-                                       subsetData );
-              wroteLatitudes = 1;
-            }
-          } else {
-
-            if ( arguments->aggregateMode ) {
-              aggregateData( arguments->aggregateMode, subsetHours,
-                             writeSubsetCells, subsetData,
-                             aggregateAllData, aggregateAllCounts );
-            }
-
-            if ( ! aggregateAllData ) {
-              const char* const theOutputVariableName =
-                outputVariableName( writeVariableName );
-              result =
-                writeM3IOVariable( file, theOutputVariableName, timestep,
-                                   writeLayers, subsetRows, subsetColumns,
-                                   subsetData );
-
-              if ( AND2( result, variable == 0 ) ) {
-                result = writeCOARDSTimeVariables( file, timestep, yyyymmddhh );
-              }
-
-              ++timestep;
-            }
+          if ( strstr( variableName, "tude" ) ) {
+            writeVariable = 0;
           }
+        } else if ( AND2( ! arguments->corners,
+                            strchr( variableName, '_' ) ) ) {
+          writeVariable = 0;
         }
 
-        if ( data->isHourlyTimesteps ) {
-          yyyymmddhh = incrementHours( yyyymmddhh, timestepHours );
-        }
-
-      } while ( AND3( result, timestep < outputTimesteps,
-                      yyyymmddhh <= yyyymmddhh2) );
-
-      if ( AND3( aggregateAllData,
-                 strcmp( writeVariableName, "longitude" ),
-                 strcmp( writeVariableName, "latitude" ) ) ) {
-        const char* const theOutputVariableName =
-          outputVariableName( writeVariableName );
-        result =
-          writeM3IOVariable( file, theOutputVariableName, 0,
-                             writeLayers, subsetRows, subsetColumns,
-                             aggregateAllData );
-
-        if ( AND2( result, variable == 0 ) ) {
-          result = writeCOARDSTimeVariables( file, 0, yyyymmddhh1 );
+        if ( AND2( ! arguments->elevation,
+                   ! strcmp( variableName, "elevation" ) ) ) {
+          writeVariable = 0;
         }
       }
+
+      DEBUG( fprintf( stderr, "write %s = %d\n", variableName, writeVariable);)
+
+      if ( writeVariable ) {
+        int yyyymmddhh = yyyymmddhh1;
+        int timestep = 0;
+
+        do {
+
+          if ( ! data->isHourlyTimesteps ) {
+            yyyymmddhh =
+              data->fileTimeRange[ timestep + data->skipFileCount ][ 0 ];
+          }
+
+          result =
+            readSubset( data, variableName, yyyymmddhh,
+                        subsetData, subsetZF, subsetDENS );
+
+          if ( result ) {
+
+            if ( AND2( is2DVariable, timestep == 0 ) ) {
+              result =
+                  writeCOARDS2DVariable( file, variableName,
+                                         subsetRows, subsetColumns, subsetData);
+              timestep = outputTimesteps; /* Stop looping over time. */
+            } else {
+
+              if ( arguments->aggregateMode ) {
+                aggregateData( arguments->aggregateMode, subsetHours,
+                               writeSubsetCells, subsetData,
+                               aggregateAllData, aggregateAllCounts );
+              }
+
+              if ( ! aggregateAllData ) {
+                const char* const theOutputVariableName =
+                  outputVariableName( writeVariableName );
+                result =
+                  writeM3IOVariable( file, theOutputVariableName, timestep,
+                                     writeLayers, subsetRows, subsetColumns,
+                                     subsetData );
+
+                if ( AND2( result, wroteTime < outputTimesteps ) ) {
+                  result =
+                    writeCOARDSTimeVariables( file, timestep, yyyymmddhh );
+                  ++wroteTime;
+                }
+
+                ++timestep;
+              }
+            }
+          }
+
+          if ( data->isHourlyTimesteps ) {
+            yyyymmddhh = incrementHours( yyyymmddhh, timestepHours );
+          }
+
+        } while ( AND3( result, timestep < outputTimesteps,
+                        yyyymmddhh <= yyyymmddhh2) );
+
+        if ( AND3( aggregateAllData,
+                   ! strstr( writeVariableName, "longitude" ),
+                   ! strstr( writeVariableName, "latitude" ) ) ) {
+          const char* const theOutputVariableName =
+            outputVariableName( writeVariableName );
+          result =
+            writeM3IOVariable( file, theOutputVariableName, 0,
+                               writeLayers, subsetRows, subsetColumns,
+                               aggregateAllData );
+
+          if ( AND2( result, wroteTime < outputTimesteps ) ) {
+            result = writeCOARDSTimeVariables( file, 0, yyyymmddhh1 );
+            ++wroteTime;
+          }
+        }
+      } /* If writeVariable. */
 
       ++variable;
     } while ( AND2( result, variable < variables ) );
@@ -5704,10 +5830,10 @@ static int createTemporaryIOAPIFileHeader( Data* const data ) {
       COUNT_IN_RANGE( arguments->subset[ COLUMN ][ MINIMUM ],
                       arguments->subset[ COLUMN ][ MAXIMUM ] );
     const int coordinateVariables =
-      arguments->lonlat * 2 + arguments->elevation;
+      arguments->lonlat * 2 + arguments->corners * 8 + arguments->elevation;
     const int outputVariables =
-      arguments->variables +
       coordinateVariables +
+      arguments->variables +
       ( arguments->auxMode == WIND );
     int dimids[ 4 ] = { 0, 0, 0, 0 };
     int tflagDimIds[ 3 ] = { 0, 0, 0 };
@@ -5743,15 +5869,95 @@ static int createTemporaryIOAPIFileHeader( Data* const data ) {
             GE_ZERO2( createNetCDFVariable( file, "LONGITUDE",
                                             paddedString("deg", NAMLEN3,units),
                                             "var_desc",
-                                        paddedString("Longitude [-180, 180].",
-                                                     MXDLEN3, desc ),
-                                        4, dimids ),
+                                            paddedString("Longitude "
+                                                         "[-180, 180].",
+                                                         MXDLEN3, desc ),
+                                            4, dimids ),
                       createNetCDFVariable( file, "LATITUDE",
                                             paddedString("deg", NAMLEN3,units),
                                             "var_desc",
-                                        paddedString( "Latitude [-90, 90].",
-                                                      MXDLEN3, desc ),
-                                        4, dimids ) );
+                                            paddedString( "Latitude [-90, 90].",
+                                                          MXDLEN3, desc ),
+                                            4, dimids ) );
+
+          if ( result ) {
+
+            if ( arguments->corners ) {
+              result =
+                GE_ZERO8( createNetCDFVariable( file, "LONGITUDE_SW",
+                                                paddedString("deg",
+                                                             NAMLEN3, units ),
+                                                             "var_desc",
+                                                paddedString("Longitude SW "
+                                                             "corner "
+                                                             "[-180, 180].",
+                                                             MXDLEN3, desc ),
+                                                4, dimids ),
+                          createNetCDFVariable( file, "LONGITUDE_SE",
+                                                paddedString("deg",
+                                                             NAMLEN3, units ),
+                                                             "var_desc",
+                                                paddedString("Longitude SE "
+                                                             "corner "
+                                                             "[-180, 180].",
+                                                             MXDLEN3, desc ),
+                                                4, dimids ),
+                          createNetCDFVariable( file, "LONGITUDE_NW",
+                                                paddedString("deg",
+                                                             NAMLEN3, units ),
+                                                             "var_desc",
+                                                paddedString("Longitude NW "
+                                                             "corner "
+                                                             "[-180, 180].",
+                                                             MXDLEN3, desc ),
+                                                4, dimids ),
+                          createNetCDFVariable( file, "LONGITUDE_NE",
+                                                paddedString("deg",
+                                                             NAMLEN3, units ),
+                                                             "var_desc",
+                                                paddedString("Longitude NE "
+                                                             "corner "
+                                                             "[-180, 180].",
+                                                             MXDLEN3, desc ),
+                                                4, dimids ),
+                          createNetCDFVariable( file, "LATITUDE_SW",
+                                                paddedString("deg",
+                                                             NAMLEN3, units ),
+                                                             "var_desc",
+                                                paddedString("Latitude SW "
+                                                             "corner "
+                                                             "[-90, 90].",
+                                                             MXDLEN3, desc ),
+                                                4, dimids ),
+                          createNetCDFVariable( file, "LATITUDE_SE",
+                                                paddedString("deg",
+                                                             NAMLEN3, units ),
+                                                             "var_desc",
+                                                paddedString("Latitude SE "
+                                                             "corner "
+                                                             "[-90, 90].",
+                                                             MXDLEN3, desc ),
+                                                4, dimids ),
+                          createNetCDFVariable( file, "LATITUDE_NW",
+                                                paddedString("deg",
+                                                             NAMLEN3, units ),
+                                                             "var_desc",
+                                                paddedString("Latitude NW "
+                                                             "corner "
+                                                             "[-90, 90].",
+                                                             MXDLEN3, desc ),
+                                                4, dimids ),
+                          createNetCDFVariable( file, "LATITUDE_NE",
+                                                paddedString("deg",
+                                                             NAMLEN3, units ),
+                                                             "var_desc",
+                                                paddedString("Latitude NE "
+                                                             "corner "
+                                                             "[-90, 90].",
+                                                             MXDLEN3, desc ),
+                                                4, dimids ) );
+            }
+          }
         }
 
         if ( result ) {
@@ -5768,7 +5974,7 @@ static int createTemporaryIOAPIFileHeader( Data* const data ) {
 
           if ( result ) {
             char name[ NAMLEN3 + 1 ] = "";
-            char varlist[ MXVARS3 * ( NAMLEN3 + 1 ) ];
+            char varlist[ MXVARS3 * ( NAMLEN3 + 1 ) ] = "";
             const int variables = arguments->variables;
             int variable = 0;
             memset( name, 0, sizeof name );
@@ -5781,6 +5987,33 @@ static int createTemporaryIOAPIFileHeader( Data* const data ) {
               strncat( &varlist[0],
                        paddedString( "LATITUDE", NAMLEN3, name ),
                        NAMLEN3 );
+
+              if ( arguments->corners ) {
+                strncat( &varlist[0],
+                         paddedString( "LONGITUDE_SW", NAMLEN3, name ),
+                         NAMLEN3 );
+                strncat( &varlist[0],
+                         paddedString( "LONGITUDE_SE", NAMLEN3, name ),
+                         NAMLEN3 );
+                strncat( &varlist[0],
+                         paddedString( "LONGITUDE_NW", NAMLEN3, name ),
+                         NAMLEN3 );
+                strncat( &varlist[0],
+                         paddedString( "LONGITUDE_NE", NAMLEN3, name ),
+                         NAMLEN3 );
+                strncat( &varlist[0],
+                         paddedString( "LATITUDE_SW", NAMLEN3, name ),
+                         NAMLEN3 );
+                strncat( &varlist[0],
+                         paddedString( "LATITUDE_SE", NAMLEN3, name ),
+                         NAMLEN3 );
+                strncat( &varlist[0],
+                         paddedString( "LATITUDE_NW", NAMLEN3, name ),
+                         NAMLEN3 );
+                strncat( &varlist[0],
+                         paddedString( "LATITUDE_NE", NAMLEN3, name ),
+                         NAMLEN3 );
+              }
             }
 
             if ( arguments->elevation ) {
@@ -5993,7 +6226,7 @@ static int writeTFLAG( Data* const data, const int file ) {
   const Arguments* const arguments = data->arguments;
   const int outputTimesteps = data->outputTimesteps;
   const int coordinateVariables =
-    2 * arguments->lonlat + arguments->elevation;
+    2 * arguments->lonlat + 8 * arguments->corners + arguments->elevation;
   const int outputVariables =
     coordinateVariables +
     arguments->variables + ( arguments->auxMode == WIND );
@@ -6098,75 +6331,111 @@ static int writeIOAPIData( Data* const data, const int file) {
       aggregateAllSize ? subsetData + subsetSize : 0;
     int* const aggregateAllCounts =
       aggregateAllSize ? (int*) aggregateAllData + aggregateAllSize : 0;
-    const int variables = arguments->variables + (arguments->auxMode == WIND);
+    const char* const coordinateNames[] = {
+      "LONGITUDE",
+      "LATITUDE",
+      "LONGITUDE_SW",
+      "LONGITUDE_SE",
+      "LONGITUDE_NW",
+      "LONGITUDE_NE",
+      "LATITUDE_SW",
+      "LATITUDE_SE",
+      "LATITUDE_NW",
+      "LATITUDE_NE",
+      "ELEVATION"
+    };
     const int coordinateVariables =
-      2 * arguments->lonlat + arguments->elevation;
-    int variable = -coordinateVariables;
+      sizeof coordinateNames / sizeof *coordinateNames;
+    const int variables =
+      coordinateVariables + arguments->variables + (arguments->auxMode == WIND);
+    int variable = 0;
     const int outputTimesteps  = data->outputTimesteps;
     const int outputLayers = integrate ? 1 : subsetLayers;
 
     do {
+      const int dataVariable = variable - coordinateVariables;
       const char* const variableName =
-        variable == -3 ? "LONGITUDE" :
-        variable == -2 ?
-          ( coordinateVariables == 2 ? "LONGITUDE" : "LATITUDE" ) :
-        variable == -1 ?
-          ( coordinateVariables == 2 ? "LATITUDE" : "ELEVATION" ) :
-        ( variable < arguments->variables ?
-            arguments->variableNames[ variable ] : data->wwindVariable );
-      const char* const writeVariableName =
-        AND2( variable >= arguments->variables,
-              ! strcmp( variableName, data->wwindVariable ) ) ? "WWIND"
-        : variableName;
-      int yyyymmddhh = yyyymmddhh1;
-      int timestep = 0;
+        variable < coordinateVariables ? coordinateNames[ variable ]
+        : dataVariable < arguments->variables ?
+          arguments->variableNames[ dataVariable ]
+        : data->wwindVariable;
+      int writeVariable = 1;
 
-      do {
+      if ( variable < coordinateVariables ) {
 
-        if ( ! data->isHourlyTimesteps ) {
-          yyyymmddhh =
-            data->fileTimeRange[ timestep + data->skipFileCount ][ 0 ];
-        }
+        if ( ! arguments->lonlat ) {
 
-        result = readSubset( data, variableName, yyyymmddhh,
-                             subsetData, subsetZF, subsetDENS );
-
-        if ( result ) {
-
-          if ( AND3( arguments->aggregateMode,
-                     strcmp( variableName, "LONGITUDE" ),
-                     strcmp( variableName, "LATITUDE" ) ) ) {
-            aggregateData( arguments->aggregateMode, subsetHours,
-                           writeSubsetCells, subsetData,
-                           aggregateAllData, aggregateAllCounts );
+          if ( strstr( variableName, "TUDE" ) ) {
+            writeVariable = 0;
           }
-
-          if ( ! aggregateAllData ) {
-            const char* const theOutputVariableName =
-              outputVariableName( writeVariableName );
-            result =
-              writeM3IOVariable( file, theOutputVariableName, timestep,
-                                 outputLayers, subsetRows, subsetColumns,
-                                 subsetData );
-             ++timestep;
-          }
+        } else if ( AND2( ! arguments->corners,
+                            strchr( variableName, '_' ) ) ) {
+          writeVariable = 0;
         }
 
-        if ( data->isHourlyTimesteps ) {
-          yyyymmddhh = incrementHours( yyyymmddhh, timestepHours );
+        if ( AND2( ! arguments->elevation,
+                   ! strcmp( variableName, "ELEVATION" ) ) ) {
+          writeVariable = 0;
         }
-
-      } while ( AND3( result, timestep < outputTimesteps,
-                      yyyymmddhh <= yyyymmddhh2 ) );
-
-      if ( aggregateAllData ) {
-        const char* const theOutputVariableName =
-          outputVariableName( writeVariableName );
-        result =
-          writeM3IOVariable( file, theOutputVariableName, 0,
-                             outputLayers, subsetRows, subsetColumns,
-                             aggregateAllData );
       }
+
+      DEBUG( fprintf( stderr, "write %s = %d\n", variableName, writeVariable);)
+
+      if ( writeVariable ) {
+        const char* const writeVariableName =
+          AND2( dataVariable >= arguments->variables,
+                ! strcmp( variableName, data->wwindVariable ) ) ? "WWIND"
+          : variableName;
+        int yyyymmddhh = yyyymmddhh1;
+        int timestep = 0;
+
+        do {
+
+          if ( ! data->isHourlyTimesteps ) {
+            yyyymmddhh =
+              data->fileTimeRange[ timestep + data->skipFileCount ][ 0 ];
+          }
+
+          result = readSubset( data, variableName, yyyymmddhh,
+                               subsetData, subsetZF, subsetDENS );
+
+          if ( result ) {
+
+            if ( AND3( arguments->aggregateMode,
+                       ! strstr( variableName, "LONGITUDE" ),
+                       ! strstr( variableName, "LATITUDE" ) ) ) {
+              aggregateData( arguments->aggregateMode, subsetHours,
+                             writeSubsetCells, subsetData,
+                             aggregateAllData, aggregateAllCounts );
+            }
+
+            if ( ! aggregateAllData ) {
+              const char* const theOutputVariableName =
+                outputVariableName( writeVariableName );
+              result =
+                writeM3IOVariable( file, theOutputVariableName, timestep,
+                                   outputLayers, subsetRows, subsetColumns,
+                                   subsetData );
+               ++timestep;
+            }
+          }
+
+          if ( data->isHourlyTimesteps ) {
+            yyyymmddhh = incrementHours( yyyymmddhh, timestepHours );
+          }
+
+        } while ( AND3( result, timestep < outputTimesteps,
+                        yyyymmddhh <= yyyymmddhh2 ) );
+
+        if ( aggregateAllData ) {
+          const char* const theOutputVariableName =
+            outputVariableName( writeVariableName );
+          result =
+            writeM3IOVariable( file, theOutputVariableName, 0,
+                               outputLayers, subsetRows, subsetColumns,
+                               aggregateAllData );
+        }
+      } /* If writeVariable. */
 
       ++variable;
     } while ( AND2( result, variable < variables ) );
@@ -6504,7 +6773,7 @@ INPUTS:  const double g         Gravitational force, e.g., 9.81 m/s^2.
          const double R         Gas constant e.g., 287.04 J/kg/K = m^3/s/K.
          const double A         Atmospheric lapse rate, e.g., 50.0 K/kg.
          const double T0s       Reference surface temperature, e.g., 290.0 K.
-         const double P00       Reference surface pressure, e.g., 100000 P.
+         const double P00       Reference surface pressure, e.g., 100000 Pa.
          const int layers       Number of elevation layers.
          const int type         Vertical grid type:
                                 VGSGPH3  hydrostatic sigma-P

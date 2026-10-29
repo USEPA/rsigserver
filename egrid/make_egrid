@@ -1,0 +1,18 @@
+#!/bin/csh -f
+# make_egrid - Create egrid.txt annual power plant emissions file.
+# https://www.epa.gov/egrid/detailed-data
+# Usage:
+# Download this spreadsheet:
+# https://www.epa.gov/system/files/documents/2025-06/egrid2023_data_rev2.xlsx
+# Load it into a spreadsheet program such as Excel.
+# Export it as TSV file(s).
+# cp -p egrid2023_data_rev2/"PLNT23-Table 1.tsv" PLNT23-Table_1.tsv
+# Parse power plant file PLNT23-Table_1.tsv into egrid.txt file
+# with units converted to kg and kg/MWh with this command:
+# make_egrid PLNT23-Table_1.tsv > egrid_2023.txt
+# head egrid_2023.txt
+# 2025-07-10 plessel.todd@epa.gov
+
+cat $1 | tr -d '"' | tr -d ',' | \
+awk -F'\t' 'BEGIN { lbs_to_kg = 0.4535924; tons_to_kg = 2000.0 * lbs_to_kg; printf("TIMESTAMP(UTC)\tLONGITUDE(deg)\tLATITUDE(deg)\tID(-)\tYEARLY_POWER(MWh)\tYEARLY_NOX(kg)\tYEARLY_SO2(kg)\tYEARLY_CO2(kg)\tYEARLY_CH4(kg)\tYEARLY_N2O(kg)\tYEARLY_NOX_RATE(kg/MWh)\tYEARLY_SO2_RATE(kg/MWh)\tYEARLY_CO2_RATE(kg/MWh)\tYEARLY_CH4_RATE(kg/MWh)\tYEARLY_N2O_RATE(kg/MWh)\tNOTE(-)\n" ); } { if ( NR > 2 && $41 * 1.0 > 0.0 ) { lon = $21; lat = $20; id = $5; power = $41; nox = $44 * tons_to_kg; so2 = $46 * tons_to_kg; co2 = $47 * tons_to_kg; ch4 = $48 * lbs_to_kg; n2o = $49 * lbs_to_kg; nox_rate = $52 * lbs_to_kg; so2_rate = $54 * lbs_to_kg; co2_rate = $55 * lbs_to_kg; ch4_rate = $56 * lbs_to_kg; n2o_rate = $57 * lbs_to_kg; note = $3 " " $4 " " $9 " " $8; printf "2023-01-01T00:00:00-0000\t%0.6f\t%0.6f\t%d\t%0.6e\t%0.6e\t%0.6e\t%0.6e\t%0.6e\t%0.6e\t%0.6e\t%0.6e\t%0.6e\t%0.6e\t%0.6e\t%-80s\n", lon, lat, id, power, nox, so2, co2, ch4, n2o, nox_rate, so2_rate, co2_rate, ch4_rate, n2o_rate, substr( note, 1, 79 ) } }'
+

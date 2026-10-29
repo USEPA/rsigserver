@@ -1,5 +1,5 @@
 /******************************************************************************
-PURPOSE: RegridQuadrilaterals.h - Declares routine to regrid 2D quadrilaterals
+PURPOSE: RegridQuadrilaterals.c - Defines routine to regrid 2D quadrilaterals
          onto a regular 2D grid with or without area weighting
          (i.e., scaling the data by the fractional area of the clipped polygon).
 

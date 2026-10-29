@@ -1283,6 +1283,22 @@ int fillAndWriteArray( const double value, const size_t count,
 
 
 /******************************************************************************
+PURPOSE: fileExists - Determine if named file exists.
+INPUTS:  const char* name  Name of file to examine.
+RETURNS: size_t size, in bytes, of named file, else 0 if failed.
+******************************************************************************/
+
+int fileExists( const char* name ) {
+  int result = 0;
+  struct stat buf;
+  assert( name );
+  result = stat( name, &buf ) == 0;
+  return result;
+}
+
+
+
+/******************************************************************************
 PURPOSE: fileSize - Determine size of named file.
 INPUTS:  const char* name  Name of file to examine.
 RETURNS: size_t size, in bytes, of named file, else 0 if failed.

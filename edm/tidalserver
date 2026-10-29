@@ -55,7 +55,7 @@ my $stations_file_name = '/data/land_use/tidal_stations.txt';
 # External server to forward to via wget command:
 
 my $bindir = '/code/bin/Linux.x86_64';
-#my $wget = "$bindir/wget -q -t 1 -T 0 -O -";
+#my $wget = "/usr/bin/wget -q -t 1 -T 0 -O -";
 my $wget = '/usr/bin/curl -k --silent --max-time 3600 --retry 0 -L --tcp-nodelay';
 
 my $wget_command =

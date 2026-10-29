@@ -62,7 +62,7 @@ my $cut         = '/bin/cut';
 my $bindir      = '/rsig/current/code/bin/Linux.x86_64';
 my $fdd         = "$bindir/fdd";
 my $xdrconvert  = "$bindir/XDRConvert";
-my $compressor  = "$bindir/gzip -c -1";
+my $compressor  = "/usr/bin/gzip -c -1";
 
 # Output messages when REQUEST=GetMetadata.
 # Print this message first:

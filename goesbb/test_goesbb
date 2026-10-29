@@ -1,0 +1,71 @@
+#!/bin/csh -f
+
+echo ; echo TEST GOESBB ; echo
+
+if ( 0 ) then
+
+sleep 2 ; echo ; echo TEST GetCapabilities ; echo
+curl --silent --retry 0 'https://maple.hesc.epa.gov/rsig/rsigserver?SERVICE=wcs&VERSION=1.0.0&REQUEST=GetCapabilities' > junk ; head junk ; echo '...' ; grep -i goesbb junk
+
+sleep 2 ; echo ; echo TEST DescribeCoverage ; echo
+curl --silent --retry 0 'https://maple.hesc.epa.gov/rsig/rsigserver?SERVICE=wcs&VERSION=1.0.0&REQUEST=DescribeCoverage' > junk ; head junk ; echo '...' ; grep -i goesbb junk
+
+endif
+
+
+# DescribeCoverage:
+
+sleep 2 ; echo ; echo TEST DescribeCoverage pm25_emission ; echo
+curl --silent --retry 0 'https://maple.hesc.epa.gov/rsig/rsigserver?SERVICE=wcs&VERSION=1.0.0&REQUEST=DescribeCoverage&COVERAGE=goesbb.pm25_emission' > junk ; echo $? ; cat junk
+
+sleep 2 ; echo ; echo TEST DescribeCoverage ecosystem ; echo
+curl --silent --retry 0 'https://maple.hesc.epa.gov/rsig/rsigserver?SERVICE=wcs&VERSION=1.0.0&REQUEST=DescribeCoverage&COVERAGE=goesbb.ecosystem' > junk ; echo $? ; cat junk
+
+
+# Original:
+
+sleep 2 ; echo ; echo TEST pm25_emission original ; echo
+curl --silent --retry 0 'https://maple.hesc.epa.gov/rsig/rsigserver?SERVICE=wcs&VERSION=1.0.0&REQUEST=GetMetadata&COVERAGE=goesbb.pm25_emission&FORMAT=original&TIME=2019-07-01T00:00:00Z/2019-07-02T23:59:59Z&BBOX=-126,24,-60,50' > junk ; echo $? ; tar -ztf junk
+
+sleep 2 ; echo ; echo TEST ecosystem original ; echo
+curl --silent --retry 0 'https://maple.hesc.epa.gov/rsig/rsigserver?SERVICE=wcs&VERSION=1.0.0&REQUEST=GetCoverage&COVERAGE=goesbb.ecosystem&FORMAT=original&TIME=2019-07-01T00:00:00Z/2019-07-02T23:59:59Z&BBOX=-126,24,-60,50' > junk ; echo $? ; tar -ztf junk
+
+
+# XDR:
+
+sleep 2 ; echo ; echo TEST pm25_emission xdr ; echo
+curl --silent --retry 0 'https://maple.hesc.epa.gov/rsig/rsigserver?SERVICE=wcs&VERSION=1.0.0&REQUEST=GetCoverage&COVERAGE=goesbb.pm25_emission&FORMAT=xdr&TIME=2019-07-01T00:00:00Z/2019-07-02T23:59:59Z&BBOX=-126,24,-60,50' > junk ; echo $? ; ~/bin/Linux.x86_64/xdrdump junk | head -30
+
+sleep 2 ; echo ; echo TEST ecosystem xdr ; echo
+curl --silent --retry 0 'https://maple.hesc.epa.gov/rsig/rsigserver?SERVICE=wcs&VERSION=1.0.0&REQUEST=GetCoverage&COVERAGE=goesbb.ecosystem&FORMAT=xdr&TIME=2019-07-01T00:00:00Z/2019-07-02T23:59:59Z&BBOX=-126,24,-60,50' > junk ; echo $? ; ~/bin/Linux.x86_64/xdrdump junk | head -30
+
+
+# ASCII:
+
+sleep 2 ; echo ; echo TEST pm25_emission ascii ; echo
+curl --silent --retry 0 'https://maple.hesc.epa.gov/rsig/rsigserver?SERVICE=wcs&VERSION=1.0.0&REQUEST=GetCoverage&COVERAGE=goesbb.pm25_emission&FORMAT=ascii&TIME=2019-07-01T00:00:00Z/2019-07-02T23:59:59Z&BBOX=-126,24,-60,50' > junk ; echo $? ; head -30 junk
+
+sleep 2 ; echo ; echo TEST ecosystem ascii ; echo
+curl --silent --retry 0 'https://maple.hesc.epa.gov/rsig/rsigserver?SERVICE=wcs&VERSION=1.0.0&REQUEST=GetCoverage&COVERAGE=goesbb.ecosystem&FORMAT=ascii&TIME=2019-07-01T00:00:00Z/2019-07-02T23:59:59Z&BBOX=-126,24,-60,50' > junk ; echo $? ; head -30 junk
+
+
+# NetCDF-COARDS:
+
+sleep 2 ; echo ; echo TEST pm25_emission netcdf-coards ; echo
+curl --silent --retry 0 'https://maple.hesc.epa.gov/rsig/rsigserver?SERVICE=wcs&VERSION=1.0.0&REQUEST=GetCoverage&COVERAGE=goesbb.pm25_emission&FORMAT=netcdf-coards&TIME=2019-07-01T00:00:00Z/2019-07-02T23:59:59Z&BBOX=-126,24,-60,50' > junk ; echo $? ; ~/bin/Linux.x86_64/ncdump -h junk
+
+sleep 2 ; echo ; echo TEST ecosystem netcdf-coards ; echo
+curl --silent --retry 0 'https://maple.hesc.epa.gov/rsig/rsigserver?SERVICE=wcs&VERSION=1.0.0&REQUEST=GetCoverage&COVERAGE=goesbb.ecosystem&FORMAT=netcdf-coards&TIME=2019-07-01T00:00:00Z/2019-07-02T23:59:59Z&BBOX=-126,24,-60,50' > junk ; echo $? ; ~/bin/Linux.x86_64/ncdump -h junk
+
+
+# NetCDF-IOAPI:
+
+sleep 2 ; echo ; echo TEST pm25_emission netcdf-ioapi ; echo
+curl --silent --retry 0 'https://maple.hesc.epa.gov/rsig/rsigserver?SERVICE=wcs&VERSION=1.0.0&REQUEST=GetCoverage&COVERAGE=goesbb.pm25_emission&FORMAT=netcdf-ioapi&TIME=2019-07-01T00:00:00Z/2019-07-02T23:59:59Z&BBOX=-126,24,-60,50&REGRID=weighted&LAMBERT=33,45,-97,40&ELLIPSOID=6370000,6370000&GRID=459,299,-2556000,-1728000,120000,12000&COMPRESS=1' | gzip -d > junk ; echo $? ; ~/bin/Linux.x86_64/ncdump -h junk
+
+sleep 2 ; echo ; echo TEST ecosystem netcdf_ioapi ; echo
+curl --silent --retry 0 'https://maple.hesc.epa.gov/rsig/rsigserver?SERVICE=wcs&VERSION=1.0.0&REQUEST=GetCoverage&COVERAGE=goesbb.ecosystem&FORMAT=netcdf-ioapi&TIME=2019-07-01T00:00:00Z/2019-07-02T23:59:59Z&BBOX=-126,24,-60,50&REGRID=weighted&LAMBERT=33,45,-97,40&ELLIPSOID=6370000,6370000&GRID=459,299,-2556000,-1728000,120000,12000&COMPRESS=1' | gzip -d > junk ; echo $? ; ~/bin/Linux.x86_64/ncdump -h junk
+
+
+/bin/rm -f junk
+echo ; echo DONE GOESBB ; echo

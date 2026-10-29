@@ -64,7 +64,7 @@ my $netrc_content =
 my $temp_cookie_file = "/data/tmp/nldas_cookie.$$";
 
 my $curl_command =
-  "$bindir/curl -k --silent --retry 0 -L --max-redirs 10 --tcp-nodelay " .
+  "/usr/bin/curl -k --silent --retry 0 -L --max-redirs 10 --tcp-nodelay " .
   "--max-time 3600 " .
   "--netrc-file $temp_netrc_file -c $temp_cookie_file -b $temp_cookie_file ";
 

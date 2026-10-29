@@ -33,7 +33,7 @@ my $data_directory = '/data/HYSPLIT/images';
 
 # Server where this program is installed:
 
-my $server_path = 'https://YOUR_WEBSERVER_HOST/cgi-bin';
+my $server_path = 'https://maple.hesc.epa.gov/cgi-bin';
 
 # Query string parsing routine dispatch table:
 

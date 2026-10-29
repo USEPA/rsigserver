@@ -1,7 +1,7 @@
 #!/bin/sh
 # Complie CALIPSOSubset:
 
-gcc -m64 -Wall -D_FILE_OFFSET_BITS=64 -D_LARGEFILE_SOURCE -DNDEBUG -O -I. -o CALIPSOSubset CALIPSOSubset.c ReadData.c ReadFile.c Utilities.c -L. -lhdfeos -lmfhdf -ldf -lsz -lz -ljpeg -lm
+gcc -m64 -Wall -D_FILE_OFFSET_BITS=64 -D_LARGEFILE_SOURCE -DNDEBUG -O -I. -o CALIPSOSubset CALIPSOSubset.c ReadData.c ReadFile.c Utilities.c -L. -lhdfeos -lmfhdf -ldf -lsz -lz -ljpeg -ltirpc -lm
 strip CALIPSOSubset
 ls -l CALIPSOSubset
 file  CALIPSOSubset

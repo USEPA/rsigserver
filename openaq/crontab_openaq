@@ -1,0 +1,1 @@
+10 0 * * * /data/OpenAQ/update_all_files > /dev/null 2>&1

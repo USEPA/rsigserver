@@ -366,10 +366,10 @@ size_t readDataset( const int file,
         strncpy( units, entry->units, 79 );
         assert( ! strchr( units, ' ' ) ); /* No spaces allowed in units. */
 
-        if ( isTime ) { /* Convert from seconds TAI93 to yyyymmddhhmmss UTC: */
+        if ( isTime ) { /* Convert from seconds TAI93 to yyyydddhhmm UTC: */
 
           for ( index = 0, result = 0; index < points; ++index ) {
-            const double secondsTAI93 = temp[ index ];
+            const double secondsTAI93 = data[ index ];
             const long long secondsUTC70 = toSecondsUTC70( secondsTAI93 );
             const long long yyyydddhhmm = toUTC( secondsUTC70 );
 

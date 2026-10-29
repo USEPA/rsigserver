@@ -1,0 +1,124 @@
+#!/bin/csh -f
+
+echo ; echo TEST MODIS ; echo
+
+if ( 0 ) then
+
+sleep 2 ; echo ; echo TEST GetCapabilities ; echo
+curl --silent --retry 0 'https://maple.hesc.epa.gov/rsig/rsigserver?SERVICE=wcs&VERSION=1.0.0&REQUEST=GetCapabilities' > junk ; head junk ; echo '...' ; grep -i modis junk
+
+sleep 2 ; echo ; echo TEST DescribeCoverage ; echo
+curl --silent --retry 0 'https://maple.hesc.epa.gov/rsig/rsigserver?SERVICE=wcs&VERSION=1.0.0&REQUEST=DescribeCoverage' > junk ; head junk ; echo '...' ; grep -i modis junk
+
+endif
+
+
+
+# DescribeCoverage:
+
+sleep 2 ; echo ; echo TEST DescribeCoverage modis.mod4.AOD_550_Dark_Target_Deep_Blue_Combined ; echo
+curl --silent --retry 0 'https://maple.hesc.epa.gov/rsig/rsigserver?SERVICE=wcs&VERSION=1.0.0&REQUEST=DescribeCoverage&COVERAGE=modis.mod4.AOD_550_Dark_Target_Deep_Blue_Combined' > junk ; echo $? ; cat junk
+
+sleep 2 ; echo ; echo TEST DescribeCoverage modis.mod43k.Optical_Depth_Land_And_Ocean ; echo
+curl --silent --retry 0 'https://maple.hesc.epa.gov/rsig/rsigserver?SERVICE=wcs&VERSION=1.0.0&REQUEST=DescribeCoverage&COVERAGE=modis.mod43k.Optical_Depth_Land_And_Ocean' > junk ; echo $? ; cat junk
+
+sleep 2 ; echo ; echo TEST DescribeCoverage modis.mod43k.Optical_Depth_Land_And_Ocean ; echo
+curl --silent --retry 0 'https://maple.hesc.epa.gov/rsig/rsigserver?SERVICE=wcs&VERSION=1.0.0&REQUEST=DescribeCoverage&COVERAGE=modis.mod6.Tropopause_Height' > junk ; echo $? ; cat junk
+
+sleep 2 ; echo ; echo TEST DescribeCoverage modis.mod7.Total_Ozone ; echo
+curl --silent --retry 0 'https://maple.hesc.epa.gov/rsig/rsigserver?SERVICE=wcs&VERSION=1.0.0&REQUEST=DescribeCoverage&COVERAGE=modis.mod7.Total_Ozone' > junk ; echo $? ; cat junk
+
+sleep 2 ; echo ; echo TEST DescribeCoverage modis.mod7.Total_Ozone ; echo
+curl --silent --retry 0 'https://maple.hesc.epa.gov/rsig/rsigserver?SERVICE=wcs&VERSION=1.0.0&REQUEST=DescribeCoverage&COVERAGE=tempo.l3.no2.terrain_height' > junk ; echo $? ; cat junk
+
+
+
+# GetMetadata:
+
+sleep 2 ; echo ; echo TEST GetMetadata modis.mod4.AOD_550_Dark_Target_Deep_Blue_Combined ; echo
+curl --silent --retry 0 'https://maple.hesc.epa.gov/rsig/rsigserver?SERVICE=wcs&VERSION=1.0.0&REQUEST=GetMetadata&COVERAGE=modis.mod4.AOD_550_Dark_Target_Deep_Blue_Combined&FORMAT=xdr&TIME=2025-05-13T00:00:00Z/2025-05-14T23:59:59Z&BBOX=-120,33,-118,35&CORNERS=1' > junk ; echo $? ; cat junk
+
+sleep 2 ; echo ; echo TEST GetMetadata modis.mod43k.Optical_Depth_Land_And_Ocean ; echo
+curl --silent --retry 0 'https://maple.hesc.epa.gov/rsig/rsigserver?SERVICE=wcs&VERSION=1.0.0&REQUEST=GetMetadata&COVERAGE=modis.mod43k.Optical_Depth_Land_And_Ocean&FORMAT=xdr&TIME=2025-05-13T00:00:00Z/2025-05-14T23:59:59Z&BBOX=-120,33,-118,35&CORNERS=1' > junk ; echo $? ; cat junk
+
+sleep 2 ; echo ; echo TEST GetMetadata modis.mod6.Tropopause_Height ; echo
+curl --silent --retry 0 'https://maple.hesc.epa.gov/rsig/rsigserver?SERVICE=wcs&VERSION=1.0.0&REQUEST=GetMetadata&COVERAGE=modis.mod6.Tropopause_Height&FORMAT=xdr&TIME=2025-05-13T00:00:00Z/2025-05-14T23:59:59Z&BBOX=-120,33,-118,35&CORNERS=1' > junk ; echo $? ; cat junk
+
+sleep 2 ; echo ; echo TEST GetMetadata modis.mod7.Total_Ozone ; echo
+curl --silent --retry 0 'https://maple.hesc.epa.gov/rsig/rsigserver?SERVICE=wcs&VERSION=1.0.0&REQUEST=GetMetadata&COVERAGE=modis.mod7.Total_Ozone&FORMAT=xdr&TIME=2025-05-13T00:00:00Z/2025-05-14T23:59:59Z&BBOX=-120,33,-118,35&CORNERS=1' > junk ; echo $? ; cat junk
+
+
+
+# Original:
+
+sleep 2 ; echo ; echo TEST modis.mod4.AOD_550_Dark_Target_Deep_Blue_Combined original ; echo
+curl --silent --retry 0 'https://maple.hesc.epa.gov/rsig/rsigserver?SERVICE=wcs&VERSION=1.0.0&REQUEST=GetCoverage&COVERAGE=modis.mod4.AOD_550_Dark_Target_Deep_Blue_Combined&FORMAT=original&TIME=2023-08-15T00:00:00Z/2023-08-15T23:59:59Z&BBOX=-120,33,-118,35' > junk ; echo $? ; tar -ztf junk
+
+
+
+# XDR:
+
+sleep 2 ; echo ; echo TEST modis.mod4.AOD_550_Dark_Target_Deep_Blue_Combined xdr ; echo
+curl --silent --retry 0 'https://maple.hesc.epa.gov/rsig/rsigserver?SERVICE=wcs&VERSION=1.0.0&REQUEST=GetCoverage&COVERAGE=modis.mod4.AOD_550_Dark_Target_Deep_Blue_Combined&FORMAT=xdr&TIME=2025-05-13T00:00:00Z/2025-05-14T23:59:59Z&BBOX=-120,33,-118,35&CORNERS=1&COMPRESS=1' | gzip -d > junk ; echo $? ; ~/bin/Linux.x86_64/xdrdump junk | head -30
+
+sleep 2 ; echo ; echo TEST modis.mod43k.Optical_Depth_Land_And_Ocean xdr; echo
+curl --silent --retry 0 'https://maple.hesc.epa.gov/rsig/rsigserver?SERVICE=wcs&VERSION=1.0.0&REQUEST=GetCoverage&COVERAGE=modis.mod43k.Optical_Depth_Land_And_Ocean&FORMAT=xdr&TIME=2025-05-13T00:00:00Z/2025-05-14T23:59:59Z&BBOX=-120,33,-118,35&CORNERS=1' | gzip -d > junk ; echo $? ; ~/bin/Linux.x86_64/xdrdump junk | head -30
+
+sleep 2 ; echo ; echo TEST modis.mod6.Tropopause_Height minimum_quality xdr; echo
+curl --silent --retry 0 'https://maple.hesc.epa.gov/rsig/rsigserver?SERVICE=wcs&VERSION=1.0.0&REQUEST=GetCoverage&COVERAGE=modis.mod6.Tropopause_Height&FORMAT=xdr&TIME=2025-05-13T00:00:00Z/2025-05-14T23:59:59Z&BBOX=-120,33,-118,35&CORNERS=1' | gzip -d > junk ; echo $? ; ~/bin/Linux.x86_64/xdrdump junk | head -30
+
+sleep 2 ; echo ; echo TEST modis.mod7.Total_Ozone xdr; echo
+curl --silent --retry 0 'https://maple.hesc.epa.gov/rsig/rsigserver?SERVICE=wcs&VERSION=1.0.0&REQUEST=GetCoverage&COVERAGE=modis.mod7.Total_Ozone&FORMAT=xdr&TIME=2025-05-13T00:00:00Z/2025-05-14T23:59:59Z&BBOX=-120,33,-118,35&CORNERS=1' | gzip -d > junk ; echo $? ; ~/bin/Linux.x86_64/xdrdump junk | head -30
+
+
+
+# ASCII:
+
+sleep 2 ; echo ; echo TEST modis.mod4.AOD_550_Dark_Target_Deep_Blue_Combined ascii ; echo
+curl --silent --retry 0 'https://maple.hesc.epa.gov/rsig/rsigserver?SERVICE=wcs&VERSION=1.0.0&REQUEST=GetCoverage&COVERAGE=modis.mod4.AOD_550_Dark_Target_Deep_Blue_Combined&FORMAT=ascii&TIME=2025-05-13T00:00:00Z/2025-05-14T23:59:59Z&BBOX=-120,33,-118,35&CORNERS=1&COMPRESS=1' | gzip -d > junk ; echo $? ; head -30 junk
+
+sleep 2 ; echo ; echo TEST modis.mod43k.Optical_Depth_Land_And_Ocean ascii ; echo
+curl --silent --retry 0 'https://maple.hesc.epa.gov/rsig/rsigserver?SERVICE=wcs&VERSION=1.0.0&REQUEST=GetCoverage&COVERAGE=modis.mod43k.Optical_Depth_Land_And_Ocean&FORMAT=ascii&TIME=2025-05-13T00:00:00Z/2025-05-14T23:59:59Z&BBOX=-120,33,-118,35&CORNERS=1&COMPRESS=1' | gzip -d > junk ; echo $? ; head -30 junk
+
+sleep 2 ; echo ; echo TEST modis.mod6.Tropopause_Height ascii ; echo
+curl --silent --retry 0 'https://maple.hesc.epa.gov/rsig/rsigserver?SERVICE=wcs&VERSION=1.0.0&REQUEST=GetCoverage&COVERAGE=modis.mod6.Tropopause_Height&FORMAT=ascii&TIME=2025-05-13T00:00:00Z/2025-05-14T23:59:59Z&BBOX=-120,33,-118,35&CORNERS=1&COMPRESS=1' | gzip -d > junk ; echo $? ; head -30 junk
+
+sleep 2 ; echo ; echo TEST modis.mod7.Total_Ozone ascii ; echo
+curl --silent --retry 0 'https://maple.hesc.epa.gov/rsig/rsigserver?SERVICE=wcs&VERSION=1.0.0&REQUEST=GetCoverage&COVERAGE=modis.mod7.Total_Ozone&FORMAT=ascii&TIME=2025-05-13T00:00:00Z/2025-05-14T23:59:59Z&BBOX=-120,33,-118,35&CORNERS=1&COMPRESS=1' | gzip -d > junk ; echo $? ; head -30 junk
+
+
+
+# NetCDF-COARDS:
+
+sleep 2 ; echo ; echo TEST modis.mod4.AOD_550_Dark_Target_Deep_Blue_Combined netcdf-coards ; echo
+curl --silent --retry 0 'https://maple.hesc.epa.gov/rsig/rsigserver?SERVICE=wcs&VERSION=1.0.0&REQUEST=GetCoverage&COVERAGE=modis.mod4.AOD_550_Dark_Target_Deep_Blue_Combined&FORMAT=netcdf-coards&TIME=2025-05-13T00:00:00Z/2025-05-14T23:59:59Z&BBOX=-120,33,-118,35&CORNERS=1&COMPRESS=1' | gzip -d > junk ; echo $? ; ~/bin/Linux.x86_64/ncdump -h junk
+
+sleep 2 ; echo ; echo TEST modis.mod43k.Optical_Depth_Land_And_Ocean netcdf-coards ; echo
+curl --silent --retry 0 'https://maple.hesc.epa.gov/rsig/rsigserver?SERVICE=wcs&VERSION=1.0.0&REQUEST=GetCoverage&COVERAGE=modis.mod43k.Optical_Depth_Land_And_Ocean&FORMAT=netcdf-coards&TIME=2025-05-13T00:00:00Z/2025-05-14T23:59:59Z&BBOX=-120,33,-118,35&CORNERS=1&COMPRESS=1' | gzip -d > junk ; echo $? ; ~/bin/Linux.x86_64/ncdump -h junk
+
+sleep 2 ; echo ; echo TEST modis.mod6.Tropopause_Height netcdf-coards ; echo
+curl --silent --retry 0 'https://maple.hesc.epa.gov/rsig/rsigserver?SERVICE=wcs&VERSION=1.0.0&REQUEST=GetCoverage&COVERAGE=modis.mod6.Tropopause_Height&FORMAT=netcdf-coards&TIME=2025-05-13T00:00:00Z/2025-05-14T23:59:59Z&BBOX=-120,33,-118,35&CORNERS=1&COMPRESS=1' | gzip -d > junk ; echo $? ; ~/bin/Linux.x86_64/ncdump -h junk
+
+sleep 2 ; echo ; echo TEST modis.mod7.Total_Ozone netcdf-coards ; echo
+curl --silent --retry 0 'https://maple.hesc.epa.gov/rsig/rsigserver?SERVICE=wcs&VERSION=1.0.0&REQUEST=GetCoverage&COVERAGE=modis.mod7.Total_Ozone&FORMAT=netcdf-coards&TIME=2025-05-13T00:00:00Z/2025-05-14T23:59:59Z&BBOX=-120,33,-118,35&CORNERS=1&COMPRESS=1' | gzip -d > junk ; echo $? ; ~/bin/Linux.x86_64/ncdump -h junk
+
+
+
+# NetCDF-IOAPI:
+
+sleep 2 ; echo ; echo TEST modis.mod4.AOD_550_Dark_Target_Deep_Blue_Combined netcdf-ioapi ; echo
+curl --silent --retry 0 'https://maple.hesc.epa.gov/rsig/rsigserver?SERVICE=wcs&VERSION=1.0.0&REQUEST=GetCoverage&COVERAGE=modis.mod4.AOD_550_Dark_Target_Deep_Blue_Combined&FORMAT=netcdf-ioapi&TIME=2025-05-13T00:00:00Z/2025-05-14T23:59:59Z&BBOX=-120,33,-118,35&CORNERS=1&REGRID=weighted&LAMBERT=33,45,-97,40&ELLIPSOID=6370000,6370000&GRID=459,299,-2556000,-1728000,12000,12000&COMPRESS=1' | gzip -d > junk ; echo $? ; ~/bin/Linux.x86_64/ncdump -h junk
+
+sleep 2 ; echo ; echo TEST modis.mod43k.Optical_Depth_Land_And_Ocean netcdf-ioapi ; echo
+curl --silent --retry 0 'https://maple.hesc.epa.gov/rsig/rsigserver?SERVICE=wcs&VERSION=1.0.0&REQUEST=GetCoverage&COVERAGE=modis.mod43k.Optical_Depth_Land_And_Ocean&FORMAT=netcdf-ioapi&TIME=2025-05-13T00:00:00Z/2025-05-14T23:59:59Z&BBOX=-120,33,-118,35&CORNERS=1&REGRID=weighted&LAMBERT=33,45,-97,40&ELLIPSOID=6370000,6370000&GRID=459,299,-2556000,-1728000,12000,12000&COMPRESS=1' | gzip -d > junk ; echo $? ; ~/bin/Linux.x86_64/ncdump -h junk
+
+sleep 2 ; echo ; echo TEST modis.mod6.Tropopause_Height netcdf-ioapi ; echo
+curl --silent --retry 0 'https://maple.hesc.epa.gov/rsig/rsigserver?SERVICE=wcs&VERSION=1.0.0&REQUEST=GetCoverage&COVERAGE=modis.mod6.Tropopause_Height&FORMAT=netcdf-ioapi&TIME=2025-05-13T00:00:00Z/2025-05-14T23:59:59Z&BBOX=-120,33,-118,35&CORNERS=1&REGRID=weighted&LAMBERT=33,45,-97,40&ELLIPSOID=6370000,6370000&GRID=459,299,-2556000,-1728000,12000,12000&COMPRESS=1' | gzip -d > junk ; echo $? ; ~/bin/Linux.x86_64/ncdump -h junk
+
+sleep 2 ; echo ; echo TEST modis.mod7.Total_Ozone netcdf-ioapi ; echo
+curl --silent --retry 0 'https://maple.hesc.epa.gov/rsig/rsigserver?SERVICE=wcs&VERSION=1.0.0&REQUEST=GetCoverage&COVERAGE=modis.mod7.Total_Ozone&FORMAT=netcdf-ioapi&TIME=2025-05-13T00:00:00Z/2025-05-14T23:59:59Z&BBOX=-120,33,-118,35&CORNERS=1&REGRID=weighted&LAMBERT=33,45,-97,40&ELLIPSOID=6370000,6370000&GRID=459,299,-2556000,-1728000,12000,12000&COMPRESS=1' | gzip -d > junk ; echo $? ; ~/bin/Linux.x86_64/ncdump -h junk
+
+
+
+/bin/rm -f junk
+echo ; echo DONE MODIS ; echo

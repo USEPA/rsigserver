@@ -4,7 +4,7 @@
 # PURPOSE: surfmetserver - Serve SURF_MET station data, subsetted by date/time
 #          range, variable, and longitude-latitude box, in ASCII, XDR, original,
 #          NetCDF-COARDS, and NetCDF-IOAPI formats for use by other programs
-#          (e.g., via wget).
+#          (e.g., via curl).
 #
 # NOTES:   Server is WCS-compliant:
 #          https://www.opengeospatial.org/standards/wcs
@@ -19,7 +19,7 @@
 #
 #          Example:
 #
-#          wget -q -T 0 -O - 'https://rtpmeta.epa.gov/portal/surfmetserver?\
+#          curl -q -T 0 -O - 'https://rtpmeta.epa.gov/portal/surfmetserver?\
 #                    SERVICE=wcs&\
 #                    VERSION=1.0.0&\
 #                    REQUEST=GetCoverage&\
@@ -47,28 +47,27 @@ my $debugging = 0; # 1 = print debug messages to STDERR logs/error_log
 
 # Server where this program is installed:
 
-my $server_path = 'https://YOUR_WEBSERVER_HOST/cgi-bin';
+my $server_path = 'https://maple.hesc.epa.gov/cgi-bin';
 my $bindir      = '/rsig/current/code/bin/Linux.x86_64';
 my $subsetter   = "$bindir/SiteSubset";
 my $xdrconvert  = "$bindir/XDRConvert";
-my $compressor  = "$bindir/gzip -c -1";
+my $compressor  = "/usr/bin/gzip -c -1";
 
-# External server to forward to via wget command:
+# External server to forward to via curl command:
 
-#my $wget = "$bindir/wget -q -t 1 -T 0 -O -";
-my $wget = '/usr/bin/curl -k -g --silent --max-time 3600 --retry 0 --tcp-nodelay';
+my $curl = '/usr/bin/curl -k -g --silent --max-time 3600 --retry 0 --tcp-nodelay';
 
 # Old service got moved in Jan 2017:
-# my $wget_command =
-#  "$wget '" .
+# my $curl_command =
+#  "$curl '" .
 #  'https://webapps.datafed.net/ogc_PSWC.wsfl?' .
 #  'SERVICE=WCS&REQUEST=GetCoverage&VERSION=1.0.0&CRS=EPSG:4326&' .
 #  'WIDTH=-1&HEIGHT=-1&DEPTH=-1&FORMAT=CSV&' .
 #  'COVERAGE=SURF_MET.';
 ##t&TIME=2005-08-26T20:00:00Z/2005-08-27T01:59:59Z/PT1H&BBOX=-90,30,-88,32,0,0';
 
-my $wget_command =
-  "$wget '" .
+my $curl_command =
+  "$curl '" .
   'https://webapps.datafed.net/SURF_MET.ogc?' .
   'SERVICE=WCS&REQUEST=GetCoverage&VERSION=1.0.0&CRS=EPSG:4326&' .
   'WIDTH=-1&HEIGHT=-1&DEPTH=-1&FORMAT=CSV&' .
@@ -340,6 +339,13 @@ sub main {
 
   $result = 1 - $result; # UNIX: zero is success, non-zero is failure.
   debug( "exit result = $result" );
+
+  # Must return some bytes to avoid 30 second timeout delay when unsuccessful:
+
+  if ( $result != 0 ) {
+    print STDOUT "\nFAILED\n";
+  }
+
   exit $result;
 }
 
@@ -1277,7 +1283,7 @@ sub query_external_wcs {
     $bbox00 .= ',0,0';
   }
 
-  my $wcs_command = $wget_command . "$parameter&TIME=$ext_time&BBOX=$bbox00'";
+  my $wcs_command = $curl_command . "$parameter&TIME=$ext_time&BBOX=$bbox00'";
   my $the_pipe = 0;
 
   if ( $is_wind ) { # UGLY HACK to switch webservice for Wind:
@@ -1375,7 +1381,7 @@ sub query_external_wcs {
           }
         }
 
-        close( the_pipe ) or die $!;
+        close( the_pipe );
         $result = ! $?;
       }
     } else { # Child process.
@@ -1599,7 +1605,7 @@ sub execute_command {
         print;
       }
 
-      close( the_pipe ) or die $!;
+      close( the_pipe );
       $result = ! $?;
     } else { # Child process.
       exec( $command ) or die "can't exec program: $!";

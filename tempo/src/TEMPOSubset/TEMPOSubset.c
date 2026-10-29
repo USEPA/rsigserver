@@ -11,12 +11,13 @@ NOTES:   Uses NetCDF4 and HDF5 libraries and libs they depend on (curl, z, dl).
 
          Usage:
          TEMPOSubset -files <listfile> \
-                      -tmpdir <temp_directory> \
-                      -desc "description text" \
+                      [-tmpdir <temp_directory>] \
+                      [-desc "description text"] \
                       -timestamp <yyyymmddhh> -hours <count> \
                       -variable <name> \
-                      -domain <minimum_longitude> <minimum_latitude> \
-                              <maximum_longitude> <maximum_latitude> \
+                      [-domain <minimum_longitude> <minimum_latitude> \
+                              <maximum_longitude> <maximum_latitude>] \
+                      [-layer value] \
                       [-minimumQuality value] \
                       [-maximumCloudFraction value] \
                       [-maximumSolarZenithAngle value] \
@@ -147,6 +148,7 @@ typedef struct {
   const char* description;    /* User-supplied description. */
   const char* variable;       /* Name of variable to read. */
   Bounds      domain; /* Subset domain[LONGITUDE,LATITUDE][MINIMUM,MAXIMUM]. */
+  int         layer;          /* 1-based O3PROF layer of subset. */
   int         yyyymmddhh;     /* First timestamp of subset. */
   int         hours;          /* Number of hours in subset. */
   int         minimumQuality; /* Minimum quality filter [0, 2]. */
@@ -183,6 +185,7 @@ typedef struct {
   long long*  yyyydddhhmm;  /* Timestamp per output subset scan. */
   long long*  points;       /* Number of points per output subset scan. */
   int         isL3;         /* Is this a set of L3 grid files? */
+  double      elevation;    /* Mean elevation (in meters) of center of layer.*/
   GridInfo    gridInfo;     /* Of L3 gridded data. */
   size_t      gridSubsetIndices[2][2]; /* [COLUMN, ROW][FIRST, LAST]. 1-based*/
   double*     gridSubsetValues; /* For L3: subset variable read buffer. */
@@ -206,6 +209,7 @@ static int isValidArguments( const Arguments* const arguments ) {
     arguments->variable &&
     arguments->variable[ 0 ] &&
     isValidBounds( (const double (*)[2]) arguments->domain ) &&
+    arguments->layer >= 1 &&
     isValidYYYYMMDDHH( arguments->yyyymmddhh ) &&
     arguments->hours > 0 &&
     arguments->minimumQuality >= 0 &&
@@ -258,6 +262,7 @@ static int readFileInfo( const char* const fileName,
                          const char** variable,
                          int* const file,
                          long long* const yyyymmddhhmm,
+                         size_t* const layers,
                          size_t* const rows,
                          size_t* const columns,
                          size_t* const size,
@@ -265,6 +270,7 @@ static int readFileInfo( const char* const fileName,
 
 static void readCoordinatesAndValues( Data* const data,
                                       const int file,
+                                      const size_t layers,
                                       const size_t rows,
                                       const size_t columns,
                                       double* const longitudes,
@@ -406,13 +412,14 @@ static void printUsage( const char* name ) {
   fprintf( stderr, "\nUsage:\n\n" );
   fprintf( stderr, "%s \\\n", name );
   fprintf( stderr, "  -files <listfile> \\\n" );
-  fprintf( stderr, "  -tmpdir <temp_directory> \\\n" );
-  fprintf( stderr, "  -desc \"description text\" \\\n" );
+  fprintf( stderr, "  [-tmpdir <temp_directory>] \\\n" );
+  fprintf( stderr, "  [-desc \"description text\"] \\\n" );
   fprintf( stderr, "  -timestamp <yyyymmddhh> -hours <count> \\\n" );
   fprintf( stderr, "  -variable <name> \\\n" );
-  fprintf( stderr, "  -domain <minimum_longitude> <minimum_latitude>" );
-  fprintf( stderr, " <maximum_longitude> <maximum_latitude> \\\n" );
+  fprintf( stderr, "  [-domain <minimum_longitude> <minimum_latitude>" );
+  fprintf( stderr, " <maximum_longitude> <maximum_latitude>] \\\n" );
   fprintf( stderr, "  [-minimumQuality value]\\\n" );
+  fprintf( stderr, "  [-layer value]\\\n" );
   fprintf( stderr, "  [-maximumCloudFraction value]\\\n" );
   fprintf( stderr, "  [-maximumSolarZenithAngle value]\\\n" );
   fprintf( stderr, "  [-allowNegativeCounts]\\\n" );
@@ -420,6 +427,9 @@ static void printUsage( const char* name ) {
   fprintf( stderr, "Note:\ntimestamp is in UTC (GMT)\n" );
   fprintf( stderr, "-tmpdir specifies a directory were a transient file is " );
   fprintf( stderr, "written.\nIt should have enough disk space (1TB).\n" );
+  fprintf( stderr, "-layer is the 1-based ground-up layer number of O3PROF"
+           " data to retrieve.\n");
+  fprintf( stderr, "Range is [1, 24]. Default is 1.\n");
   fprintf( stderr, "-minimumQuality option filters-out values less than the " );
   fprintf( stderr, "specified allowed minimum to accept:\n" );
   fprintf( stderr, "[0 = only 'normal' values allowed,\n" );
@@ -497,15 +507,18 @@ static int parseArguments(int argc, char* argv[], Arguments* const arguments) {
   assert( argc > 0 ); assert( argv ); assert( argv[ 0 ] );
   assert( argv[ argc - 1 ] ); assert( arguments );
   memset( arguments, 0, sizeof (Arguments) );
+  arguments->description = "http://tempo.si.edu/,TEMPOSubset";
+  arguments->tmpdir = ".";
   arguments->domain[ LONGITUDE ][ MINIMUM ] = -180.0;
   arguments->domain[ LONGITUDE ][ MAXIMUM ] =  180.0;
   arguments->domain[ LATITUDE  ][ MINIMUM ] =  -90.0;
   arguments->domain[ LATITUDE  ][ MAXIMUM ] =   90.0;
+  arguments->layer = 1; /* Range [1, 24]. Only used for O3PROF data. */
   arguments->minimumQuality = 0; /* Range: [0, 2], default 0 = normal. */
   arguments->maximumCloudFraction = 1.0; /* Allow any fraction of clouds. */
   arguments->maximumSolarZenithAngle = 90.0; /* Allow any solar zenith angle */
 
-  result = argc >= 18 && argc <= 26;
+  result = argc >= 18 && argc <= 28;
 
   for ( arg = 1; result && arg < argc; ++arg ) {
 
@@ -552,6 +565,10 @@ static int parseArguments(int argc, char* argv[], Arguments* const arguments) {
       arguments->domain[ LATITUDE ][ MAXIMUM ] = value;
       result = result == 5 &&
                isValidBounds( (const double (*)[2]) arguments->domain );
+    } else if ( ! strcmp( argv[ arg ], "-layer" ) && arg + 1 < argc ) {
+      ++arg;
+      arguments->layer = atoi( argv[ arg ] );
+      result = arguments->layer >= 1;
     } else if ( ! strcmp( argv[ arg ], "-minimumQuality") &&
                 arg + 1 < argc && isdigit( argv[ arg + 1 ][ 0 ] ) ) {
       ++arg;
@@ -602,6 +619,8 @@ OUTPUTS: Data* data  data->yyyydddhhmm, points, cellWidthHeight, scans, ok,
 
 static void readData( Data* const data ) {
   const Arguments* const arguments = &( data->arguments );
+  const int end_yyyymmddhh =
+    incrementHours( arguments->yyyymmddhh, arguments->hours );
   char* listFileContent = readListFileAndAllocateScanArrays( data );
   int wroteSomeData = 0;
   data->ok = listFileContent != 0;
@@ -609,6 +628,7 @@ static void readData( Data* const data ) {
   if ( data->ok ) {
     char* fileName       = 0;
     char* end            = 0;
+    size_t layers        = 0;
     size_t rows          = 0;
     size_t columns       = 0;
     size_t size          = 0;
@@ -632,7 +652,8 @@ static void readData( Data* const data ) {
 
     data->isL3 =
       ! arguments->corners &&
-      strstr( listFileContent, "_L3_V" ) != 0 &&
+      ( strstr( listFileContent, "_L3_V" ) != 0 ||
+        strstr( listFileContent, "_L3_NRT_V" ) != 0 ) &&
       strstr( listFileContent, "_L2_V" ) == 0 &&
       strstr( listFileContent, "_PM25_L3_" ) == 0;
 
@@ -641,141 +662,152 @@ static void readData( Data* const data ) {
     for ( fileName = strtok_r( listFileContent, "\n", &end );
           fileName;
           fileName = strtok_r( 0, "\n", &end ) ) {
-      int file = 0;
-      long long yyyymmddhhmm = 0;
-      int changedDimensions = 0;
 
-      if ( strstr( fileName, "_PM25_L3_V" ) ||
-           strstr( fileName, "_ADP_L2_V" ) ) {
-        data->variable = arguments->variable;
-      }
+      if ( fileExists( fileName ) ) {
+        int file = 0;
+        long long yyyymmddhhmm = 0;
+        long long yyyymmddhh = 0;
+        int changedDimensions = 0;
 
-      data->ok =
-        readFileInfo( fileName,
-                      &(data->product),
-                      &(data->variable),
-                      &file, &yyyymmddhhmm, &rows, &columns, &size,
-                      &changedDimensions );
-
-      if ( data->ok && ! strcmp( data->product, "PM25_L3" ) ) {
-        data->variable = arguments->variable;
-      }
-
-      DEBUG( fprintf( stderr,
-                     "\n%s %lld %s %s isL3 = %d, %lu x %lu = %lu "
-                     "changed = %d, ok = %d\n",
-                     fileName, yyyymmddhhmm, data->product, data->variable,
-                     data->isL3, rows, columns, size, changedDimensions,
-                     data->ok ); )
-
-      if ( data->ok ) {
-
-        if ( data->isL3 ) {
-
-          if ( data->gridInfo.rows == 0 ) {
-            data->ok = initializeGridInfo( file, rows, columns, data );
-          } else {
-            data->ok =
-              rows == data->gridInfo.rows && columns == data->gridInfo.columns;
-
-            if ( data->ok ) {
-              data->ok = matchesGridInfo( file, rows, columns, data );
-            }
-
-            if ( ! data->ok ) {
-              fprintf( stderr, "Skipping file with unmatched grid '%s'.\n",
-                       fileName );
-            }
-          }
-        } else if ( changedDimensions ) {
-          const int corners = arguments->corners;
-          const size_t variables = 4 + 8 * corners; /* lon,lat,values,scratch*/
-          const size_t dataSize = variables * size * sizeof (double);
-          const size_t maskSize = size * sizeof (unsigned char);
-          const size_t bytes = dataSize + maskSize;
-
-          if ( buffer ) {
-            free( buffer ), buffer = 0;
-          }
-
-          buffer = malloc( bytes );
-          data->ok = buffer != 0;
-
-          if ( buffer ) {
-            memset( buffer, 0, bytes );
-            longitudes = buffer;
-            latitudes  = longitudes + size;
-            values     = latitudes  + size;
-            scratch    = values + size;
-
-            if ( corners ) {
-              longitudesSW = scratch      + size;
-              longitudesSE = longitudesSW + size;
-              longitudesNW = longitudesSE + size;
-              longitudesNE = longitudesNW + size;
-              latitudesSW  = longitudesNE + size;
-              latitudesSE  = latitudesSW  + size;
-              latitudesNW  = latitudesSE  + size;
-              latitudesNE  = latitudesNW  + size;
-              mask = (unsigned char*) ( latitudesNE + size );
-            } else {
-              mask = (unsigned char*) ( scratch + size );
-            }
-          } else {
-            fprintf( stderr,
-                     "\nCan't allocate %lu bytes "
-                     "to complete the requested action.\n", bytes );
-          }
+        if ( strstr( fileName, "_PM25_L3_V" ) ||
+             strstr( fileName, "_ADP_L2_V" ) ) {
+          data->variable = arguments->variable;
         }
 
-        if ( data->ok ) {
-          readCoordinatesAndValues( data, file, rows, columns,
-                                    longitudes, latitudes, values, scratch );
+        data->ok =
+          readFileInfo( fileName,
+                        &(data->product),
+                        &(data->variable),
+                        &file, &yyyymmddhhmm, &layers, &rows, &columns, &size,
+                        &changedDimensions );
+
+        if ( data->ok && ! strcmp( data->product, "PM25_L3" ) ) {
+          data->variable = arguments->variable;
         }
 
-        closeFile( file );
-        file = -1;
+        DEBUG( fprintf( stderr,
+                       "\n%s %lld %s %s isL3 = %d, layers = %lu, "
+                       "%lu x %lu = %lu "
+                       "changed = %d, ok = %d\n",
+                       fileName, yyyymmddhhmm, data->product, data->variable,
+                       data->isL3, layers, rows, columns, size,
+                       changedDimensions,
+                       data->ok ); )
 
-        if ( data->ok ) {
+        yyyymmddhh = yyyymmddhhmm / 100;
+
+        if ( data->ok &&
+             yyyymmddhh >= arguments->yyyymmddhh &&
+             yyyymmddhh < end_yyyymmddhh ) {
 
           if ( data->isL3 ) {
 
-            if ( ! wroteGridHeader ) {
-              writeGridHeader( data );
-              wroteGridHeader = 1;
-            }
+            if ( data->gridInfo.rows == 0 ) {
+              data->ok = initializeGridInfo( file, rows, columns, data );
+            } else {
+              data->ok =
+                rows == data->gridInfo.rows &&
+                columns == data->gridInfo.columns;
 
-            writeSubsetGridData( data, yyyymmddhhmm / 100 );
-          } else {
-            const size_t subsetPoints =
-              pointsInDomain( (const double (*)[2]) data->arguments.domain,
-                              size, longitudes, latitudes, values, mask );
-            DEBUG( fprintf( stderr, "subsetPoints = %lu\n", subsetPoints ); )
-
-            if ( subsetPoints ) {
-
-              if ( longitudesSW ) {
-                computeCorners( rows, columns, longitudes, latitudes,
-                                longitudesSW, longitudesSE,
-                                longitudesNW, longitudesNE,
-                                latitudesSW, latitudesSE,
-                                latitudesNW, latitudesNE );
+              if ( data->ok ) {
+                data->ok = matchesGridInfo( file, rows, columns, data );
               }
 
-              writeSubset( data, yyyymmddhhmm, subsetPoints, size,
-                           mask, longitudes, latitudes, values,
-                           longitudesSW, longitudesSE,
-                           longitudesNW, longitudesNE,
-                           latitudesSW, latitudesSE,
-                           latitudesNW, latitudesNE );
+              if ( ! data->ok ) {
+                fprintf( stderr, "Skipping file with unmatched grid '%s'.\n",
+                         fileName );
+              }
+            }
+          } else if ( changedDimensions || ! buffer ) {
+            const int corners = arguments->corners;
+            const size_t variables = 4 + 8 * corners; /*lon,lat,values,scratch*/
+            const size_t dataSize = variables * size * sizeof (double);
+            const size_t maskSize = size * sizeof (unsigned char);
+            const size_t bytes = dataSize + maskSize;
+
+            if ( buffer ) {
+              free( buffer ), buffer = 0;
+            }
+
+            buffer = malloc( bytes );
+            data->ok = buffer != 0;
+
+            if ( buffer ) {
+              memset( buffer, 0, bytes );
+              longitudes = buffer;
+              latitudes  = longitudes + size;
+              values     = latitudes  + size;
+              scratch    = values + size;
+
+              if ( corners ) {
+                longitudesSW = scratch      + size;
+                longitudesSE = longitudesSW + size;
+                longitudesNW = longitudesSE + size;
+                longitudesNE = longitudesNW + size;
+                latitudesSW  = longitudesNE + size;
+                latitudesSE  = latitudesSW  + size;
+                latitudesNW  = latitudesSE  + size;
+                latitudesNE  = latitudesNW  + size;
+                mask = (unsigned char*) ( latitudesNE + size );
+              } else {
+                mask = (unsigned char*) ( scratch + size );
+              }
+            } else {
+              fprintf( stderr,
+                       "\nCan't allocate %lu bytes "
+                       "to complete the requested action.\n", bytes );
             }
           }
 
           if ( data->ok ) {
-            wroteSomeData = 1;
+            readCoordinatesAndValues( data, file, layers, rows, columns,
+                                      longitudes, latitudes, values, scratch );
           }
-        }
-      } /* If ok */
+
+          closeFile( file );
+          file = -1;
+
+          if ( data->ok ) {
+
+            if ( data->isL3 ) {
+
+              if ( ! wroteGridHeader ) {
+                writeGridHeader( data );
+                wroteGridHeader = 1;
+              }
+
+              writeSubsetGridData( data, yyyymmddhh );
+            } else {
+              const size_t subsetPoints =
+                pointsInDomain( (const double (*)[2]) data->arguments.domain,
+                                size, longitudes, latitudes, values, mask );
+              DEBUG( fprintf( stderr, "subsetPoints = %lu\n", subsetPoints ); )
+
+              if ( subsetPoints ) {
+
+                if ( longitudesSW ) {
+                  computeCorners( rows, columns, longitudes, latitudes,
+                                  longitudesSW, longitudesSE,
+                                  longitudesNW, longitudesNE,
+                                  latitudesSW, latitudesSE,
+                                  latitudesNW, latitudesNE );
+                }
+
+                writeSubset( data, yyyymmddhhmm, subsetPoints, size,
+                             mask, longitudes, latitudes, values,
+                             longitudesSW, longitudesSE,
+                             longitudesNW, longitudesNE,
+                             latitudesSW, latitudesSE,
+                             latitudesNW, latitudesNE );
+              }
+            }
+
+            if ( data->ok ) {
+              wroteSomeData = 1;
+            }
+          }
+        } /* If ok */
+      } /* If listed file exists. */
     } /* End loop on listFile. */
 
     free( listFileContent ), listFileContent = 0;
@@ -794,8 +826,6 @@ static void readData( Data* const data ) {
   DEBUG(fprintf(stderr, "\nEnd of file processing, data->ok = %d\n",data->ok);)
 
   if ( data->ok && data->isL3 ) {
-    const int end_yyyymmddhh =
-      incrementHours( arguments->yyyymmddhh, arguments->hours );
     writeDataBeforeYYYYMMDDHH( data, end_yyyymmddhh );
   }
 }
@@ -846,7 +876,7 @@ static size_t initializeGridInfo( const int file,
     indices[ COLUMN ][ LAST ] = columns;
     memset( buffer, 0, bytes );
     data->ok =
-      readFileData( file, data->product, "longitude", 1, columns,
+      readFileData( file, data->product, "longitude", 0, 1, columns,
                     (const size_t (*)[2]) indices,
                     0, 1.0, 90.0, 0, unused, buffer, 0 ) > 0;
 
@@ -872,7 +902,7 @@ static size_t initializeGridInfo( const int file,
           indices[ COLUMN ][ LAST ] = 1;
           indices[ ROW ][ LAST ] = rows;
           data->ok =
-            readFileData( file, data->product, "latitude", rows, 1,
+            readFileData( file, data->product, "latitude", 0, rows, 1,
                           (const size_t (*)[2]) indices,
                           0, 1.0, 90.0, 0, unused, buffer, 0 ) > 0;
 
@@ -1098,7 +1128,7 @@ static int matchesGridInfo( const int file,
     indices[ COLUMN ][ LAST ] = columns;
     memset( buffer, 0, bytes );
     data->ok =
-      readFileData( file, data->product, "longitude", 1, columns,
+      readFileData( file, data->product, "longitude", 0, 1, columns,
                     (const size_t (*)[2]) indices,
                     0, 1.0, 90.0, 0, unused, buffer, 0 ) > 0;
 
@@ -1123,7 +1153,7 @@ static int matchesGridInfo( const int file,
           indices[ COLUMN ][ LAST ] = 1;
           indices[ ROW ][ LAST ] = rows;
           data->ok =
-            readFileData( file, data->product, "latitude", rows, 1,
+            readFileData( file, data->product, "latitude", 0, rows, 1,
                           (const size_t (*)[2]) indices,
                           0, 1.0, 90.0, 0, unused, buffer, 0 ) > 0;
 
@@ -1152,6 +1182,8 @@ static int matchesGridInfo( const int file,
         }
       }
     }
+
+    free( buffer ), buffer = 0;
   }
 
   return result;
@@ -1277,7 +1309,11 @@ PURPOSE: swathFileTimestamp - Timestamp of swath file.
 INPUTS:  const char* const fileName   Name of TEMPO file.
 RETURNS: long long yyyymmddhhmm of file or 0 if failed and message on stderr.
 NOTES: File names look like:
-S5P_OFFL_L2__NO2____20171128T163259_20171128T181628_00657_03_001108_20171220T145115.nc
+         TEMPO_CLDO4_L2_V01_20231017T111336Z_S001G01.nc
+         TEMPO_HCHO_L2_V01_20231017T111336Z_S001G01.nc
+         TEMPO_NO2_L2_V01_20231017T111336Z_S001G01.nc
+         TEMPO_O3TOT_L2_V01_20231017T111336Z_S001G01.nc
+         so result is 202310171113 or 0 if failed.
 ******************************************************************************/
 
 static long long swathFileTimestamp( const char* const fileName ) {
@@ -1332,12 +1368,26 @@ static const char* swathFileProduct( const char* const fileName ) {
   const char* slash = strchr( fileName, '/' );
   const char* const name = slash ? slash + 1 : fileName;
 
-  if ( strstr( name, "NO2_L2_" ) ) {
+  if ( strstr( name, "NO2_L2_NRT" ) ) {
+    result = "NO2_L2_NRT";
+  } else if ( strstr( name, "HCHO_L2_NRT" ) ) {
+    result = "HCHO_L2_NRT";
+  } else if ( strstr( name, "CLDO4_L2_NRT" ) ) {
+    result = "CLDO4_L2_NRT";
+  } else if ( strstr( name, "NO2_L3_NRT" ) ) {
+    result = "NO2_L3_NRT";
+  } else if ( strstr( name, "HCHO_L3_NRT" ) ) {
+    result = "HCHO_L3_NRT";
+  } else if ( strstr( name, "CLDO4_L3_NRT" ) ) {
+    result = "CLDO4_L3_NRT";
+  } else if ( strstr( name, "NO2_L2_" ) ) {
     result = "NO2_L2";
   } else if ( strstr( name, "HCHO_L2_" ) ) {
     result = "HCHO_L2";
   } else if ( strstr( name, "O3TOT_L2_" ) ) {
     result = "O3TOT_L2";
+  } else if ( strstr( name, "O3PROF_L2_" ) ) {
+    result = "O3PROF_L2";
   } else if ( strstr( name, "CLDO4_L2_" ) ) {
     result = "CLDO4_L2";
   } else if ( strstr( name, "NO2_L3_" ) ) {
@@ -1346,6 +1396,8 @@ static const char* swathFileProduct( const char* const fileName ) {
     result = "HCHO_L3";
   } else if ( strstr( name, "O3TOT_L3_" ) ) {
     result = "O3TOT_L3";
+  } else if ( strstr( name, "O3PROF_L3_" ) ) {
+    result = "O3PROF_L3";
   } else if ( strstr( name, "CLDO4_L3_" ) ) {
     result = "CLDO4_L3";
   } else if ( strstr( name, "AODALH_L2_" ) ) {
@@ -1409,6 +1461,7 @@ static const char* swathFileVariable( const char* const fileName ) {
 PURPOSE: readFileInfo - Parse file name timestamp, product and variable and
          open it and read dimensions.
 INPUTS:  const char* const fileName    Name of file to check bounds/dims.
+         size_t* const layers          Layers of data in previous file or 0.
          size_t* const rows            Rows of data in previous file or 0.
          size_t* const columns         Columns of data in previous file or 0.
          const char** variable         E.g., "pm25_ge".
@@ -1416,11 +1469,12 @@ OUTPUTS: const char** product          E.g., "NO2_L2" or "L3".
          const char** variable         E.g., "no2".
          int* const file               NetCDF file id of file.
          long long* const yyyymmddhhmm Timestamp of file.
+         size_t* const layers          Layers of data in file or 0.
          size_t* const rows            Rows of data in file.
          size_t* const columns         Columns of data in file.
          size_t* const size            rows * columns.
          int* const changedDimensions  1 if rows or columns changed.
-RETURNS: int 1 if in domain else 0.
+RETURNS: int 1 if usable file else 0.
 ******************************************************************************/
 
 static int readFileInfo( const char* const fileName,
@@ -1428,6 +1482,7 @@ static int readFileInfo( const char* const fileName,
                          const char** variable,
                          int* const file,
                          long long* const yyyymmddhhmm,
+                         size_t* const layers,
                          size_t* const rows,
                          size_t* const columns,
                          size_t* const size,
@@ -1436,7 +1491,7 @@ static int readFileInfo( const char* const fileName,
   int result = 0;
   assert( fileName ); assert( *fileName ); assert( product ), assert( file );
   assert( yyyymmddhhmm );
-  assert( rows ); assert( columns ); assert( size );
+  assert( layers ); assert( rows ); assert( columns ); assert( size );
   assert( changedDimensions );
 
   *yyyymmddhhmm = swathFileTimestamp( fileName );
@@ -1456,14 +1511,17 @@ static int readFileInfo( const char* const fileName,
         *file = openFile( fileName );
 
         if ( *file != -1 ) {
+          size_t layers2 = 0;
           size_t rows2 = 0;
           size_t columns2 = 0;
           result =
-            readFileDimensions( *file, *product, *variable, &rows2, &columns2 );
+            readFileDimensions( *file, *product, *variable,
+                                &layers2, &rows2, &columns2 );
 
           if ( result ) {
 
-            if ( rows2 != *rows || columns2 != *columns ) {
+            if ( layers2 != *layers || rows2 != *rows || columns2 != *columns ) {
+              *layers = layers2;
               *rows = rows2;
               *columns = columns2;
               *size = rows2 * columns2;
@@ -1495,6 +1553,7 @@ static int readFileInfo( const char* const fileName,
 PURPOSE: readCoordinatesAndValues - Read lon-lats and variable data.
 INPUTS:  Data* const data              data->arguments.variable
          const int file                NetCDF file id of file to read.
+         const size_t layers           Layers of data or 0.
          const size_t rows             Rows of data to read.
          const size_t columns          Columns of data to read.
 OUTPUTS: Data* const data              data->ok, data->units[ 80 ]
@@ -1506,6 +1565,7 @@ OUTPUTS: Data* const data              data->ok, data->units[ 80 ]
 
 static void readCoordinatesAndValues( Data* const data,
                                       const int file,
+                                      const size_t layers,
                                       const size_t rows,
                                       const size_t columns,
                                       double* const longitudes,
@@ -1514,10 +1574,16 @@ static void readCoordinatesAndValues( Data* const data,
                                       double* const scratch ) {
 
   char unused[ 80 ] = "";
+  int readLayer = 0;
 
   assert( data ); assert( data->ok ); assert( data->arguments.variable );
   assert( file > -1 );
-  assert( rows ); assert( columns );
+  assert( rows ); assert( columns ); assert( layers >= 0 );
+
+  DEBUG( fprintf( stderr,
+          "readCoordinatesAndValues( ..., %lu, %lu, %lu, %p, %p, %p, %p )\n",
+                 layers, rows, columns,
+                 longitudes, latitudes, values, scratch ); )
 
   if ( ! data->isL3 ) {
     const char* longitude = "longitude";
@@ -1539,14 +1605,14 @@ static void readCoordinatesAndValues( Data* const data,
     }
 
     data->ok =
-      readFileData( file, data->product, longitude, rows, columns,
+      readFileData( file, data->product, longitude, 0, rows, columns,
                     (const size_t (*)[2]) data->gridSubsetIndices,
                     0, 1.0, 90.0, 0, unused,
                     longitudes, scratch ) > 0;
 
     if ( data->ok ) {
       data->ok =
-        readFileData( file, data->product, latitude, rows, columns,
+        readFileData( file, data->product, latitude, 0, rows, columns,
                       (const size_t (*)[2]) data->gridSubsetIndices,
                       0, 1.0, 90.0, 0, unused,
                       latitudes, scratch ) > 0;
@@ -1554,6 +1620,58 @@ static void readCoordinatesAndValues( Data* const data,
       if ( data->ok ) {
         data->ok =
           clampInvalidCoordinates( rows * columns, longitudes, latitudes );
+      }
+    }
+  }
+
+  if ( data->ok &&
+       ( ! strcmp( data->product, "O3PROF_L2" ) ||
+         ! strcmp( data->product, "O3PROF_L3" ) ) ) {
+
+    /* Compute mean elevation of specified layer: */
+
+    const size_t readRows =
+      data->isL3 ?
+        1 + data->gridSubsetIndices[ ROW ][ LAST  ] -
+            data->gridSubsetIndices[ ROW ][ FIRST ]
+      : rows;
+    const size_t readColumns =
+      data->isL3 ?
+        1 + data->gridSubsetIndices[ COLUMN ][ LAST  ] -
+            data->gridSubsetIndices[ COLUMN ][ FIRST ]
+      : columns;
+    double* const values2 = data->isL3 ? data->gridSubsetValues : values;
+
+    readLayer =
+      data->arguments.layer <= layers ? 1 + layers - data->arguments.layer
+      : 1;
+
+    data->ok =
+      readFileData( file, data->product, "ozone_profile_altitude",
+                    readLayer, readRows, readColumns,
+                    (const size_t (*)[2]) data->gridSubsetIndices,
+                    0, 1.0, 90.0, 0, unused,
+                    data->isL3 ? data->gridSubsetValues : values,
+                    data->isL3 ? data->gridSubsetScratch : scratch ) > 0;
+
+    if ( data->ok ) {
+      double sum = 0.0;
+      const size_t rowsTimesColumns = readRows * readColumns;
+      size_t count = 0;
+      size_t index = 0;
+
+      for ( index = 0; index < rowsTimesColumns; ++index ) {
+        const double value = values2[ index ];
+
+        if ( value > 0.0 ) {
+          sum += value;
+          ++count;
+        }
+      }
+
+      if ( count > 0 ) {
+        const double mean = sum / count;
+        data->elevation = mean * 1000.0; /* km to m. */
       }
     }
   }
@@ -1569,11 +1687,11 @@ static void readCoordinatesAndValues( Data* const data,
         1 + data->gridSubsetIndices[ COLUMN ][ LAST  ] -
             data->gridSubsetIndices[ COLUMN ][ FIRST ]
       : columns;
-
     data->ok =
       readFileData( file,
                     data->product,
                     data->arguments.variable,
+                    readLayer,
                     readRows,
                     readColumns,
                     (const size_t (*)[2]) data->gridSubsetIndices,
@@ -1608,6 +1726,10 @@ static void writeGridHeader( const Data* const data ) {
   const int lastColumn  = data->gridSubsetIndices[ COLUMN ][ LAST ];
   const int subsetRows = 1 + lastRow - firstRow;
   const int subsetColumns = 1 + lastColumn - firstColumn;
+  const double lowerElevation =
+    data->elevation > 2000.0 ? data->elevation - 1000.0 : 0.0;
+  const double upperElevation =
+    data->elevation > 0.0 ? lowerElevation + 2000.0 : 1.0;
 
   printf( "SUBSET 9.0 CMAQ\n" );
   printf( "TEMPO_L3\n" );
@@ -1627,12 +1749,15 @@ static void writeGridHeader( const Data* const data ) {
   printf( "%s\n", data->units );
   printf( "# lonlat projection: major_semiaxis minor_semiaxis\n" );
   printf( "6370000 6370000\n" );
-  printf( "# Grid: ncols nrows xorig yorig xcell ycell vgtyp vgtop vglvls[2]:\n" );
-  printf( "%lu %lu %f %f %f %f 6 40000 0 1\n",
+  printf( "# Grid: ncols nrows xorig yorig xcell ycell vgtyp vgtop "
+          "vglvls[2]:\n" );
+  printf( "%lu %lu %f %f %f %f 6 40000 %g %g\n",
           data->gridInfo.columns, data->gridInfo.rows,
           data->gridInfo.west, data->gridInfo.south,
-          data->gridInfo.cellWidth, data->gridInfo.cellHeight );
-  printf( "# IEEE-754 64-bit reals data[variables][timesteps][layers][rows][columns]:\n" );
+          data->gridInfo.cellWidth, data->gridInfo.cellHeight,
+          lowerElevation, upperElevation );
+  printf( "# IEEE-754 64-bit reals "
+          "data[variables][timesteps][layers][rows][columns]:\n" );
 }
 
 
@@ -2053,10 +2178,22 @@ static void streamHeader( const Data* const data ) {
   const char* const prefix = has_column_ ? data->variable : "";
   const char* const underscore = has_column_ ? "_" : "";
 
+  /* HACK: append elevation to description: */
+
+  char elevationDescription[ 80 ] = "";
+  memset( elevationDescription, 0, sizeof elevationDescription );
+
+  if ( data->elevation > 0.0 ) {
+    snprintf( elevationDescription,
+              sizeof elevationDescription / sizeof *elevationDescription,
+              "@%0.0fm",
+              data->elevation );
+  }
+
   assert( ! data->isL3 );
 
-  printf( "Swath 2.0\n%s\n%04d-%02d-%02dT%02d:00:00-0000\n",
-          arguments->description, yyyy, mm, dd, hh );
+  printf( "Swath 2.0\n%s%s\n%04d-%02d-%02dT%02d:00:00-0000\n",
+          arguments->description, elevationDescription, yyyy, mm, dd, hh );
   printf( "# Dimensions: variables timesteps scans:\n%d %d %d\n",
           variables, arguments->hours, data->scans );
   printf( "# Variable names:\n" );

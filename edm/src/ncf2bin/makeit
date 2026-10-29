@@ -1,15 +1,256 @@
 #!/bin/sh
+# PURPOSE: makeit - Compile debug or optimized application executable.
+#
+# NOTES:
+#  Compile debug version of application executable:
+#    makeit
+#  Compile optimized version of application executable:
+#    makeit optimized
+#  Run application executable:
+#    ../../../bin/$platform/$NAME
+#  Produce performance profile report:
+#    makeit 4profile ; ../../../bin/$platform/$NAME ; makeit profile
+#  Produce code coverage report:
+#    makeit 4coverage ; ../../../bin/$platform/$NAME ; makeit coverage
+#  Produce static analysis report:
+#    makeit lint
+#  Produce metrics report:
+#    makeit metrics
+#  Produce code API documentation:
+#    makeit doc
+#  Remove all generated artifacts:
+#    makeit clean
+#
+# HISTORY: 2018-12-28 plessel.todd@epa.gov
 
-clear
+
+# Specify application-specific source code files and libraries used:
+
+NAME="`pwd | awk -F/ '{ print $NF }'`"
+SOURCE="*.c"
+HEADERS="*.h"
+#LFLAGS='-lnetcdf -lm'
+LFLAGS='-lnetcdf4 -lhdf5_hl -lhdf5 -lcurl -lz -ldl -lm -lc'
+
+
+# Determine the platform using uname:
+
+UNAME_="`uname`"
+UNAME_M="`uname -m`"
+PLATFORM="$UNAME_.$UNAME_M"
+
+for repeat in {1..100} ; do echo ; done
+if [ "$PLATFORM" != 'Win32' ] ; then clear ; fi
+echo ; echo "Platform is $PLATFORM" ; echo
+
+
+# Set code directories:
+
+#INCLUDE_DIR='../../../include'
+#LIB_DIR="../../../lib/$PLATFORM"
+#BIN_DIR="../../../bin/$PLATFORM"
+
+INCLUDE_DIR='netcdf'
+LIB_DIR="netcdf/lib/$PLATFORM"
+BIN_DIR='.'
+APP="$BIN_DIR/$NAME"
+DOCS_DIR='docs'
+
+# Set default/initial compiler flags:
+
+CC=/usr/bin/gcc
+AR='ar -r'
+RANLIB='ar -t'
+LDD=ldd
+CFLAGS='-Wall'
+#CFLAGS_DEBUG='-g'
+CFLAGS_DEBUG="-g -DDEBUGGING"
+CFLAGS_OPTIMIZED="-O -DNDEBUG -DNO_ASSERTIONS"
+IFLAGS="-I. -I$INCLUDE_DIR"
+SYSTEM_LIBS=''
+
+# Adjust defaults/initial compiler flags to platform-specific requirements:
+
+if [ "$PLATFORM" == 'Darwin.x86_64' ] || [ "$PLATFORM" == 'Darwin.arm64' ]
+then
+  RANLIB='ranlib'
+  LDD='otool -L'
+  CFLAGS="-m64 $CFLAGS"
+
+  if [ "$PLATFORM" == 'Darwin.x86_64' ]
+  then
+    CFLAGS_DEBUG="-fsanitize=address $CFLAGS_DEBUG"
+
+    if [ "$1" == '' ]
+    then
+      SYSTEM_LIBS="-lgmalloc $SYSTEM_LIBS"
+    fi
+  fi
+
+elif [ "$PLATFORM" == 'Linux.x86_64' ]
+then
+##CFLAGS="-fopenmp -D_FILE_OFFSET_BITS=64 -D_LARGEFILE_SOURCE $CFLAGS"
+  CFLAGS="-D_FILE_OFFSET_BITS=64 -D_LARGEFILE_SOURCE $CFLAGS"
+elif [ "$PLATFORM" == 'Win32' ]
+then
+  LDD=ls
+  # HACK -O for BUG in g++ 4.7.3 to ensure that -inf + inf = nan instead of 0:
+  CFLAGS_DEBUG="$CFLAGS_DEBUG -O"
+  CFLAGS="-mwindows $CFLAGS"
+else
+  echo "Unsupported platform: $PLATFORM"
+  exit 1
+fi
+
+
+# Set final/derived compiler flags:
+
+if { [ "$1" == "optimized" ] || [ "$1" == "4profile" ]; }
+then
+  CFLAGS="$CFLAGS $CFLAGS_OPTIMIZED"
+  LFLAGS=`echo $LFLAGS | sed 's/.debug//g'`
+else
+  CFLAGS="$CFLAGS $CFLAGS_DEBUG"
+fi
+
+LFLAGS="-L$LIB_DIR $LFLAGS $SYSTEM_LIBS"
+
+# Ensure required output artifact sub-directories exist: 
+for d in docs test
+do
+  if [ ! -d $d ] ; then mkdir $d ; fi
+done
+
+
+# Process options:
+
+if [ "$1" == 'clean' ] # Remove all generated (non-source code) artifacts:
+then
+  rm -f $APP "$DOCS_DIR/$NAME"_API.txt
+  rm -f *.o */*.o *.g??? gmon.out test/*.out
+  exit 0
+elif [ "$1" == 'lint' ]
+then
+  flexelint -D__x86_64__ +fcp +fll -esym\(550,unused_assert_\) \
+            -esym\(752,unused_assert_static_\) \
+            -esym\(762,unused_assert_static_\) -esym\(529,unused\) \
+            $IFLAGS $SOURCE >& test/lint.out
+  echo >> test/lint.out
+  echo >> test/lint.out
+  echo Infer >> test/lint.out
+  infer run --no-liveness -- $CC $CFLAGS_DEBUG $IFLAGS -c $SOURCE
+  cat infer-out/bugs.txt >> test/lint.out
+  echo >> test/lint.out
+  echo >> test/lint.out
+  rm -rf *.o infer-out
+  echo >> test/lint.out
+  echo >> test/lint.out
+  echo "cppcheck --enable=all --suppress=unreadVariable $SOURCE" >> test/lint.out
+  $HOME/cppcheck-2.4/cppcheck --enable=all --suppress=unreadVariable $SOURCE 2>> test/lint.out
+  touch test/junklint ; \rm -rf test/junklint ; mkdir test/junklint
+  scan-build -o test/junklint $CC $CFLAGS_DEBUG $IFLAGS -c $SOURCE 2>> test/lint.out
+  echo >> test/lint.out
+  echo >> test/lint.out
+  cat test/lint.out
+  exit 0
+elif [ "$1" == 'metrics' ]
+then
+  metrics $HEADERS $SOURCE > docs/metrics.out
+  summetrics > docs/summetrics.out
+  cat docs/summetrics.out
+  exit 0
+elif [ "$1" == 'doc' ]
+then
+##rm -f docs/*_API.txt
+##makedoc $NAME "$LFLAGS"
+##DOC="docs/$NAME"_API.txt
+##sed "s/PRODUCTS:     $NAME.h/PRODUCTS:     $NAME/g" < $DOC > x ; mv x $DOC
+##cat $DOC
+  exit 0
+elif [ "$1" == '4profile' ]
+then
+  rm -f gmon.out test/profile.out $APP
+  CFLAGS="$CFLAGS -pg"
+elif [ "$1" == 'profile' ]
+then
+  gprof $APP 1> test/profile.out
+  awk '/^  % /{n = 13; while (n--) {print; getline}}' < test/profile.out
+  exit 0
+elif [ "$1" == '4coverage' ]
+then
+  rm -f *.g??? test/untested.out $APP
+  CFLAGS="$CFLAGS -ftest-coverage -fprofile-arcs"
+elif [ "$1" == 'coverage' ]
+then
+  rm -f test/untested.out
+
+  for f in $SOURCE
+  do
+    h="$f:r.h"
+
+    if [ -f "$h.gcov" ]
+    then
+      echo "---------------------- Untested lines in $h" 1>> test/untested.out
+      gcov -a $h 1> /dev/null
+      grep ' #####: \| $$$$$: ' < $h.gcov 1>> test/untested.out
+    fi
+
+    echo "------------------------ Untested lines in $f" 1>> test/untested.out
+    gcov -a $f 1> /dev/null
+    grep ' #####: \| $$$$$: ' < $f.gcov 1>> test/untested.out
+  done
+
+  cat test/untested.out
+  exit 0
+fi
+
+
+# Recompile application source code files concurrently:
+
+rm -f $APP *.o
+
+for SOURCE_FILE in $SOURCE
+do
+  echo \
+  "$CC $CFLAGS $IFLAGS -c $SOURCE_FILE &"
+   $CC $CFLAGS $IFLAGS -c $SOURCE_FILE \
+     2>&1 \
+     | grep -v assert_static \
+     | grep -v unused_ \
+     | grep -v ' warning: comparison is always true due to limited range ' \
+     | grep -v ' warning: comparison between signed and unsigned ' \
+     | grep -v 'In file included from ' \
+     | grep -v ': In member function ' \
+     | grep -v ': In function ' \
+     | grep -v '\^' \
+     | grep -v gluBuild2DMipmaps \
+     | grep -v ' generated' \
+     &
+done
+
+wait
+
+# Link application executable:
 
 echo
-echo "Compiling ncf2bin"
-gcc -m64 -Wall -D_FILE_OFFSET_BITS=64 -D_LARGEFILE_SOURCE -DNDEBUG -O -Inetcdf -o ncf2bin ncf2bin.c -Lnetcdf/lib/Linux.x86_64 -lnetcdf4 -lhdf5_hl -lhdf5 -lcurl -lz -ldl -lm -lc
-strip ncf2bin
-ls -l ncf2bin
-file  ncf2bin
-ldd   ncf2bin
+echo \
+"$CC $CFLAGS -o $APP *.o $LFLAGS" ; echo
+ $CC $CFLAGS -o $APP *.o $LFLAGS
 
-ls -Fsalt | head
-echo Done
+if [ "$1" == "optimized" ]
+then
+  strip $APP
+fi
+
+if [ $? != 0 ] ; then exit $? ; fi
+ls $APP 2>&1 > /dev/null
+if [ $? != 0 ] ; then exit $? ; fi
+#rm -f *.o
+
+echo ; ls -l $APP
+echo ; file  $APP
+echo ; $LDD $APP
+echo
+echo "To run this application: $APP"
+echo
 

@@ -1,0 +1,8 @@
+Data Year	"One of the three interconnect power grids in the U.S. (plus Alaska, Hawaii, and the entire U.S.)"	Estimated losses (MWh)	Total disposition (MWh) without exports	Direct use (MWh)	Grid gross loss [Estimated losses/(Total disposition without exports - Direct use)]
+YEAR	REGION	ESTLOSS	TOTDISP	DIRCTUSE	GGRSLOSS
+2023	Alaska	"266,812"	"6,717,825"	"257,915"	4.1%
+2023	ERCOT	"18,707,070"	"477,196,420"	"33,326,182"	4.2%
+2023	Eastern	"121,579,324"	"2,973,141,901"	"85,205,118"	4.2%
+2023	Hawaii	"395,363"	"9,194,164"	"196,737"	4.4%
+2023	Western	"30,244,892"	"746,640,041"	"17,788,276"	4.1%
+2023	U.S.	"171,193,462"	"4,212,890,351"	"136,774,229"	4.2%

@@ -1,0 +1,505 @@
+#!/usr/bin/perl -wT
+
+##############################################################################
+# PURPOSE: woaserver - Serve WOA gridded data, subsetted by date/time range,
+#          variable, and longitude-latitude box, in bin or original format
+#          for use by EstuaryDataMapper (e.g., via curl).
+#
+# NOTES:   Server is WCS-compliant:
+#          https://www.opengeospatial.org/standards/wcs
+#          https://datafed.net/xs/OpenGIS/wcs/1.0.0/
+#          and modeled after a similar webserver application:
+#          https://webapps.datafed.net/ogc_EPA.wsfl
+#
+#          Launches the C Shell script listfiles and the
+#          C program ncf2bin which streams the data back on STDOUT.
+#
+#          Data comes from:
+#          https://www.ncei.noaa.gov/data/oceans/woa/WOA23/DATA/*/netcdf/*/*/*.nc
+#
+#          Example:
+#
+#          curl -k --silent --retry 0 'https://ofmpub.epa.gov/rsig/rsigserver?\
+#                    SERVICE=wcs&\
+#                    VERSION=1.0.0&\
+#                    REQUEST=GetCoverage&\
+#                    COVERAGE=woa.temperature&\
+#                    TIME=2023-01-01T00:00:00Z/2023-12-31T23:59:59Z&\
+#                    BBOX=-85,28,-84,29,100,100,100&\
+#                    FORMAT=bin'
+#
+# HISTORY: 2026-06-05 plessel.todd@epa.gov 1-919-541-5500
+#
+# STATUS:  unreviewed tested
+##############################################################################
+
+use strict;
+#BEGIN { push @INC, '/Users/plessel/projects/rsig/code/perl'; }
+BEGIN { push @INC, '/data/Apache/cgi-bin'; }
+use emvl; # Local OGC-WCS query string parsing and printing utility functions.
+pop @INC;
+
+package main;
+$| = 1; # Turn off output buffering so messages appear in correct order.
+alarm( 3600 ); # Kill process after 1 hour. Legitimate usage could be an hour!
+# Restrict PATH and ENV. (But before popen, ENV is cleared!)
+delete @ENV{ 'PATH', 'IFS', 'CDPATH', 'ENV', 'BASH_ENV' };
+
+############################## TUNABLE CONSTANTS #############################
+
+emvl::set_debugging( 0 ); # 1 = print debug messages to STDERR logs/error_log
+
+my @pathed_program_parts = split( /\//, $0 );
+my $program_name = $pathed_program_parts[ @pathed_program_parts - 1 ];
+
+my $data_source = 'WOA';
+my $desc = 'https://www.ncei.noaa.gov/data/oceans/woa/WOA23/DATA/,ncf2bin';
+my $temp_directory  = '/data/tmp';
+my $data_directory  = '/data/land_use';
+my $bindir     = '/rsig/current/code/bin/Linux.x86_64';
+my $subsetter  = "$bindir/ncf2bin";
+my $compressor = '/usr/bin/gzip -c -1';
+my $ls         = '/bin/ls';
+my $ln         = '/bin/ln -s';
+my $cp         = '/bin/cp';
+my $rm         = '/bin/rm -f';
+my $tar        = '/usr/bin/tar -hzcO';
+my $temp_file_name = "/data/tmp/woaserver_temp.$$";
+
+# Output messages when REQUEST=GetMetadata.
+# Print this message first:
+
+my $metadata_content = '
+World Ocean Atlas global modelled gridded ocean temperature, salinity, etc.
+data accessed using RSIG.
+WOA: https://www.ncei.noaa.gov/data/oceans/woa/WOA23/DATA
+RSIG: https://www.epa.gov/rsig
+';
+
+# If FORMAT=original then print this message second:
+
+my $metadata_content_original = '
+The list of original data files are shown below.
+
+';
+
+# Else FORMAT!=original then print this message second:
+
+my $metadata_content_processed = '
+Data processing was done using the RSIG program ncf2bin.
+ncf2bin is used to subset (by variable, lon-lat box, depth and year or year-month)
+and reorganize/reformat and filter the data.
+The list of original data files and the RSIG command used to process them
+are shown below.
+
+';
+
+# All data variables are available within this date range and bounds:
+
+my $begin_date = '2023-01-01';
+my $end_date   = '2023-12-31';
+my $west_bound = -180;
+my $east_bound = 180;
+my $south_bound = -90;
+my $north_bound = 90;
+
+my @coverage_metadata = (
+  {
+    name => 'monthly_nitrate',
+    units => 'umol/kg',
+    description =>
+      'World Ocean Atalas global modelled 1-degree gridded at standard depths '.
+      'monthly mean ' .
+      'objectively analyzed moles of nitrate per unit mass in sea water.',
+    min => 0,
+    max => 1000000,
+    file => 'woa23_all_nMM_01.nc'
+  },
+  {
+    name => 'monthly_oxygen_saturation',
+    units => '%',
+    description =>
+      'World Ocean Atalas global modelled 1-degree gridded at standard depths '.
+      'monthly mean ' .
+      'objectively analyzed fractional saturation of oxygen in sea water.',
+    min => 0,
+    max => 100,
+    file => 'woa23_all_OMM_01.nc'
+  },
+  {
+    name => 'monthly_oxygen',
+    units => 'umol/kg',
+    description =>
+      'World Ocean Atalas global modelled 1-degree gridded at standard depths '.
+      'monthly mean ' .
+      'objectively analyzed moles of oxygen per unit mass in sea water.',
+    min => 0,
+    max => 1000000,
+    file => 'woa23_all_oMM_01.nc'
+  },
+  {
+    name => 'monthly_phosphate',
+    units => 'umol/kg',
+    description =>
+      'World Ocean Atalas global modelled 1-degree gridded at standard depths '.
+      'monthly mean ' .
+      'objectively analyzed moles of phosphate per unit mass in sea water.',
+    min => 0,
+    max => 1000000,
+    file => 'woa23_all_pMM_01.nc'
+  },
+  {
+    name => 'monthly_salinity',
+    units => 'PSU',
+    description =>
+      'World Ocean Atalas global modelled 0.25-degree gridded at standard depths '.
+      'monthly mean ' .
+      'objectively analyzed salinity in sea water.',
+    min => 0,
+    max => 100,
+    file => 'woa23_decav_sMM_04.nc'
+  },
+  {
+    name => 'monthly_silicate',
+    units => 'umol/kg',
+    description =>
+      'World Ocean Atalas global modelled 1-degree gridded at standard depths '.
+      'monthly mean ' .
+      'objectively analyzed moles of silicate per unit mass in sea water.',
+    min => 0,
+    max => 1000000,
+    file => 'woa23_all_iMM_01.nc'
+  },
+  {
+    name => 'monthly_temperature',
+    units => 'C',
+    description =>
+      'World Ocean Atalas global modelled 0.25-degree gridded at standard depths '.
+      'monthly mean ' .
+      'objectively analyzed salinity in sea water.',
+    min => 0,
+    max => 50,
+    file => 'woa23_decav_tMM_04.nc'
+  },
+
+
+  {
+    name => 'yearly_nitrate',
+    units => 'umol/kg',
+    description =>
+      'World Ocean Atalas global modelled 1-degree gridded at standard depths '.
+      'yearly mean ' .
+      'objectively analyzed moles of nitrate per unit mass in sea water.',
+    min => 0,
+    max => 1000000,
+    file => 'woa23_all_n00_01.nc'
+  },
+  {
+    name => 'yearly_oxygen_saturation',
+    units => '%',
+    description =>
+      'World Ocean Atalas global modelled 1-degree gridded at standard depths '.
+      'yearly mean ' .
+      'objectively analyzed fractional saturation of oxygen in sea water.',
+    min => 0,
+    max => 100,
+    file => 'woa23_all_O00_01.nc'
+  },
+  {
+    name => 'yearly_oxygen',
+    units => 'umol/kg',
+    description =>
+      'World Ocean Atalas global modelled 1-degree gridded at standard depths '.
+      'yearly mean ' .
+      'objectively analyzed moles of oxygen per unit mass in sea water.',
+    min => 0,
+    max => 1000000,
+    file => 'woa23_all_o00_01.nc'
+  },
+  {
+    name => 'yearly_phosphate',
+    units => 'umol/kg',
+    description =>
+      'World Ocean Atalas global modelled 1-degree gridded at standard depths '.
+      'yearly mean ' .
+      'objectively analyzed moles of phosphate per unit mass in sea water.',
+    min => 0,
+    max => 1000000,
+    file => 'woa23_all_p00_01.nc'
+  },
+  {
+    name => 'yearly_salinity',
+    units => 'PSU',
+    description =>
+      'World Ocean Atalas global modelled 0.25-degree gridded at standard depths '.
+      'yearly mean ' .
+      'objectively analyzed salinity in sea water.',
+    min => 0,
+    max => 100,
+    file => 'woa23_decav_s00_04.nc'
+  },
+  {
+    name => 'yearly_silicate',
+    units => 'umol/kg',
+    description =>
+      'World Ocean Atalas global modelled 1-degree gridded at standard depths '.
+      'yearly mean ' .
+      'objectively analyzed moles of silicate per unit mass in sea water.',
+    min => 0,
+    max => 1000000,
+    file => 'woa23_all_i00_01.nc'
+  },
+  {
+    name => 'yearly_temperature',
+    units => 'C',
+    description =>
+      'World Ocean Atalas global modelled 0.25-degree gridded at standard depths '.
+      'yearly mean ' .
+      'objectively analyzed salinity in sea water.',
+    min => 0,
+    max => 50,
+    file => 'woa23_decav_t00_04.nc'
+  }
+);
+
+################################## VARIABLES #################################
+
+my $data_files = ''; # E.g., /data/land_use/woa23_decav_t01_04.nc
+
+################################## ROUTINES ##################################
+
+
+main();
+
+
+sub main {
+  my $result = 0;
+
+  # Before calling emvl::parse_url(), specify various options so the default
+  # functions work:
+
+  emvl::set_source( $data_source );
+  emvl::set_metadata_begin_date( $begin_date );
+  emvl::set_metadata_end_date( $end_date );
+  emvl::set_metadata_west_bound( $west_bound );
+  emvl::set_metadata_east_bound( $east_bound );
+  emvl::set_metadata_south_bound( $south_bound );
+  emvl::set_metadata_north_bound( $north_bound );
+  emvl::set_coverage_metadata( \@coverage_metadata );
+  emvl::append_content_type( 'bin', 'application/octet-stream' );
+
+  if ( ! emvl::parse_url() ) {
+    print "Content-type: text/plain; charset=iso-8859-1\n\n"; # For webserver
+  } else {
+    my $request = emvl::get_request();
+    my $format = emvl::get_format();
+
+    if ( $request eq 'getcapabilities' ) {
+      print "Content-type: text/xml; charset=iso-8859-1\n\n"; # For webserver
+      emvl::print_capabilities();
+      $result = 1;
+    } elsif ( $request eq 'describecoverage' ) {
+      print "Content-type: text/xml; charset=iso-8859-1\n\n"; # For webserver
+      emvl::print_coverage_description();
+      $result = 1;
+    } elsif ( $request eq 'getcoverage' ) {
+      my $header = emvl::get_content_type_header(); # Based on parsed FORMAT.
+      print "$header\n\n";
+      compute_input_files();
+
+      if ( $data_files ne '' ) {
+        my $command = construct_command();
+
+        if ( $command ne '' ) {
+          $result = execute_command( $command );
+        }
+      }
+    } elsif ( $request eq 'getmetadata' ) {
+      print "Content-type: text/plain; charset=iso-8859-1\n\n"; # For webserver
+      compute_input_files();
+
+      if ( $data_files ne '' ) {
+        my $command = construct_command();
+
+        if ( $command ne '' ) {
+          print $metadata_content;
+          $data_files =~ tr/ /\n/;
+
+          if ( $format eq 'original' ) {
+            print $metadata_content_original;
+            print "$data_files\n";
+            print "\n";
+          } else {
+            print $metadata_content_processed;
+            print "$data_files\n";
+            print "\n$command\n\n";
+          }
+
+          $data_files =~ tr/\n/ /;
+          $result = 1;
+        }
+      }
+    }
+  }
+
+  if ( -f $temp_file_name ) {
+    unlink( $temp_file_name );
+  }
+
+  $result = 1 - $result; # UNIX: zero is success, non-zero is failure.
+  emvl::debug( "exit result = $result" );
+
+  # Must return some bytes to avoid 30 second timeout delay when unsuccessful:
+
+  if ( $result != 0 ) {
+    print STDOUT "\nFAILED\n";
+  }
+
+  exit $result;
+}
+
+
+
+# Create time-sorted list of input files:
+
+sub compute_input_files {
+  my $coverage_index = emvl::get_coverage_index();
+  my $coverage_info = $coverage_metadata[ $coverage_index ];
+  my $coverage = lc( emvl::get_coverage()) ;
+  my $is_monthly = index( $coverage, 'monthly_' ) != -1;
+  my $yyyymm  = int( emvl::get_yyyymmdd1() / 100 );
+  my $yyyymm2 = int( emvl::get_yyyymmdd2() / 100 );
+
+  while ( $yyyymm <= $yyyymm2 ) {
+    my $file_name = $coverage_info->{ file };
+
+    if ( $is_monthly ) {
+      my $mm = int( $yyyymm % 100 );
+      my $mm_ = sprintf( "%02d_", $mm );
+      $file_name =~ s/MM_/$mm_/g;
+    }
+
+    my $data_file = $data_directory . '/' . $file_name;
+
+    if ( $data_files eq '' ) {
+      $data_files = $data_file;
+    } else {
+      $data_files .= ' ' . $data_file;
+    }
+
+    # Increment by year or month:
+
+    if ( $is_monthly ) {
+      $yyyymm += 1;
+
+      if ( int( $yyyymm % 100 ) > 12 ) {
+        $yyyymm = int( $yyyymm / 100 + 1 ) * 100 + 1;
+      }
+    } else {
+      $yyyymm += 100;
+    }
+  }
+
+  emvl::debug( "data_files = '$data_files'" );
+}
+
+
+
+# Construct and return subsetter command.
+
+sub construct_command {
+  my $command = '';
+
+  if ( $data_files eq '' ) {
+    return $command;
+  }
+
+  my $format = emvl::get_format();
+
+  if ( $format eq 'original' ) {
+    $command = "$tar $data_files";
+  } else {
+    my $list_command = "$ls -1 $data_files > $temp_file_name ";
+    my $west_south_east_north = emvl::get_west_south_east_north();
+    my $variable = lc( emvl::get_coverage() );
+    $variable =~ s/yearly_//g;
+    $variable =~ s/monthly_//g;
+    my $coverage_index = emvl::get_coverage_index();
+    my $entry = $coverage_metadata[ $coverage_index ];
+    my $units = $entry-> { units };
+    my $min = $entry-> { min };
+    my $max = $entry-> { max };
+    my $my_compressor = emvl::get_compress() ? " | $compressor" : '';
+    my $depth = emvl::get_lower();
+
+    if ( $depth eq '' ) {
+      $depth = 0;
+    }
+
+    my $coverage = lc( emvl::get_coverage()) ;
+    my $is_monthly = index( $coverage, 'monthly_' ) != -1;
+    my $yyyymm  = int( emvl::get_yyyymmdd1() / 100 );
+
+    if ( ! $is_monthly ) {
+      $yyyymm = int( $yyyymm / 100 );
+    }
+
+    $command =
+      "$list_command ; $subsetter" .
+      " $temp_file_name" .
+      " $variable " .
+      " $units " .
+      " $min " .
+      " $max " .
+      " $west_south_east_north " .
+      " $depth " .
+      " $yyyymm " .
+      " $my_compressor";
+  }
+
+  return $command;
+}
+
+
+
+# Execute command and echo its output to STDOUT.
+# E.g., execute_command( '/bin/ls' );
+
+sub execute_command {
+  my $command = shift;
+  my $result = 0;
+  my $the_pipe = 0;
+
+  # -T flag requires untainting $command by matching a minimal regex needed for
+  # system commands used by this program.
+
+  if ( $command =~ m#^(/[\w-]+/[\w -/.;%>|]+)$# )
+  {
+    $command = $1; # Re-assign first match, which is enough to satisfy -T.
+    emvl::debug( "$0 executing command = $command" );
+    %ENV = (); # Unset all environment variables prior to popen.
+    # Complicated, supposedly safer way to open a readable pipe to command:
+    my $pid = open( the_pipe, "-|" );
+
+    if ( ! defined( $pid ) ) {
+      die "Couldn't open pipe to subprocess";
+    } elsif ( $pid ) { # Parent process.
+
+      while ( <the_pipe> ) {
+        print;
+      }
+
+      close( the_pipe );
+      $result = ! $?;
+    } else { # Child process.
+      exec( $command ) or die "can't exec program: $!";
+    }
+  } else {
+    print STDERR "\n$0: command contains invalid characters.\n";
+  }
+
+  return $result;
+}
+
+
+

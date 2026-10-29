@@ -1,0 +1,70 @@
+#!/bin/csh -f
+
+echo ; echo TEST NERRS ; echo
+
+if ( 0 ) then
+
+sleep 2 ; echo ; echo TEST GetCapabilities ; echo
+curl --silent --retry 0 'https://maple.hesc.epa.gov/rsig/rsigserver?SERVICE=wcs&VERSION=1.0.0&REQUEST=GetCapabilities' > junk ; head junk ; echo '...' ; grep -i NERRS junk
+
+sleep 2 ; echo ; echo TEST DescribeCoverage ; echo
+curl --silent --retry 0 'https://maple.hesc.epa.gov/rsig/rsigserver?SERVICE=wcs&VERSION=1.0.0&REQUEST=DescribeCoverage' > junk ; head junk ; echo '...' ; grep -i NERRS junk
+
+endif
+
+
+
+# DescribeCoverage:
+
+sleep 2 ; echo ; echo TEST DescribeCoverage NERRS.Station ; echo
+curl --silent --retry 0 'https://maple.hesc.epa.gov/rsig/rsigserver?SERVICE=wcs&VERSION=1.0.0&REQUEST=DescribeCoverage&COVERAGE=NERRS.Station' > junk ; echo $? ; cat junk
+
+sleep 2 ; echo ; echo TEST DescribeCoverage NERRS.Turbidity ; echo
+curl --silent --retry 0 'https://maple.hesc.epa.gov/rsig/rsigserver?SERVICE=wcs&VERSION=1.0.0&REQUEST=DescribeCoverage&COVERAGE=NERRS.Turbidity' > junk ; echo $? ; cat junk
+
+sleep 2 ; echo ; echo TEST DescribeCoverage NERRS.Wind ; echo
+curl --silent --retry 0 'https://maple.hesc.epa.gov/rsig/rsigserver?SERVICE=wcs&VERSION=1.0.0&REQUEST=DescribeCoverage&COVERAGE=NERRS.Wind' > junk ; echo $? ; cat junk
+
+
+
+# GetMetadata:
+
+sleep 2 ; echo ; echo TEST GetMetadata NERRS.Station ; echo
+curl --silent --retry 0 'https://maple.hesc.epa.gov/rsig/rsigserver?SERVICE=wcs&VERSION=1.0.0&REQUEST=GetMetadata&COVERAGE=NERRS.Station&FORMAT=original&TIME=2025-07-01T00:00:00Z/2025-07-02T23:59:59Z&BBOX=-77,36,-74,40' > junk ; echo $? ; cat junk
+
+sleep 2 ; echo ; echo TEST GetMetadata NERRS.Turbidity ; echo
+curl --silent --retry 0 'https://maple.hesc.epa.gov/rsig/rsigserver?SERVICE=wcs&VERSION=1.0.0&REQUEST=GetMetadata&COVERAGE=NERRS.Turbidity&FORMAT=ascii&TIME=2025-07-01T00:00:00Z/2025-07-02T23:59:59Z&BBOX=-77,36,-74,40' > junk ; echo $? ; cat junk
+
+sleep 2 ; echo ; echo TEST GetMetadata NERRS.Wind ; echo
+curl --silent --retry 0 'https://maple.hesc.epa.gov/rsig/rsigserver?SERVICE=wcs&VERSION=1.0.0&REQUEST=GetMetadata&COVERAGE=NERRS.Wind&FORMAT=ascii&TIME=2025-07-01T00:00:00Z/2025-07-02T23:59:59Z&BBOX=-77,36,-74,40' > junk ; echo $? ; cat junk
+
+
+
+# Original:
+
+sleep 2 ; echo ; echo TEST NERRS.Station original ; echo
+curl --silent --retry 0 'https://maple.hesc.epa.gov/rsig/rsigserver?SERVICE=wcs&VERSION=1.0.0&REQUEST=GetCoverage&COVERAGE=NERRS.Station&FORMAT=original&TIME=2025-07-01T00:00:00Z/2025-07-02T23:59:59Z&BBOX=-77,36,-74,40' > junk ; echo $? ; tar -ztf junk
+
+sleep 2 ; echo ; echo TEST NERRS.Turbidity original ; echo
+curl --silent --retry 0 'https://maple.hesc.epa.gov/rsig/rsigserver?SERVICE=wcs&VERSION=1.0.0&REQUEST=GetCoverage&COVERAGE=NERRS.Turbidity&FORMAT=original&TIME=2025-07-01T00:00:00Z/2025-07-02T23:59:59Z&BBOX=-77,36,-74,40' > junk ; echo $? ; tar -ztf junk
+
+sleep 2 ; echo ; echo TEST NERRS.Wind original ; echo
+curl --silent --retry 0 'https://maple.hesc.epa.gov/rsig/rsigserver?SERVICE=wcs&VERSION=1.0.0&REQUEST=GetCoverage&COVERAGE=NERRS.Wind&FORMAT=original&TIME=2025-07-01T00:00:00Z/2025-07-02T23:59:59Z&BBOX=-77,36,-74,40' > junk ; echo $? ; tar -ztf junk
+
+
+
+# ASCII:
+
+sleep 2 ; echo ; echo TEST ASCII NERRS.Station ; echo
+curl --silent --retry 0 'https://maple.hesc.epa.gov/rsig/rsigserver?SERVICE=wcs&VERSION=1.0.0&REQUEST=GetCoverage&COVERAGE=NERRS.Station&FORMAT=ascii&TIME=2025-07-01T00:00:00Z/2025-07-02T23:59:59Z&BBOX=-77,36,-74,40' > junk ; echo $? ; head junk
+
+sleep 2 ; echo ; echo TEST ASCII NERRS.Turbidity ; echo
+curl --silent --retry 0 'https://maple.hesc.epa.gov/rsig/rsigserver?SERVICE=wcs&VERSION=1.0.0&REQUEST=GetCoverage&COVERAGE=NERRS.Turbidity&FORMAT=ascii&TIME=2025-07-01T00:00:00Z/2025-07-02T23:59:59Z&BBOX=-77,36,-74,40' > junk ; echo $? ; head junk
+
+sleep 2 ; echo ; echo TEST ASCII NERRS.Wind ; echo
+curl --silent --retry 0 'https://maple.hesc.epa.gov/rsig/rsigserver?SERVICE=wcs&VERSION=1.0.0&REQUEST=GetCoverage&COVERAGE=NERRS.Wind&FORMAT=ascii&TIME=2025-07-01T00:00:00Z/2025-07-02T23:59:59Z&BBOX=-77,36,-74,40' > junk ; echo $? ; head junk
+
+
+
+/bin/rm -f junk
+echo ; echo DONE NERRS ; echo

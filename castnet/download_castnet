@@ -1,0 +1,23 @@
+#!/bin/csh -f
+# download_quantaq - Download CASTNET QuantAQ and PurpleAir files
+# and unzip them into data/ overwritting existing files.
+
+set data_directory = /data/QuantAQ/data
+set URL = 'https://gaftp.epa.gov/castnet/CASTNET_Outgoing/data'
+set CURL = '/usr/bin/curl -k --retry 5 --retry-delay 30 -L --tcp-nodelay --max-time 300'
+set UNZIP = '/bin/unzip -o'
+
+cd $data_directory
+
+foreach zip_file ( site.zip quantaq_web.zip purpleair_web.zip )
+  set new_zip_file = new_$zip_file
+  echo "Downloading $URL/$zip_file to $new_zip_file"
+  $CURL "$URL/$zip_file" -o $new_zip_file
+  @ old_file_size = `ls -l     $zip_file | awk '{ print $5 }'`
+  @ new_file_size = `ls -l $new_zip_file | awk '{ print $5 }'`
+
+  if ( $new_file_size >= $old_file_size ) then
+    $UNZIP $new_zip_file
+  endif
+end
+

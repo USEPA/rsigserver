@@ -50,13 +50,13 @@ my $use_file_cache = 0;
 
 my $data_directory = $use_file_cache ? '/data/map/data' : '/data/tmp';
 my $bindir = '/rsig/current/code/bin/Linux.x86_64';
-my $curl = "$bindir/curl -k --silent --retry 0 -L --tcp-nodelay --max-time 120";
+my $curl = "/usr/bin/curl -k --silent --retry 0 -L --tcp-nodelay --max-time 120";
 my $minimum_size = 100;  # Minimum pixel size supported.
 my $maximum_size = 1500; # Maximum pixel size supported.
 
 # Server where this program is installed:
 
-my $server_path = 'https://YOUR_WEBSERVER_HOST/cgi-bin';
+my $server_path = 'https://maple.hesc.epa.gov/cgi-bin';
 
 # Query string parsing routine dispatch table:
 
@@ -70,8 +70,12 @@ my %parsers = (
   'bbox'        => \&parse_bbox_option,
   'width'       => \&parse_width_option,
   'height'      => \&parse_height_option,
-  'with_header' => \&parse_with_header_option
+  'with_header' => \&parse_with_header_option,
+  'rsig_id'     => \&parse_rsigid_option
 );
+
+sub parse_rsigid_option { return 1; }
+
 
 # Full URL path to this program:
 
@@ -118,6 +122,13 @@ sub main {
   
   $result = 1 - $result; # UNIX: zero is success, non-zero is failure.
   debug( "exit result = $result" );
+
+  # Must return some bytes to avoid 30 second timeout delay when unsuccessful:
+
+  if ( $result != 0 ) {
+    print STDOUT "\nFAILED\n";
+  }
+
   exit $result;
 }
 
@@ -557,7 +568,7 @@ sub execute_command {
         print;
       }
 
-      close( the_pipe ) or die $!;
+      close( the_pipe );
       $result = ! $?;
       debug( "close() return value: $?" );
     } else { # Child process.

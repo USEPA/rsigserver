@@ -14,13 +14,12 @@ set temp2 = "$tmpdir/listfiles2.$$"
 set temp_file_input_template  = "$tmpdir/listfiles_input_PROCESS.$$"
 set temp_file_output_template = "$tmpdir/listfiles_output_PROCESS.$$"
 set temp_run_file = "$tmpdir/listfiles_run_file.$$"
-set url = `grep '^set url' $directory/get_tropomi_files | awk '{ print $NF }' | tr -d "'"`
 
 # Make tail +N work!
 setenv _POSIX2_VERSION 199209
 set _POSIX_VERSION=199209
 
-touch $temp ; \rm $temp
+touch $temp $temp2 ; \rm $temp $temp2
 
 @ yyyymmddhh = 0
 @ hours      = 0
@@ -71,49 +70,45 @@ endif
 
 set variable_ = `echo $variable | awk '{ v = $1; n = length( v ); while ( n++ < 6 ) v = v "_"; print v }'`
 
-set days_per_month = ( 31 28 31 30 31 30 31 31 30 31 30 31 )
-@ yyyy =   $yyyymmddhh / 1000000
-@ mm   = ( $yyyymmddhh / 10000 ) % 100
-@ dd   = ( $yyyymmddhh / 100 ) % 100
-@ hh   =   $yyyymmddhh % 100
+# Compute the starting and ending timestamps:
 
-@ leap = ( $yyyy % 4 == 0 && ! ( $yyyy % 100 == 0 && ! $yyyy % 400 == 0 ) )
+@ yyyymmdd = $yyyymmddhh / 100
+@ hh = $yyyymmddhh % 100
+@ seconds1 = `date -u --date="$yyyymmdd" "+%s"`
+@ seconds1 += $hh * 60 * 60
+set yyyymmddThh1 = `date -u --date="@$seconds1" "+%Y%m%dT%H"`
+@ seconds2 = $seconds1 + ( $hours - 1 ) * 60 * 60
+set yyyymmddThh2 = `date -u --date="@$seconds2" "+%Y%m%dT%H"`
+@ seconds_1 = `date -u --date="$yyyymmdd" "+%s"`
+@ seconds_1 -= 60 * 60
+@ yyyymmdd_1 = `date -u --date="@$seconds_1" "+%Y%m%d"`
+@ seconds_p1 = $seconds2 + 24 * 60 * 60
+@ yyyymmdd2 = `date -u --date="@$seconds_p1" "+%Y%m%d"`
 
-@ h = 1
-while ( $h <= $hours )
+# List files in each directory within the time range -
+# starting with the previous day and extending to the next day -
+# since file timestamps can overlap days.
+# Also, file timestamps can contain multiple hours.
 
-  # List files matching yyyymmdd hh:
+@ yyyymmdd = $yyyymmdd_1
 
-  @ yyyymmdd = `printf "%04d%02d%02d" $yyyy $mm $dd`
-  set hh0 = `printf "%02d" $hh`
+while ( $yyyymmdd <= $yyyymmdd2 )
 
-  ls $data_directory/$yyyymmdd/S5P_${type}_L2__${variable_}_${yyyymmdd}T$hh0*.nc |& grep -v 'ls: ' >> $temp
+  # List all files in the directory with file timestamps within the time range:
 
-  @ hh += 1
+  ls $data_directory/$yyyymmdd/S5P_${type}_L2__${variable_}_*.nc |& \
+  grep -v 'ls: ' | \
+  awk -F_ -v yyyymmddThh1="$yyyymmddThh1" -v yyyymmddThh2="$yyyymmddThh2" \
+  '{ yyyymmddThh_start = substr( $(NF-5), 1, 11 ); yyyymmddThh_end = substr( $(NF-4), 1, 11 ); outside = ( yyyymmddThh_end < yyyymmddThh1 || yyyymmddThh_start > yyyymmddThh2 ); if ( ! outside ) { print } }' \
+  > $temp2
 
-  if ( $hh == 24 ) then
-    @ hh = 0
-    @ dd += 1
+  cat $temp2 >> $temp
 
-    @ days_this_month = $days_per_month[$mm]
+  # Increment date:
 
-    if ( $mm == 2 ) then
-      @ days_this_month += $leap
-    endif
-
-    if ( $dd > $days_this_month ) then
-      @ dd = 1
-      @ mm += 1
-
-      if ( $mm > 12 ) then
-        @ mm = 1
-        @ yyyy += 1
-        @ leap = ( $yyyy % 4 == 0 && ! ( $yyyy % 100 == 0 && ! $yyyy % 400 == 0 ) )
-      endif
-    endif
-  endif
-
-  @ h += 1
+  @ seconds = `date -u --date="$yyyymmdd" "+%s"`
+  @ seconds += 24 * 60 * 60
+  @ yyyymmdd = `date -u --date="@$seconds" "+%Y%m%d"`
 end
 
 cat $temp | sort | uniq > $temp2

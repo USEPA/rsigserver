@@ -15,7 +15,7 @@ NOTES:   The input files are created by the ../PurpleAirSubset program.
            -bounds <minimum_longitude> <minimum_latitude> \
                    <maximum_longitude> <maximum_latitude> \
            [-timerange <yyyymmddhhmmss> <yyyymmddhhmmss> ] \
-           [-sensor sensor_id] \
+           [-sensor sensor_id or -1 to only output sensor locations] \
 
           Example:
           ../../../bin/$platform/PointSubset \
@@ -64,6 +64,28 @@ STATUS:  unreviewed untested
 
 /*================================== TYPES ==================================*/
 
+enum { MAXIMUM_SENSORS = 1000000 }; /* For only sensor locations option. */
+static int sensorIds[ MAXIMUM_SENSORS ]; /* Unique ids for sensor = -1 option*/
+
+static int foundId( const int id ) {
+  int result = 0;
+  int index = 0;
+
+  for ( index = 0; index < MAXIMUM_SENSORS; ++index ) {
+    const int thisId = sensorIds[ index ];
+
+    if ( thisId == 0 ) {
+      sensorIds[ index ] = id;
+      index = MAXIMUM_SENSORS - 1;
+    } else if ( id == thisId ) {
+      result = 1;
+      index = MAXIMUM_SENSORS - 1;
+    }
+  }
+
+  return result;
+}
+
 enum { VARIABLES = 7 };/*timestamp,longitude,latitude,elevation,id,count,pm25*/
 enum { TEMP_FILES = 1 + VARIABLES }; /* notes + variables. */
 enum { HEADER_LINES = 11 }; /* Input file header lines. */
@@ -85,7 +107,9 @@ typedef struct {
   const char* tmpdir;   /* Name of directory to write temp files. */
   Bounds      bounds;   /* Subset bounds[LONGITUDE,LATITUDE][MINIMUM,MAXIMUM]*/
   long long   yyyymmddhhmmss[ 2 ]; /* Beginning/ending timestamp of subset. */
-  int         sensor;   /* 0 = all. > 0 for specific sensor id. */
+  int         sensor;   /* -1 = only output sensor locations, */
+                        /* 0 = all sensors (in subset), */
+                        /* > 0 for specific sensor id only (if in subset). */
 } Arguments;
 
 /* Data type: */
@@ -98,7 +122,7 @@ typedef struct {
   size_t    bufferSize;                  /* Size, in bytes, of buffer. */
   Note      header[ HEADER_LINES ];      /* Input file header lines. */
   long long yyyymmddhhmmss[ 2 ];         /* First and last file timestamps. */
-  int variables;                         /* 6 or 7 if counts. */
+  int       variables;                   /* 6 or 7 if counts. */
   size_t    points;                      /* Number of data points in subset. */
   int       ok;                          /* Did last command succeed? */
 } Data;
@@ -207,7 +231,10 @@ static void printUsage( const char* name ) {
   fprintf( stderr, "  -bounds <minimum_longitude> <minimum_latitude>" );
   fprintf( stderr, " <maximum_longitude> <maximum_latitude> \\\n" );
   fprintf( stderr, " [-timerange <yyyymmddhhmmss> <yyyymmddhhmmss> ]] \\\n" );
-  fprintf( stderr, " [-sensor sensor_id] (subset to specific sensor id)\n\n" );
+  fprintf( stderr, " [-sensor sensor_id] \n" );
+  fprintf( stderr, "sensor = 0 (default) for all sensors in subset,\n" );
+  fprintf( stderr, "sensor = -1 only output sensor locations (in subset),\n" );
+  fprintf( stderr, "sensor > 0 only output specifed sensor (if in subset).\n" );
   fprintf( stderr, "-tmpdir specifies a directory were temp files are " );
   fprintf ( stderr, "written.\nIt should have enough disk space (1TB).\n" );
   fprintf( stderr, "Example:\n\n" );
@@ -245,12 +272,12 @@ RETURNS: int 1 if successful, else 0.
 
 static int parseArguments(int argc, char* argv[], Arguments* const arguments) {
   int result = argc >= 5;
-  static const int one_int_max[ 2 ] = { 1, INT_MAX };
+  static const int minus_one_int_max[ 2 ] = { -1, INT_MAX };
   static Option options[] = {
     { "-files",  1, FILE_TYPE,      1, 0, 0, 0, 0 },
     { "-tmpdir", 1, DIRECTORY_TYPE, 1, 0, 0, 0, 0 },
     { "-bounds", 0, BOUNDS_TYPE,    4, 0, 0, 0, 0 },
-    { "-sensor", 0, INT_TYPE,       1, one_int_max, 0, 0, 0 },
+    { "-sensor", 0, INT_TYPE,       1, minus_one_int_max, 0, 0, 0 },
     { "-timerange", 0, YYYYMMDDHHMMSS_TYPE, 2, 0, 0, 0, 0 }
   };
 
@@ -287,7 +314,7 @@ static int parseArguments(int argc, char* argv[], Arguments* const arguments) {
          ( arguments->listFile && arguments->listFile[ 0 ] &&
            arguments->tmpdir && arguments->tmpdir[ 0 ] &&
            isValidBounds( (const double (*)[2]) arguments->bounds ) &&
-           arguments->sensor >= 0 ) );
+           arguments->sensor >= -1 ) );
 
   return result;
 }
@@ -442,7 +469,7 @@ static void readData( Data* const data ) {
     /* Get each line of list file. It is the data file to read: */
 
     for ( inputFileName = strtok_r( listFileContent, "\n", &end );
-          inputFileName && data->ok;
+          inputFileName /* && data->ok */;
           inputFileName = strtok_r( 0, "\n", &end ) ) {
 
       if ( fileSize( inputFileName ) ) { /* Ignore empty files. */
@@ -476,7 +503,7 @@ static void readData( Data* const data ) {
                 yyyymmddhhmmss1 = data->yyyymmddhhmmss[ 0 ];
               }
 
-              /* Appends to temp files: */
+              /* Extract and append subset data to temp files: */
 
               extractSubset( inputFile, points, data );
             }
@@ -490,7 +517,7 @@ static void readData( Data* const data ) {
 
     data->yyyymmddhhmmss[ 0 ] = yyyymmddhhmmss1;
     free( listFileContent ), listFileContent = 0;
-    data->ok = data->ok && data->points > 0;
+    data->ok = /* data->ok && */ data->points > 0;
   }
 
   closeTempFiles( data );
@@ -631,15 +658,18 @@ OUTPUTS: Data* data  data->tempFiles[]  Write variable data to these files.
 
 static void extractSubset( FILE* inputFile, const size_t points, Data* data ) {
   const int variables = data ? data->variables : 0;
-  size_t bytes = points * sizeof (Note) + data->variables * points * sizeof (double);
-  assert( inputFile ); assert( points );
+  size_t bytes = points * sizeof (Note) + variables * points * sizeof (double);
+  assert( inputFile );
+  assert( points );
   assert( data );
   assert( data->variables == 6 || data->variables == 7 );
   assert( data->tempFiles[ 0 ] );
+
   checkAndReallocateBuffer( bytes, data );
 
   if ( data->ok ) {
     char* const buffer = data->buffer;
+    assert( buffer );
     data->ok = fread( buffer, 1, bytes, inputFile ) == bytes;
 
     if ( ! data->ok ) {
@@ -673,11 +703,13 @@ static void extractSubset( FILE* inputFile, const size_t points, Data* data ) {
 
       if ( filtering ) {
         size_t point = 0;
-        rotate8ByteArrayIfLittleEndian( timestamps, variables * points );
+        rotate8ByteArrayIfLittleEndian( dp, variables * points );
 
         for ( point = 0; point < points; ++point ) {
 
-          if ( sensor == 0 || ids[ point ] == sensor ) {
+          if ( sensor == 0 ||
+               ( sensor == -1 && ! foundId( (int) ( ids[ point ] ) ) ) ||
+               ids[ point ] == sensor ) {
             const double longitude = longitudes[ point ];
 
             if ( longitude >= longitudeMinimum &&
@@ -724,20 +756,11 @@ static void extractSubset( FILE* inputFile, const size_t points, Data* data ) {
       if ( outputPoints ) {
 
         if ( filtering ) {
-          rotate8ByteArrayIfLittleEndian( timestamps, outputPoints );
-          rotate8ByteArrayIfLittleEndian( longitudes, outputPoints );
-          rotate8ByteArrayIfLittleEndian( latitudes,  outputPoints );
-          rotate8ByteArrayIfLittleEndian( elevations, outputPoints );
-          rotate8ByteArrayIfLittleEndian( ids,        outputPoints );
-
-          if ( counts ) {
-            rotate8ByteArrayIfLittleEndian( counts,   outputPoints );
-          }
-
-          rotate8ByteArrayIfLittleEndian( measures,   outputPoints );
+          rotate8ByteArrayIfLittleEndian( dp, variables * points );
         }
 
         bytes = outputPoints * sizeof (Note);
+        filterNotes( buffer, bytes ); /* Erase problematic characters! */
         data->ok = fwrite( notes, 1, bytes, data->tempFiles[ 0 ] ) == bytes;
 
         if ( data->ok ) {
@@ -747,10 +770,14 @@ static void extractSubset( FILE* inputFile, const size_t points, Data* data ) {
             fwrite( longitudes, 1, bytes, data->tempFiles[ 2 ] ) == bytes &&
             fwrite( latitudes,  1, bytes, data->tempFiles[ 3 ] ) == bytes &&
             fwrite( elevations, 1, bytes, data->tempFiles[ 4 ] ) == bytes &&
-            fwrite( ids,        1, bytes, data->tempFiles[ 5 ] ) == bytes &&
-            ( counts == 0 ||
-              fwrite( counts,   1, bytes, data->tempFiles[ 6 ] ) == bytes ) &&
-            fwrite( measures,   1, bytes, data->tempFiles[ 7 ] ) == bytes;
+            fwrite( ids,        1, bytes, data->tempFiles[ 5 ] ) == bytes;
+
+          if ( data->ok && sensor != -1 ) {
+            data->ok =
+              ( counts == 0 ||
+                fwrite( counts, 1, bytes, data->tempFiles[ 6 ] ) == bytes ) &&
+              fwrite( measures, 1, bytes, data->tempFiles[ 7 ] ) == bytes;
+          }
 
           if ( data->ok ) {
             data->points += outputPoints;
@@ -793,34 +820,40 @@ static void streamData( Data* const data ) {
   assert( data->tempFiles[ TEMP_FILES - 1 ] == 0 );
 
   {
+    const int sensor = data->arguments.sensor;
     int fileIndex = 0;
     streamHeader( data );
 
     for ( fileIndex = 0; data->ok && fileIndex < TEMP_FILES; ++fileIndex ) {
       const char* const tempFileName = data->tempFileNames[ fileIndex ];
-      FILE* tempFile = data->tempFiles[fileIndex] = fopen( tempFileName, "rb" );
-      data->ok = tempFile != 0;
 
-      if ( ! data->ok ) {
-        fprintf( stderr, "\nCan't open temp data file '%s' for reading.\n",
-                 tempFileName );
-      } else {
-        const size_t bytes = data->bufferSize;
-        char* const buffer = data->buffer;
+      /* If only outputting sensor locations then omit count and data: */
 
-        while ( data->ok && ! feof( tempFile ) ) {
-          const size_t bytesRead = fread( buffer, 1, bytes, tempFile );
-
-          if ( bytesRead ) {
-            const size_t bytesWritten = fwrite( buffer, 1, bytesRead, stdout );
-            data->ok = bytesWritten == bytesRead;
-          }
-        }
+      if ( sensor != -1 || fileIndex <= 5 ) {
+        FILE* tempFile = data->tempFiles[fileIndex] = fopen( tempFileName, "rb" );
+        data->ok = tempFile != 0;
 
         if ( ! data->ok ) {
-          fprintf( stderr,
-                   "\nFailed to stream subset data from temp file '%s'.\n",
+          fprintf( stderr, "\nCan't open temp data file '%s' for reading.\n",
                    tempFileName );
+        } else {
+          const size_t bytes = data->bufferSize;
+          char* const buffer = data->buffer;
+
+          while ( data->ok && ! feof( tempFile ) ) {
+            const size_t bytesRead = fread( buffer, 1, bytes, tempFile );
+
+            if ( bytesRead ) {
+              const size_t bytesWritten = fwrite( buffer, 1, bytesRead, stdout );
+              data->ok = bytesWritten == bytesRead;
+            }
+          }
+
+          if ( ! data->ok ) {
+            fprintf( stderr,
+                     "\nFailed to stream subset data from temp file '%s'.\n",
+                     tempFileName );
+          }
         }
       }
     }
@@ -838,9 +871,13 @@ INPUTS:  Data* data  Data to write.
 
 static void streamHeader( Data* const data ) {
   int line = 0;
+  int sensor = 0;
+  int outputVariables = 0;
   assert( data );
   assert( data->header[ 0 ][ 0 ] );
   assert( data->header[ HEADER_LINES - 1 ][ 0 ] );
+  sensor = data->arguments.sensor;
+  outputVariables = sensor == -1 ? 5 : data->variables;
 
   for ( line = 0; line < HEADER_LINES; ++line ) {
     char* const headerLine = data->header[ line ];
@@ -880,7 +917,11 @@ static void streamHeader( Data* const data ) {
               yyyy1, mm1, dd1, hh1, mm21, ss1,
               yyyy2, mm2, dd2, hh2, mm22, ss2 );
     } else if ( line == 4 ) {
-      printf( "%d %lu\n", data->variables, data->points );
+      printf( "%d %lu\n", outputVariables, data->points );
+    } else if ( sensor == -1 && line == 6 ) {
+      fputs( "timestamp longitude latitude elevation yearly_id\n", stdout );
+    } else if ( sensor == -1 && line == 8 ) {
+      fputs( "yyyymmddhhmmss deg deg m -\n", stdout );
     } else {
       fputs( headerLine, stdout );
     }

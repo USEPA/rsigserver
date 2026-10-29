@@ -1,0 +1,1578 @@
+[H[2J[3J
+Compiling Utilities...
+In file included from Utilities.c:14:
+Utilities.c: In function ‘pointInDomain’:
+./Assertions.h:442:37: warning: unused variable ‘errno’ [-Wunused-variable]
+  442 | #define NOP_DECLARATION_ extern int errno
+      |                                     ^~~~~
+./Assertions.h:447:24: note: in expansion of macro ‘NOP_DECLARATION_’
+  447 | #define PRE3(c1,c2,c3) NOP_DECLARATION_
+      |                        ^~~~~~~~~~~~~~~~
+./Assertions.h:510:15: note: in expansion of macro ‘PRE3’
+  510 | #define PRE03 PRE3
+      |               ^~~~
+Utilities.c:66:3: note: in expansion of macro ‘PRE03’
+   66 |   PRE03( isValidLongitude( longitude ),
+      |   ^~~~~
+Utilities.c: In function ‘overlap’:
+./Assertions.h:442:37: warning: unused variable ‘errno’ [-Wunused-variable]
+  442 | #define NOP_DECLARATION_ extern int errno
+      |                                     ^~~~~
+./Assertions.h:448:27: note: in expansion of macro ‘NOP_DECLARATION_’
+  448 | #define PRE4(c1,c2,c3,c4) NOP_DECLARATION_
+      |                           ^~~~~~~~~~~~~~~~
+./Assertions.h:511:15: note: in expansion of macro ‘PRE4’
+  511 | #define PRE04 PRE4
+      |               ^~~~
+Utilities.c:98:3: note: in expansion of macro ‘PRE04’
+   98 |   PRE04( a, b, isValidBounds( a ), isValidBounds( b ) );
+      |   ^~~~~
+Utilities.c: In function ‘checkForTest’:
+./Assertions.h:442:37: warning: unused variable ‘errno’ [-Wunused-variable]
+  442 | #define NOP_DECLARATION_ extern int errno
+      |                                     ^~~~~
+./Assertions.h:445:17: note: in expansion of macro ‘NOP_DECLARATION_’
+  445 | #define PRE(c1) NOP_DECLARATION_
+      |                 ^~~~~~~~~~~~~~~~
+./Assertions.h:508:14: note: in expansion of macro ‘PRE’
+  508 | #define PRE0 PRE
+      |              ^~~
+Utilities.c:155:3: note: in expansion of macro ‘PRE0’
+  155 |   PRE0( isValidArgs( *argc, (const char**) argv ) );
+      |   ^~~~
+Utilities.c: In function ‘parseArgument2’:
+./Assertions.h:442:37: warning: unused variable ‘errno’ [-Wunused-variable]
+  442 | #define NOP_DECLARATION_ extern int errno
+      |                                     ^~~~~
+./Assertions.h:449:30: note: in expansion of macro ‘NOP_DECLARATION_’
+  449 | #define PRE5(c1,c2,c3,c4,c5) NOP_DECLARATION_
+      |                              ^~~~~~~~~~~~~~~~
+./Assertions.h:512:15: note: in expansion of macro ‘PRE5’
+  512 | #define PRE05 PRE5
+      |               ^~~~
+Utilities.c:183:3: note: in expansion of macro ‘PRE05’
+  183 |   PRE05( isValidArgs( argc, (const char**) argv ),
+      |   ^~~~~
+Utilities.c: In function ‘parseBounds’:
+./Assertions.h:442:37: warning: unused variable ‘errno’ [-Wunused-variable]
+  442 | #define NOP_DECLARATION_ extern int errno
+      |                                     ^~~~~
+./Assertions.h:449:30: note: in expansion of macro ‘NOP_DECLARATION_’
+  449 | #define PRE5(c1,c2,c3,c4,c5) NOP_DECLARATION_
+      |                              ^~~~~~~~~~~~~~~~
+./Assertions.h:512:15: note: in expansion of macro ‘PRE5’
+  512 | #define PRE05 PRE5
+      |               ^~~~
+Utilities.c:221:3: note: in expansion of macro ‘PRE05’
+  221 |   PRE05( isValidArgs( argc, (const char**) argv ),
+      |   ^~~~~
+Utilities.c: In function ‘parseTimestampAndHours’:
+./Assertions.h:442:37: warning: unused variable ‘errno’ [-Wunused-variable]
+  442 | #define NOP_DECLARATION_ extern int errno
+      |                                     ^~~~~
+./Assertions.h:450:33: note: in expansion of macro ‘NOP_DECLARATION_’
+  450 | #define PRE6(c1,c2,c3,c4,c5,c6) NOP_DECLARATION_
+      |                                 ^~~~~~~~~~~~~~~~
+./Assertions.h:513:15: note: in expansion of macro ‘PRE6’
+  513 | #define PRE06 PRE6
+      |               ^~~~
+Utilities.c:271:3: note: in expansion of macro ‘PRE06’
+  271 |   PRE06( isValidArgs( argc, (const char**) argv ),
+      |   ^~~~~
+Utilities.c: In function ‘indexOfString’:
+./Assertions.h:442:37: warning: unused variable ‘errno’ [-Wunused-variable]
+  442 | #define NOP_DECLARATION_ extern int errno
+      |                                     ^~~~~
+./Assertions.h:452:39: note: in expansion of macro ‘NOP_DECLARATION_’
+  452 | #define PRE8(c1,c2,c3,c4,c5,c6,c7,c8) NOP_DECLARATION_
+      |                                       ^~~~~~~~~~~~~~~~
+./Assertions.h:515:15: note: in expansion of macro ‘PRE8’
+  515 | #define PRE08 PRE8
+      |               ^~~~
+Utilities.c:331:3: note: in expansion of macro ‘PRE08’
+  331 |   PRE08( string, *string, strings, strings[ 0 ], *strings[ 0 ],
+      |   ^~~~~
+Utilities.c: In function ‘lowercase’:
+./Assertions.h:442:37: warning: unused variable ‘errno’ [-Wunused-variable]
+  442 | #define NOP_DECLARATION_ extern int errno
+      |                                     ^~~~~
+./Assertions.h:445:17: note: in expansion of macro ‘NOP_DECLARATION_’
+  445 | #define PRE(c1) NOP_DECLARATION_
+      |                 ^~~~~~~~~~~~~~~~
+./Assertions.h:508:14: note: in expansion of macro ‘PRE’
+  508 | #define PRE0 PRE
+      |              ^~~
+Utilities.c:363:3: note: in expansion of macro ‘PRE0’
+  363 |   PRE0( string );
+      |   ^~~~
+Utilities.c: In function ‘uppercase’:
+./Assertions.h:442:37: warning: unused variable ‘errno’ [-Wunused-variable]
+  442 | #define NOP_DECLARATION_ extern int errno
+      |                                     ^~~~~
+./Assertions.h:445:17: note: in expansion of macro ‘NOP_DECLARATION_’
+  445 | #define PRE(c1) NOP_DECLARATION_
+      |                 ^~~~~~~~~~~~~~~~
+./Assertions.h:508:14: note: in expansion of macro ‘PRE’
+  508 | #define PRE0 PRE
+      |              ^~~
+Utilities.c:380:3: note: in expansion of macro ‘PRE0’
+  380 |   PRE0( string );
+      |   ^~~~
+Utilities.c: In function ‘fileExists’:
+./Assertions.h:442:37: warning: unused variable ‘errno’ [-Wunused-variable]
+  442 | #define NOP_DECLARATION_ extern int errno
+      |                                     ^~~~~
+./Assertions.h:445:17: note: in expansion of macro ‘NOP_DECLARATION_’
+  445 | #define PRE(c1) NOP_DECLARATION_
+      |                 ^~~~~~~~~~~~~~~~
+./Assertions.h:508:14: note: in expansion of macro ‘PRE’
+  508 | #define PRE0 PRE
+      |              ^~~
+Utilities.c:397:3: note: in expansion of macro ‘PRE0’
+  397 |   PRE0( name );
+      |   ^~~~
+Utilities.c: In function ‘fileSize’:
+./Assertions.h:442:37: warning: unused variable ‘errno’ [-Wunused-variable]
+  442 | #define NOP_DECLARATION_ extern int errno
+      |                                     ^~~~~
+./Assertions.h:445:17: note: in expansion of macro ‘NOP_DECLARATION_’
+  445 | #define PRE(c1) NOP_DECLARATION_
+      |                 ^~~~~~~~~~~~~~~~
+./Assertions.h:508:14: note: in expansion of macro ‘PRE’
+  508 | #define PRE0 PRE
+      |              ^~~
+Utilities.c:413:3: note: in expansion of macro ‘PRE0’
+  413 |   PRE0( name );
+      |   ^~~~
+Utilities.c: In function ‘readFile’:
+./Assertions.h:442:37: warning: unused variable ‘errno’ [-Wunused-variable]
+  442 | #define NOP_DECLARATION_ extern int errno
+      |                                     ^~~~~
+./Assertions.h:446:21: note: in expansion of macro ‘NOP_DECLARATION_’
+  446 | #define PRE2(c1,c2) NOP_DECLARATION_
+      |                     ^~~~~~~~~~~~~~~~
+./Assertions.h:509:15: note: in expansion of macro ‘PRE2’
+  509 | #define PRE02 PRE2
+      |               ^~~~
+Utilities.c:445:3: note: in expansion of macro ‘PRE02’
+  445 |   PRE02( name, length );
+      |   ^~~~~
+Utilities.c: In function ‘controlMToSpace’:
+./Assertions.h:442:37: warning: unused variable ‘errno’ [-Wunused-variable]
+  442 | #define NOP_DECLARATION_ extern int errno
+      |                                     ^~~~~
+./Assertions.h:445:17: note: in expansion of macro ‘NOP_DECLARATION_’
+  445 | #define PRE(c1) NOP_DECLARATION_
+      |                 ^~~~~~~~~~~~~~~~
+./Assertions.h:508:14: note: in expansion of macro ‘PRE’
+  508 | #define PRE0 PRE
+      |              ^~~
+Utilities.c:489:3: note: in expansion of macro ‘PRE0’
+  489 |   PRE0( string );
+      |   ^~~~
+Utilities.c: In function ‘trimTrailingWhitespace’:
+./Assertions.h:442:37: warning: unused variable ‘errno’ [-Wunused-variable]
+  442 | #define NOP_DECLARATION_ extern int errno
+      |                                     ^~~~~
+./Assertions.h:446:21: note: in expansion of macro ‘NOP_DECLARATION_’
+  446 | #define PRE2(c1,c2) NOP_DECLARATION_
+      |                     ^~~~~~~~~~~~~~~~
+./Assertions.h:509:15: note: in expansion of macro ‘PRE2’
+  509 | #define PRE02 PRE2
+      |               ^~~~
+Utilities.c:512:3: note: in expansion of macro ‘PRE02’
+  512 |   PRE02( size, string );
+      |   ^~~~~
+Utilities.c: In function ‘linesInString’:
+./Assertions.h:442:37: warning: unused variable ‘errno’ [-Wunused-variable]
+  442 | #define NOP_DECLARATION_ extern int errno
+      |                                     ^~~~~
+./Assertions.h:445:17: note: in expansion of macro ‘NOP_DECLARATION_’
+  445 | #define PRE(c1) NOP_DECLARATION_
+      |                 ^~~~~~~~~~~~~~~~
+./Assertions.h:508:14: note: in expansion of macro ‘PRE’
+  508 | #define PRE0 PRE
+      |              ^~~
+Utilities.c:530:3: note: in expansion of macro ‘PRE0’
+  530 |   PRE0( string );
+      |   ^~~~
+Utilities.c: In function ‘skipLines’:
+./Assertions.h:442:37: warning: unused variable ‘errno’ [-Wunused-variable]
+  442 | #define NOP_DECLARATION_ extern int errno
+      |                                     ^~~~~
+./Assertions.h:446:21: note: in expansion of macro ‘NOP_DECLARATION_’
+  446 | #define PRE2(c1,c2) NOP_DECLARATION_
+      |                     ^~~~~~~~~~~~~~~~
+./Assertions.h:509:15: note: in expansion of macro ‘PRE2’
+  509 | #define PRE02 PRE2
+      |               ^~~~
+Utilities.c:552:3: note: in expansion of macro ‘PRE02’
+  552 |   PRE02( string, lines > 0 );
+      |   ^~~~~
+Utilities.c: In function ‘startOfLineWithWord’:
+./Assertions.h:442:37: warning: unused variable ‘errno’ [-Wunused-variable]
+  442 | #define NOP_DECLARATION_ extern int errno
+      |                                     ^~~~~
+./Assertions.h:446:21: note: in expansion of macro ‘NOP_DECLARATION_’
+  446 | #define PRE2(c1,c2) NOP_DECLARATION_
+      |                     ^~~~~~~~~~~~~~~~
+./Assertions.h:509:15: note: in expansion of macro ‘PRE2’
+  509 | #define PRE02 PRE2
+      |               ^~~~
+Utilities.c:583:3: note: in expansion of macro ‘PRE02’
+  583 |   PRE02( string, word );
+      |   ^~~~~
+Utilities.c: In function ‘findLine’:
+./Assertions.h:442:37: warning: unused variable ‘errno’ [-Wunused-variable]
+  442 | #define NOP_DECLARATION_ extern int errno
+      |                                     ^~~~~
+./Assertions.h:447:24: note: in expansion of macro ‘NOP_DECLARATION_’
+  447 | #define PRE3(c1,c2,c3) NOP_DECLARATION_
+      |                        ^~~~~~~~~~~~~~~~
+./Assertions.h:510:15: note: in expansion of macro ‘PRE3’
+  510 | #define PRE03 PRE3
+      |               ^~~~
+Utilities.c:614:3: note: in expansion of macro ‘PRE03’
+  614 |   PRE03( string, tag, end );
+      |   ^~~~~
+Utilities.c: In function ‘binIndex’:
+./Assertions.h:442:37: warning: unused variable ‘errno’ [-Wunused-variable]
+  442 | #define NOP_DECLARATION_ extern int errno
+      |                                     ^~~~~
+./Assertions.h:448:27: note: in expansion of macro ‘NOP_DECLARATION_’
+  448 | #define PRE4(c1,c2,c3,c4) NOP_DECLARATION_
+      |                           ^~~~~~~~~~~~~~~~
+./Assertions.h:511:15: note: in expansion of macro ‘PRE4’
+  511 | #define PRE04 PRE4
+      |               ^~~~
+Utilities.c:645:3: note: in expansion of macro ‘PRE04’
+  645 |   PRE04( index >= 0, bins > 0, counts, minimumItemI( counts, bins ) >= 0 );
+      |   ^~~~~
+Utilities.c: In function ‘appendNote’:
+./Assertions.h:442:37: warning: unused variable ‘errno’ [-Wunused-variable]
+  442 | #define NOP_DECLARATION_ extern int errno
+      |                                     ^~~~~
+./Assertions.h:447:24: note: in expansion of macro ‘NOP_DECLARATION_’
+  447 | #define PRE3(c1,c2,c3) NOP_DECLARATION_
+      |                        ^~~~~~~~~~~~~~~~
+./Assertions.h:510:15: note: in expansion of macro ‘PRE3’
+  510 | #define PRE03 PRE3
+      |               ^~~~
+Utilities.c:674:3: note: in expansion of macro ‘PRE03’
+  674 |   PRE03( regriddedNote, note, note[ 0 ] );
+      |   ^~~~~
+In file included from BasicNumerics.c:18:
+BasicNumerics.c: In function ‘rotate4ByteWordIfLittleEndian’:
+./Assertions.h:352:37: warning: unused variable ‘unused_assert_static_’ [-Wunused-variable]
+  352 | #define assert_static(a) extern int unused_assert_static_[ (a) ? 1 : -1 ]
+      |                                     ^~~~~~~~~~~~~~~~~~~~~
+BasicNumerics.c:1524:3: note: in expansion of macro ‘assert_static’
+ 1524 |   assert_static( sizeof (int) == 4 );
+      |   ^~~~~~~~~~~~~
+BasicNumerics.c: In function ‘rotate4ByteArrayIfLittleEndian’:
+BasicNumerics.c:1557: warning: ignoring ‘#pragma omp parallel’ [-Wunknown-pragmas]
+ 1557 | #pragma omp parallel for
+      | 
+In file included from BasicNumerics.c:18:
+./Assertions.h:352:37: warning: unused variable ‘unused_assert_static_’ [-Wunused-variable]
+  352 | #define assert_static(a) extern int unused_assert_static_[ (a) ? 1 : -1 ]
+      |                                     ^~~~~~~~~~~~~~~~~~~~~
+BasicNumerics.c:1553:3: note: in expansion of macro ‘assert_static’
+ 1553 |   assert_static( sizeof (int) == 4 );
+      |   ^~~~~~~~~~~~~
+BasicNumerics.c: In function ‘rotate8ByteWordIfLittleEndian’:
+./Assertions.h:352:37: warning: unused variable ‘unused_assert_static_’ [-Wunused-variable]
+  352 | #define assert_static(a) extern int unused_assert_static_[ (a) ? 1 : -1 ]
+      |                                     ^~~~~~~~~~~~~~~~~~~~~
+BasicNumerics.c:1587:3: note: in expansion of macro ‘assert_static’
+ 1587 |   assert_static( sizeof (Integer) == 8 );
+      |   ^~~~~~~~~~~~~
+BasicNumerics.c: In function ‘rotate8ByteArrayIfLittleEndian’:
+BasicNumerics.c:1624: warning: ignoring ‘#pragma omp parallel’ [-Wunknown-pragmas]
+ 1624 | #pragma omp parallel for
+      | 
+In file included from BasicNumerics.c:18:
+./Assertions.h:352:37: warning: unused variable ‘unused_assert_static_’ [-Wunused-variable]
+  352 | #define assert_static(a) extern int unused_assert_static_[ (a) ? 1 : -1 ]
+      |                                     ^~~~~~~~~~~~~~~~~~~~~
+BasicNumerics.c:1620:3: note: in expansion of macro ‘assert_static’
+ 1620 |   assert_static( sizeof (Integer) == 8 );
+      |   ^~~~~~~~~~~~~
+In file included from DateTime.c:14:
+DateTime.c: In function ‘isLeapYear’:
+./Assertions.h:442:37: warning: unused variable ‘errno’ [-Wunused-variable]
+  442 | #define NOP_DECLARATION_ extern int errno
+      |                                     ^~~~~
+./Assertions.h:445:17: note: in expansion of macro ‘NOP_DECLARATION_’
+  445 | #define PRE(c1) NOP_DECLARATION_
+      |                 ^~~~~~~~~~~~~~~~
+./Assertions.h:508:14: note: in expansion of macro ‘PRE’
+  508 | #define PRE0 PRE
+      |              ^~~
+DateTime.c:97:3: note: in expansion of macro ‘PRE0’
+   97 |   PRE0( isValidDate( yyyy * 1000 + 1 ) );
+      |   ^~~~
+DateTime.c: In function ‘daysInMonth’:
+./Assertions.h:442:37: warning: unused variable ‘errno’ [-Wunused-variable]
+  442 | #define NOP_DECLARATION_ extern int errno
+      |                                     ^~~~~
+./Assertions.h:446:21: note: in expansion of macro ‘NOP_DECLARATION_’
+  446 | #define PRE2(c1,c2) NOP_DECLARATION_
+      |                     ^~~~~~~~~~~~~~~~
+./Assertions.h:509:15: note: in expansion of macro ‘PRE2’
+  509 | #define PRE02 PRE2
+      |               ^~~~
+DateTime.c:113:3: note: in expansion of macro ‘PRE02’
+  113 |   PRE02( isValidDate( year * 1000 + 1 ), IN_RANGE( month, 1, 12 ) );
+      |   ^~~~~
+DateTime.c: In function ‘timestepsInRange’:
+./Assertions.h:442:37: warning: unused variable ‘errno’ [-Wunused-variable]
+  442 | #define NOP_DECLARATION_ extern int errno
+      |                                     ^~~~~
+./Assertions.h:450:33: note: in expansion of macro ‘NOP_DECLARATION_’
+  450 | #define PRE6(c1,c2,c3,c4,c5,c6) NOP_DECLARATION_
+      |                                 ^~~~~~~~~~~~~~~~
+./Assertions.h:513:15: note: in expansion of macro ‘PRE6’
+  513 | #define PRE06 PRE6
+      |               ^~~~
+DateTime.c:134:3: note: in expansion of macro ‘PRE06’
+  134 |   PRE06( isValidDate( firstDate ), isValidTime( firstTime ),
+      |   ^~~~~
+DateTime.c: In function ‘monthAndDay’:
+./Assertions.h:442:37: warning: unused variable ‘errno’ [-Wunused-variable]
+  442 | #define NOP_DECLARATION_ extern int errno
+      |                                     ^~~~~
+./Assertions.h:447:24: note: in expansion of macro ‘NOP_DECLARATION_’
+  447 | #define PRE3(c1,c2,c3) NOP_DECLARATION_
+      |                        ^~~~~~~~~~~~~~~~
+./Assertions.h:510:15: note: in expansion of macro ‘PRE3’
+  510 | #define PRE03 PRE3
+      |               ^~~~
+DateTime.c:163:3: note: in expansion of macro ‘PRE03’
+  163 |   PRE03( isValidDate( yyyyddd ), month, dayOfMonth );
+      |   ^~~~~
+DateTime.c: In function ‘incrementOneHour’:
+./Assertions.h:442:37: warning: unused variable ‘errno’ [-Wunused-variable]
+  442 | #define NOP_DECLARATION_ extern int errno
+      |                                     ^~~~~
+./Assertions.h:448:27: note: in expansion of macro ‘NOP_DECLARATION_’
+  448 | #define PRE4(c1,c2,c3,c4) NOP_DECLARATION_
+      |                           ^~~~~~~~~~~~~~~~
+./Assertions.h:511:15: note: in expansion of macro ‘PRE4’
+  511 | #define PRE04 PRE4
+      |               ^~~~
+DateTime.c:205:3: note: in expansion of macro ‘PRE04’
+  205 |   PRE04( yyyyddd, hhmmss, isValidDate( *yyyyddd ), isValidTime( *hhmmss ) );
+      |   ^~~~~
+DateTime.c: In function ‘decrementOneHour’:
+./Assertions.h:442:37: warning: unused variable ‘errno’ [-Wunused-variable]
+  442 | #define NOP_DECLARATION_ extern int errno
+      |                                     ^~~~~
+./Assertions.h:448:27: note: in expansion of macro ‘NOP_DECLARATION_’
+  448 | #define PRE4(c1,c2,c3,c4) NOP_DECLARATION_
+      |                           ^~~~~~~~~~~~~~~~
+./Assertions.h:511:15: note: in expansion of macro ‘PRE4’
+  511 | #define PRE04 PRE4
+      |               ^~~~
+DateTime.c:244:3: note: in expansion of macro ‘PRE04’
+  244 |   PRE04( yyyyddd, hhmmss, isValidDate( *yyyyddd ), isValidTime( *hhmmss ) );
+      |   ^~~~~
+DateTime.c: In function ‘incrementTime’:
+./Assertions.h:442:37: warning: unused variable ‘errno’ [-Wunused-variable]
+  442 | #define NOP_DECLARATION_ extern int errno
+      |                                     ^~~~~
+./Assertions.h:449:30: note: in expansion of macro ‘NOP_DECLARATION_’
+  449 | #define PRE5(c1,c2,c3,c4,c5) NOP_DECLARATION_
+      |                              ^~~~~~~~~~~~~~~~
+./Assertions.h:512:15: note: in expansion of macro ‘PRE5’
+  512 | #define PRE05 PRE5
+      |               ^~~~
+DateTime.c:282:3: note: in expansion of macro ‘PRE05’
+  282 |   PRE05( yyyyddd, hhmmss, isValidDate( *yyyyddd ), isValidTime( *hhmmss ),
+      |   ^~~~~
+DateTime.c: In function ‘decrementTime’:
+./Assertions.h:442:37: warning: unused variable ‘errno’ [-Wunused-variable]
+  442 | #define NOP_DECLARATION_ extern int errno
+      |                                     ^~~~~
+./Assertions.h:449:30: note: in expansion of macro ‘NOP_DECLARATION_’
+  449 | #define PRE5(c1,c2,c3,c4,c5) NOP_DECLARATION_
+      |                              ^~~~~~~~~~~~~~~~
+./Assertions.h:512:15: note: in expansion of macro ‘PRE5’
+  512 | #define PRE05 PRE5
+      |               ^~~~
+DateTime.c:328:3: note: in expansion of macro ‘PRE05’
+  328 |   PRE05( yyyyddd, hhmmss, isValidDate( *yyyyddd ), isValidTime( *hhmmss ),
+      |   ^~~~~
+DateTime.c: In function ‘toUTCTimestamp’:
+./Assertions.h:442:37: warning: unused variable ‘errno’ [-Wunused-variable]
+  442 | #define NOP_DECLARATION_ extern int errno
+      |                                     ^~~~~
+./Assertions.h:446:21: note: in expansion of macro ‘NOP_DECLARATION_’
+  446 | #define PRE2(c1,c2) NOP_DECLARATION_
+      |                     ^~~~~~~~~~~~~~~~
+./Assertions.h:509:15: note: in expansion of macro ‘PRE2’
+  509 | #define PRE02 PRE2
+      |               ^~~~
+DateTime.c:389:3: note: in expansion of macro ‘PRE02’
+  389 |   PRE02( isValidTimestamp( yyyydddhhmm ), string );
+      |   ^~~~~
+DateTime.c: In function ‘fromUTCTimestamp’:
+./Assertions.h:442:37: warning: unused variable ‘errno’ [-Wunused-variable]
+  442 | #define NOP_DECLARATION_ extern int errno
+      |                                     ^~~~~
+./Assertions.h:445:17: note: in expansion of macro ‘NOP_DECLARATION_’
+  445 | #define PRE(c1) NOP_DECLARATION_
+      |                 ^~~~~~~~~~~~~~~~
+./Assertions.h:508:14: note: in expansion of macro ‘PRE’
+  508 | #define PRE0 PRE
+      |              ^~~
+DateTime.c:415:3: note: in expansion of macro ‘PRE0’
+  415 |   PRE0( isValidUTCTimestamp( (const char*) string ) );
+      |   ^~~~
+DateTime.c: In function ‘parseTimestamp’:
+./Assertions.h:442:37: warning: unused variable ‘errno’ [-Wunused-variable]
+  442 | #define NOP_DECLARATION_ extern int errno
+      |                                     ^~~~~
+./Assertions.h:446:21: note: in expansion of macro ‘NOP_DECLARATION_’
+  446 | #define PRE2(c1,c2) NOP_DECLARATION_
+      |                     ^~~~~~~~~~~~~~~~
+./Assertions.h:509:15: note: in expansion of macro ‘PRE2’
+  509 | #define PRE02 PRE2
+      |               ^~~~
+DateTime.c:449:3: note: in expansion of macro ‘PRE02’
+  449 |   PRE02( string, yyyydddhh00 );
+      |   ^~~~~
+DateTime.c: In function ‘convertYearMonthDay’:
+./Assertions.h:442:37: warning: unused variable ‘errno’ [-Wunused-variable]
+  442 | #define NOP_DECLARATION_ extern int errno
+      |                                     ^~~~~
+./Assertions.h:447:24: note: in expansion of macro ‘NOP_DECLARATION_’
+  447 | #define PRE3(c1,c2,c3) NOP_DECLARATION_
+      |                        ^~~~~~~~~~~~~~~~
+./Assertions.h:510:15: note: in expansion of macro ‘PRE3’
+  510 | #define PRE03 PRE3
+      |               ^~~~
+DateTime.c:525:3: note: in expansion of macro ‘PRE03’
+  525 |   PRE03( yyyymmdd / 10000 > 1000,
+      |   ^~~~~
+DateTime.c: In function ‘incrementTimestamp’:
+./Assertions.h:442:37: warning: unused variable ‘errno’ [-Wunused-variable]
+  442 | #define NOP_DECLARATION_ extern int errno
+      |                                     ^~~~~
+./Assertions.h:446:21: note: in expansion of macro ‘NOP_DECLARATION_’
+  446 | #define PRE2(c1,c2) NOP_DECLARATION_
+      |                     ^~~~~~~~~~~~~~~~
+./Assertions.h:509:15: note: in expansion of macro ‘PRE2’
+  509 | #define PRE02 PRE2
+      |               ^~~~
+DateTime.c:560:3: note: in expansion of macro ‘PRE02’
+  560 |   PRE02( yyyydddhhmm, isValidTimestamp( *yyyydddhhmm ) );
+      |   ^~~~~
+DateTime.c: In function ‘decrementTimestamp’:
+./Assertions.h:442:37: warning: unused variable ‘errno’ [-Wunused-variable]
+  442 | #define NOP_DECLARATION_ extern int errno
+      |                                     ^~~~~
+./Assertions.h:446:21: note: in expansion of macro ‘NOP_DECLARATION_’
+  446 | #define PRE2(c1,c2) NOP_DECLARATION_
+      |                     ^~~~~~~~~~~~~~~~
+./Assertions.h:509:15: note: in expansion of macro ‘PRE2’
+  509 | #define PRE02 PRE2
+      |               ^~~~
+DateTime.c:593:3: note: in expansion of macro ‘PRE02’
+  593 |   PRE02( yyyydddhhmm, isValidTimestamp( *yyyydddhhmm ) );
+      |   ^~~~~
+DateTime.c: In function ‘offsetTimestamp’:
+./Assertions.h:442:37: warning: unused variable ‘errno’ [-Wunused-variable]
+  442 | #define NOP_DECLARATION_ extern int errno
+      |                                     ^~~~~
+./Assertions.h:445:17: note: in expansion of macro ‘NOP_DECLARATION_’
+  445 | #define PRE(c1) NOP_DECLARATION_
+      |                 ^~~~~~~~~~~~~~~~
+./Assertions.h:508:14: note: in expansion of macro ‘PRE’
+  508 | #define PRE0 PRE
+      |              ^~~
+DateTime.c:627:3: note: in expansion of macro ‘PRE0’
+  627 |   PRE0( isValidTimestamp( yyyydddhhmm ) );
+      |   ^~~~
+DateTime.c: In function ‘toYYYYMMDDHHMMSS’:
+./Assertions.h:442:37: warning: unused variable ‘errno’ [-Wunused-variable]
+  442 | #define NOP_DECLARATION_ extern int errno
+      |                                     ^~~~~
+./Assertions.h:445:17: note: in expansion of macro ‘NOP_DECLARATION_’
+  445 | #define PRE(c1) NOP_DECLARATION_
+      |                 ^~~~~~~~~~~~~~~~
+./Assertions.h:508:14: note: in expansion of macro ‘PRE’
+  508 | #define PRE0 PRE
+      |              ^~~
+DateTime.c:706:3: note: in expansion of macro ‘PRE0’
+  706 |   PRE0( isValidTimestamp( yyyydddhhmm ) );
+      |   ^~~~
+DateTime.c: In function ‘hoursInRange’:
+./Assertions.h:442:37: warning: unused variable ‘errno’ [-Wunused-variable]
+  442 | #define NOP_DECLARATION_ extern int errno
+      |                                     ^~~~~
+./Assertions.h:447:24: note: in expansion of macro ‘NOP_DECLARATION_’
+  447 | #define PRE3(c1,c2,c3) NOP_DECLARATION_
+      |                        ^~~~~~~~~~~~~~~~
+./Assertions.h:510:15: note: in expansion of macro ‘PRE3’
+  510 | #define PRE03 PRE3
+      |               ^~~~
+DateTime.c:730:3: note: in expansion of macro ‘PRE03’
+  730 |   PRE03( isValidUTCTimestamp( first ),
+      |   ^~~~~
+DateTime.c: In function ‘daysInRange’:
+./Assertions.h:442:37: warning: unused variable ‘errno’ [-Wunused-variable]
+  442 | #define NOP_DECLARATION_ extern int errno
+      |                                     ^~~~~
+./Assertions.h:447:24: note: in expansion of macro ‘NOP_DECLARATION_’
+  447 | #define PRE3(c1,c2,c3) NOP_DECLARATION_
+      |                        ^~~~~~~~~~~~~~~~
+./Assertions.h:510:15: note: in expansion of macro ‘PRE3’
+  510 | #define PRE03 PRE3
+      |               ^~~~
+DateTime.c:756:3: note: in expansion of macro ‘PRE03’
+  756 |   PRE03( isValidUTCTimestamp( first ),
+      |   ^~~~~
+DateTime.c: In function ‘parseTimeRange’:
+./Assertions.h:442:37: warning: unused variable ‘errno’ [-Wunused-variable]
+  442 | #define NOP_DECLARATION_ extern int errno
+      |                                     ^~~~~
+./Assertions.h:448:27: note: in expansion of macro ‘NOP_DECLARATION_’
+  448 | #define PRE4(c1,c2,c3,c4) NOP_DECLARATION_
+      |                           ^~~~~~~~~~~~~~~~
+./Assertions.h:511:15: note: in expansion of macro ‘PRE4’
+  511 | #define PRE04 PRE4
+      |               ^~~~
+DateTime.c:816:3: note: in expansion of macro ‘PRE04’
+  816 |   PRE04( string1, string2, yyyymmddhhmmss1, yyyymmddhhmmss2 );
+      |   ^~~~~
+DateTime.c: In function ‘totalSeconds’:
+./Assertions.h:442:37: warning: unused variable ‘errno’ [-Wunused-variable]
+  442 | #define NOP_DECLARATION_ extern int errno
+      |                                     ^~~~~
+./Assertions.h:449:30: note: in expansion of macro ‘NOP_DECLARATION_’
+  449 | #define PRE5(c1,c2,c3,c4,c5) NOP_DECLARATION_
+      |                              ^~~~~~~~~~~~~~~~
+./Assertions.h:512:15: note: in expansion of macro ‘PRE5’
+  512 | #define PRE05 PRE5
+      |               ^~~~
+DateTime.c:853:3: note: in expansion of macro ‘PRE05’
+  853 |   PRE05( isValidYYYYMMDDHHMMSS( yyyymmddhhmmss1 ),
+      |   ^~~~~
+DateTime.c: In function ‘timestampOfTargetSeconds’:
+./Assertions.h:442:37: warning: unused variable ‘errno’ [-Wunused-variable]
+  442 | #define NOP_DECLARATION_ extern int errno
+      |                                     ^~~~~
+./Assertions.h:447:24: note: in expansion of macro ‘NOP_DECLARATION_’
+  447 | #define PRE3(c1,c2,c3) NOP_DECLARATION_
+      |                        ^~~~~~~~~~~~~~~~
+./Assertions.h:510:15: note: in expansion of macro ‘PRE3’
+  510 | #define PRE03 PRE3
+      |               ^~~~
+DateTime.c:930:3: note: in expansion of macro ‘PRE03’
+  930 |   PRE03( isValidYYYYMMDDHHMMSS( yyyymmddhhmmss ), seconds >= 0,
+      |   ^~~~~
+DateTime.c: In function ‘toUTCTimestamp2’:
+./Assertions.h:442:37: warning: unused variable ‘errno’ [-Wunused-variable]
+  442 | #define NOP_DECLARATION_ extern int errno
+      |                                     ^~~~~
+./Assertions.h:446:21: note: in expansion of macro ‘NOP_DECLARATION_’
+  446 | #define PRE2(c1,c2) NOP_DECLARATION_
+      |                     ^~~~~~~~~~~~~~~~
+./Assertions.h:509:15: note: in expansion of macro ‘PRE2’
+  509 | #define PRE02 PRE2
+      |               ^~~~
+DateTime.c:999:3: note: in expansion of macro ‘PRE02’
+  999 |   PRE02( isValidYYYYMMDDHHMMSS( yyyymmddhhmmss ), string );
+      |   ^~~~~
+DateTime.c: In function ‘previousDay’:
+./Assertions.h:442:37: warning: unused variable ‘errno’ [-Wunused-variable]
+  442 | #define NOP_DECLARATION_ extern int errno
+      |                                     ^~~~~
+./Assertions.h:445:17: note: in expansion of macro ‘NOP_DECLARATION_’
+  445 | #define PRE(c1) NOP_DECLARATION_
+      |                 ^~~~~~~~~~~~~~~~
+./Assertions.h:508:14: note: in expansion of macro ‘PRE’
+  508 | #define PRE0 PRE
+      |              ^~~
+DateTime.c:1024:3: note: in expansion of macro ‘PRE0’
+ 1024 |   PRE0( isValidYYYYMMDDHHMMSS( yyyymmddhhmmss ) );
+      |   ^~~~
+DateTime.c: In function ‘incrementHour’:
+./Assertions.h:442:37: warning: unused variable ‘errno’ [-Wunused-variable]
+  442 | #define NOP_DECLARATION_ extern int errno
+      |                                     ^~~~~
+./Assertions.h:447:24: note: in expansion of macro ‘NOP_DECLARATION_’
+  447 | #define PRE3(c1,c2,c3) NOP_DECLARATION_
+      |                        ^~~~~~~~~~~~~~~~
+./Assertions.h:510:15: note: in expansion of macro ‘PRE3’
+  510 | #define PRE03 PRE3
+      |               ^~~~
+DateTime.c:1058:3: note: in expansion of macro ‘PRE03’
+ 1058 |   PRE03( yyyymmddhh, isValidYearMonthDay( *yyyymmddhh / 100 ),
+      |   ^~~~~
+DateTime.c: In function ‘toUTCTimestamp’:
+DateTime.c:397:20: warning: ‘%02lld’ directive writing between 2 and 3 bytes into a region of size between 0 and 11 [-Wformat-overflow=]
+  397 |   sprintf( string, "%04"INTEGER_FORMAT"-%02"INTEGER_FORMAT
+      |                    ^~~~~
+DateTime.c:400:22: note: format string is defined here
+  400 |                    ":%02"INTEGER_FORMAT":00-0000",
+DateTime.c:397:20: note: directive argument in the range [-99, 99]
+  397 |   sprintf( string, "%04"INTEGER_FORMAT"-%02"INTEGER_FORMAT
+      |                    ^~~~~
+DateTime.c:397:3: note: ‘sprintf’ output between 25 and 72 bytes into a destination of size 25
+  397 |   sprintf( string, "%04"INTEGER_FORMAT"-%02"INTEGER_FORMAT
+      |   ^~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+  398 |                    "-%02"INTEGER_FORMAT
+      |                    ~~~~~~~~~~~~~~~~~~~~
+  399 |                    "T%02"INTEGER_FORMAT
+      |                    ~~~~~~~~~~~~~~~~~~~~
+  400 |                    ":%02"INTEGER_FORMAT":00-0000",
+      |                    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+  401 |            yyyy, mo, dd, hh, mm );
+      |            ~~~~~~~~~~~~~~~~~~~~~~
+DateTime.c: In function ‘toUTCTimestamp2’:
+DateTime.c:1007:20: warning: ‘%02lld’ directive writing between 2 and 3 bytes into a region of size between 2 and 11 [-Wformat-overflow=]
+ 1007 |   sprintf( string, "%04"INTEGER_FORMAT"-%02"INTEGER_FORMAT
+      |                    ^~~~~
+DateTime.c:1010:22: note: format string is defined here
+ 1010 |                    ":%02"INTEGER_FORMAT":%02"INTEGER_FORMAT"-0000",
+DateTime.c:1007:20: note: directive argument in the range [-99, 99]
+ 1007 |   sprintf( string, "%04"INTEGER_FORMAT"-%02"INTEGER_FORMAT
+      |                    ^~~~~
+DateTime.c:1007:20: note: directive argument in the range [-99, 99]
+DateTime.c:1007:3: note: ‘sprintf’ output between 25 and 36 bytes into a destination of size 25
+ 1007 |   sprintf( string, "%04"INTEGER_FORMAT"-%02"INTEGER_FORMAT
+      |   ^~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+ 1008 |                    "-%02"INTEGER_FORMAT
+      |                    ~~~~~~~~~~~~~~~~~~~~
+ 1009 |                    "T%02"INTEGER_FORMAT
+      |                    ~~~~~~~~~~~~~~~~~~~~
+ 1010 |                    ":%02"INTEGER_FORMAT":%02"INTEGER_FORMAT"-0000",
+      |                    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+ 1011 |            yyyy, mo, dd, hh, mm, ss );
+      |            ~~~~~~~~~~~~~~~~~~~~~~~~~~
+In file included from Memory.c:13:
+Memory.c: In function ‘freeMemory’:
+./Assertions.h:442:37: warning: unused variable ‘errno’ [-Wunused-variable]
+  442 | #define NOP_DECLARATION_ extern int errno
+      |                                     ^~~~~
+./Assertions.h:445:17: note: in expansion of macro ‘NOP_DECLARATION_’
+  445 | #define PRE(c1) NOP_DECLARATION_
+      |                 ^~~~~~~~~~~~~~~~
+./Assertions.h:508:14: note: in expansion of macro ‘PRE’
+  508 | #define PRE0 PRE
+      |              ^~~
+Memory.c:47:3: note: in expansion of macro ‘PRE0’
+   47 |   PRE0( address );
+      |   ^~~~
+Memory.c: In function ‘newMemory’:
+./Assertions.h:442:37: warning: unused variable ‘errno’ [-Wunused-variable]
+  442 | #define NOP_DECLARATION_ extern int errno
+      |                                     ^~~~~
+./Assertions.h:447:24: note: in expansion of macro ‘NOP_DECLARATION_’
+  447 | #define PRE3(c1,c2,c3) NOP_DECLARATION_
+      |                        ^~~~~~~~~~~~~~~~
+./Assertions.h:510:15: note: in expansion of macro ‘PRE3’
+  510 | #define PRE03 PRE3
+      |               ^~~~
+Memory.c:67:3: note: in expansion of macro ‘PRE03’
+   67 |   PRE03( count > 0, sizeEach > 0, IS_BOOL( zeroIt ) );
+      |   ^~~~~
+Memory.c: In function ‘resizeMemory’:
+./Assertions.h:442:37: warning: unused variable ‘errno’ [-Wunused-variable]
+  442 | #define NOP_DECLARATION_ extern int errno
+      |                                     ^~~~~
+./Assertions.h:452:39: note: in expansion of macro ‘NOP_DECLARATION_’
+  452 | #define PRE8(c1,c2,c3,c4,c5,c6,c7,c8) NOP_DECLARATION_
+      |                                       ^~~~~~~~~~~~~~~~
+./Assertions.h:515:15: note: in expansion of macro ‘PRE8’
+  515 | #define PRE08 PRE8
+      |               ^~~~
+Memory.c:164:3: note: in expansion of macro ‘PRE08’
+  164 |   PRE08( typeSize > 0,
+      |   ^~~~~
+Memory.c: In function ‘setCountDownToFailMemory’:
+./Assertions.h:442:37: warning: unused variable ‘errno’ [-Wunused-variable]
+  442 | #define NOP_DECLARATION_ extern int errno
+      |                                     ^~~~~
+./Assertions.h:445:17: note: in expansion of macro ‘NOP_DECLARATION_’
+  445 | #define PRE(c1) NOP_DECLARATION_
+      |                 ^~~~~~~~~~~~~~~~
+./Assertions.h:508:14: note: in expansion of macro ‘PRE’
+  508 | #define PRE0 PRE
+      |              ^~~
+Memory.c:274:3: note: in expansion of macro ‘PRE0’
+  274 |   PRE0( countDown >= 0 );
+      |   ^~~~
+In file included from Stream.c:225:
+Stream.c: In function ‘newFileStream’:
+./Assertions.h:442:37: warning: unused variable ‘errno’ [-Wunused-variable]
+  442 | #define NOP_DECLARATION_ extern int errno
+      |                                     ^~~~~
+./Assertions.h:450:33: note: in expansion of macro ‘NOP_DECLARATION_’
+  450 | #define PRE6(c1,c2,c3,c4,c5,c6) NOP_DECLARATION_
+      |                                 ^~~~~~~~~~~~~~~~
+./Assertions.h:513:15: note: in expansion of macro ‘PRE6’
+  513 | #define PRE06 PRE6
+      |               ^~~~
+Stream.c:532:3: note: in expansion of macro ‘PRE06’
+  532 |   PRE06( fileName, *fileName, mode,
+      |   ^~~~~
+Stream.c: In function ‘newPipeStream’:
+./Assertions.h:442:37: warning: unused variable ‘errno’ [-Wunused-variable]
+  442 | #define NOP_DECLARATION_ extern int errno
+      |                                     ^~~~~
+./Assertions.h:448:27: note: in expansion of macro ‘NOP_DECLARATION_’
+  448 | #define PRE4(c1,c2,c3,c4) NOP_DECLARATION_
+      |                           ^~~~~~~~~~~~~~~~
+./Assertions.h:511:15: note: in expansion of macro ‘PRE4’
+  511 | #define PRE04 PRE4
+      |               ^~~~
+Stream.c:641:3: note: in expansion of macro ‘PRE04’
+  641 |   PRE04( command, *command, mode, matchesWord( mode, " r w " ) );
+      |   ^~~~~
+Stream.c: In function ‘newServerSocketStream’:
+./Assertions.h:442:37: warning: unused variable ‘errno’ [-Wunused-variable]
+  442 | #define NOP_DECLARATION_ extern int errno
+      |                                     ^~~~~
+./Assertions.h:445:17: note: in expansion of macro ‘NOP_DECLARATION_’
+  445 | #define PRE(c1) NOP_DECLARATION_
+      |                 ^~~~~~~~~~~~~~~~
+./Assertions.h:508:14: note: in expansion of macro ‘PRE’
+  508 | #define PRE0 PRE
+      |              ^~~
+Stream.c:725:3: note: in expansion of macro ‘PRE0’
+  725 |   PRE0( IN_RANGE( port, 1, 65535 ) );
+      |   ^~~~
+Stream.c: In function ‘newClientSocketStream’:
+./Assertions.h:442:37: warning: unused variable ‘errno’ [-Wunused-variable]
+  442 | #define NOP_DECLARATION_ extern int errno
+      |                                     ^~~~~
+./Assertions.h:447:24: note: in expansion of macro ‘NOP_DECLARATION_’
+  447 | #define PRE3(c1,c2,c3) NOP_DECLARATION_
+      |                        ^~~~~~~~~~~~~~~~
+./Assertions.h:510:15: note: in expansion of macro ‘PRE3’
+  510 | #define PRE03 PRE3
+      |               ^~~~
+Stream.c:775:3: note: in expansion of macro ‘PRE03’
+  775 |   PRE03( IN_RANGE( port, 1, 65535 ), host, *host );
+      |   ^~~~~
+Stream.c: In function ‘closeStream’:
+./Assertions.h:442:37: warning: unused variable ‘errno’ [-Wunused-variable]
+  442 | #define NOP_DECLARATION_ extern int errno
+      |                                     ^~~~~
+./Assertions.h:445:17: note: in expansion of macro ‘NOP_DECLARATION_’
+  445 | #define PRE(c1) NOP_DECLARATION_
+      |                 ^~~~~~~~~~~~~~~~
+Stream.c:805:3: note: in expansion of macro ‘PRE’
+  805 |   PRE( self );
+      |   ^~~
+Stream.c: In function ‘flushStream’:
+./Assertions.h:442:37: warning: unused variable ‘errno’ [-Wunused-variable]
+  442 | #define NOP_DECLARATION_ extern int errno
+      |                                     ^~~~~
+./Assertions.h:445:17: note: in expansion of macro ‘NOP_DECLARATION_’
+  445 | #define PRE(c1) NOP_DECLARATION_
+      |                 ^~~~~~~~~~~~~~~~
+Stream.c:850:3: note: in expansion of macro ‘PRE’
+  850 |   PRE( isWritable( self ) );
+      |   ^~~
+Stream.c: In function ‘seekFromStart’:
+./Assertions.h:442:37: warning: unused variable ‘errno’ [-Wunused-variable]
+  442 | #define NOP_DECLARATION_ extern int errno
+      |                                     ^~~~~
+./Assertions.h:446:21: note: in expansion of macro ‘NOP_DECLARATION_’
+  446 | #define PRE2(c1,c2) NOP_DECLARATION_
+      |                     ^~~~~~~~~~~~~~~~
+Stream.c:876:3: note: in expansion of macro ‘PRE2’
+  876 |   PRE2( isSeekable( self ), byteOffset >= 0 );
+      |   ^~~~
+Stream.c: In function ‘seekFromEnd’:
+./Assertions.h:442:37: warning: unused variable ‘errno’ [-Wunused-variable]
+  442 | #define NOP_DECLARATION_ extern int errno
+      |                                     ^~~~~
+./Assertions.h:445:17: note: in expansion of macro ‘NOP_DECLARATION_’
+  445 | #define PRE(c1) NOP_DECLARATION_
+      |                 ^~~~~~~~~~~~~~~~
+Stream.c:902:3: note: in expansion of macro ‘PRE’
+  902 |   PRE( isSeekable( self ) );
+      |   ^~~
+Stream.c: In function ‘seekFromCurrent’:
+./Assertions.h:442:37: warning: unused variable ‘errno’ [-Wunused-variable]
+  442 | #define NOP_DECLARATION_ extern int errno
+      |                                     ^~~~~
+./Assertions.h:445:17: note: in expansion of macro ‘NOP_DECLARATION_’
+  445 | #define PRE(c1) NOP_DECLARATION_
+      |                 ^~~~~~~~~~~~~~~~
+Stream.c:926:3: note: in expansion of macro ‘PRE’
+  926 |   PRE( isSeekable( self ) );
+      |   ^~~
+Stream.c: In function ‘readString’:
+./Assertions.h:442:37: warning: unused variable ‘errno’ [-Wunused-variable]
+  442 | #define NOP_DECLARATION_ extern int errno
+      |                                     ^~~~~
+./Assertions.h:447:24: note: in expansion of macro ‘NOP_DECLARATION_’
+  447 | #define PRE3(c1,c2,c3) NOP_DECLARATION_
+      |                        ^~~~~~~~~~~~~~~~
+Stream.c:951:3: note: in expansion of macro ‘PRE3’
+  951 |   PRE3( isReadable( self ), s, n > 0 );
+      |   ^~~~
+Stream.c: In function ‘readWord’:
+./Assertions.h:442:37: warning: unused variable ‘errno’ [-Wunused-variable]
+  442 | #define NOP_DECLARATION_ extern int errno
+      |                                     ^~~~~
+./Assertions.h:447:24: note: in expansion of macro ‘NOP_DECLARATION_’
+  447 | #define PRE3(c1,c2,c3) NOP_DECLARATION_
+      |                        ^~~~~~~~~~~~~~~~
+Stream.c:1032:3: note: in expansion of macro ‘PRE3’
+ 1032 |   PRE3( isReadable( self ), s, n > 0 );
+      |   ^~~~
+Stream.c: In function ‘readByte’:
+./Assertions.h:442:37: warning: unused variable ‘errno’ [-Wunused-variable]
+  442 | #define NOP_DECLARATION_ extern int errno
+      |                                     ^~~~~
+./Assertions.h:446:21: note: in expansion of macro ‘NOP_DECLARATION_’
+  446 | #define PRE2(c1,c2) NOP_DECLARATION_
+      |                     ^~~~~~~~~~~~~~~~
+Stream.c:1076:3: note: in expansion of macro ‘PRE2’
+ 1076 |   PRE2( isReadable( self ), x );
+      |   ^~~~
+Stream.c: In function ‘read8BitInteger’:
+./Assertions.h:442:37: warning: unused variable ‘errno’ [-Wunused-variable]
+  442 | #define NOP_DECLARATION_ extern int errno
+      |                                     ^~~~~
+./Assertions.h:446:21: note: in expansion of macro ‘NOP_DECLARATION_’
+  446 | #define PRE2(c1,c2) NOP_DECLARATION_
+      |                     ^~~~~~~~~~~~~~~~
+Stream.c:1108:3: note: in expansion of macro ‘PRE2’
+ 1108 |   PRE2( isReadable( self ), x );
+      |   ^~~~
+Stream.c: In function ‘read16BitInteger’:
+./Assertions.h:442:37: warning: unused variable ‘errno’ [-Wunused-variable]
+  442 | #define NOP_DECLARATION_ extern int errno
+      |                                     ^~~~~
+./Assertions.h:446:21: note: in expansion of macro ‘NOP_DECLARATION_’
+  446 | #define PRE2(c1,c2) NOP_DECLARATION_
+      |                     ^~~~~~~~~~~~~~~~
+Stream.c:1141:3: note: in expansion of macro ‘PRE2’
+ 1141 |   PRE2( isReadable( self ), x );
+      |   ^~~~
+Stream.c: In function ‘read32BitInteger’:
+./Assertions.h:442:37: warning: unused variable ‘errno’ [-Wunused-variable]
+  442 | #define NOP_DECLARATION_ extern int errno
+      |                                     ^~~~~
+./Assertions.h:446:21: note: in expansion of macro ‘NOP_DECLARATION_’
+  446 | #define PRE2(c1,c2) NOP_DECLARATION_
+      |                     ^~~~~~~~~~~~~~~~
+Stream.c:1186:3: note: in expansion of macro ‘PRE2’
+ 1186 |   PRE2( isReadable( self ), x );
+      |   ^~~~
+Stream.c: In function ‘read64BitInteger’:
+./Assertions.h:442:37: warning: unused variable ‘errno’ [-Wunused-variable]
+  442 | #define NOP_DECLARATION_ extern int errno
+      |                                     ^~~~~
+./Assertions.h:446:21: note: in expansion of macro ‘NOP_DECLARATION_’
+  446 | #define PRE2(c1,c2) NOP_DECLARATION_
+      |                     ^~~~~~~~~~~~~~~~
+Stream.c:1233:3: note: in expansion of macro ‘PRE2’
+ 1233 |   PRE2( isReadable( self ), x );
+      |   ^~~~
+Stream.c: In function ‘read32BitReal’:
+./Assertions.h:442:37: warning: unused variable ‘errno’ [-Wunused-variable]
+  442 | #define NOP_DECLARATION_ extern int errno
+      |                                     ^~~~~
+./Assertions.h:446:21: note: in expansion of macro ‘NOP_DECLARATION_’
+  446 | #define PRE2(c1,c2) NOP_DECLARATION_
+      |                     ^~~~~~~~~~~~~~~~
+Stream.c:1278:3: note: in expansion of macro ‘PRE2’
+ 1278 |   PRE2( isReadable( self ), x );
+      |   ^~~~
+Stream.c: In function ‘read64BitReal’:
+./Assertions.h:442:37: warning: unused variable ‘errno’ [-Wunused-variable]
+  442 | #define NOP_DECLARATION_ extern int errno
+      |                                     ^~~~~
+./Assertions.h:446:21: note: in expansion of macro ‘NOP_DECLARATION_’
+  446 | #define PRE2(c1,c2) NOP_DECLARATION_
+      |                     ^~~~~~~~~~~~~~~~
+Stream.c:1326:3: note: in expansion of macro ‘PRE2’
+ 1326 |   PRE2( isReadable( self ), x );
+      |   ^~~~
+Stream.c: In function ‘readBytes’:
+./Assertions.h:442:37: warning: unused variable ‘errno’ [-Wunused-variable]
+  442 | #define NOP_DECLARATION_ extern int errno
+      |                                     ^~~~~
+./Assertions.h:447:24: note: in expansion of macro ‘NOP_DECLARATION_’
+  447 | #define PRE3(c1,c2,c3) NOP_DECLARATION_
+      |                        ^~~~~~~~~~~~~~~~
+Stream.c:1370:3: note: in expansion of macro ‘PRE3’
+ 1370 |   PRE3( isReadable( self ), a, n > 0 );
+      |   ^~~~
+Stream.c: In function ‘readUpToNBytes’:
+./Assertions.h:442:37: warning: unused variable ‘errno’ [-Wunused-variable]
+  442 | #define NOP_DECLARATION_ extern int errno
+      |                                     ^~~~~
+./Assertions.h:448:27: note: in expansion of macro ‘NOP_DECLARATION_’
+  448 | #define PRE4(c1,c2,c3,c4) NOP_DECLARATION_
+      |                           ^~~~~~~~~~~~~~~~
+Stream.c:1416:3: note: in expansion of macro ‘PRE4’
+ 1416 |   PRE4( isReadable( self ), a, n > 0, actualCount );
+      |   ^~~~
+Stream.c: In function ‘read8BitIntegers’:
+./Assertions.h:442:37: warning: unused variable ‘errno’ [-Wunused-variable]
+  442 | #define NOP_DECLARATION_ extern int errno
+      |                                     ^~~~~
+./Assertions.h:447:24: note: in expansion of macro ‘NOP_DECLARATION_’
+  447 | #define PRE3(c1,c2,c3) NOP_DECLARATION_
+      |                        ^~~~~~~~~~~~~~~~
+Stream.c:1482:3: note: in expansion of macro ‘PRE3’
+ 1482 |   PRE3( isReadable( self ), a, n > 0 );
+      |   ^~~~
+Stream.c: In function ‘read16BitIntegers’:
+./Assertions.h:442:37: warning: unused variable ‘errno’ [-Wunused-variable]
+  442 | #define NOP_DECLARATION_ extern int errno
+      |                                     ^~~~~
+./Assertions.h:447:24: note: in expansion of macro ‘NOP_DECLARATION_’
+  447 | #define PRE3(c1,c2,c3) NOP_DECLARATION_
+      |                        ^~~~~~~~~~~~~~~~
+Stream.c:1526:3: note: in expansion of macro ‘PRE3’
+ 1526 |   PRE3( isReadable( self ), a,
+      |   ^~~~
+Stream.c: In function ‘read32BitIntegers’:
+./Assertions.h:442:37: warning: unused variable ‘errno’ [-Wunused-variable]
+  442 | #define NOP_DECLARATION_ extern int errno
+      |                                     ^~~~~
+./Assertions.h:447:24: note: in expansion of macro ‘NOP_DECLARATION_’
+  447 | #define PRE3(c1,c2,c3) NOP_DECLARATION_
+      |                        ^~~~~~~~~~~~~~~~
+Stream.c:1579:3: note: in expansion of macro ‘PRE3’
+ 1579 |   PRE3( isReadable( self ), a,
+      |   ^~~~
+Stream.c: In function ‘read64BitIntegers’:
+./Assertions.h:442:37: warning: unused variable ‘errno’ [-Wunused-variable]
+  442 | #define NOP_DECLARATION_ extern int errno
+      |                                     ^~~~~
+./Assertions.h:447:24: note: in expansion of macro ‘NOP_DECLARATION_’
+  447 | #define PRE3(c1,c2,c3) NOP_DECLARATION_
+      |                        ^~~~~~~~~~~~~~~~
+Stream.c:1634:3: note: in expansion of macro ‘PRE3’
+ 1634 |   PRE3( isReadable( self ), a,
+      |   ^~~~
+Stream.c: In function ‘read32BitReals’:
+./Assertions.h:442:37: warning: unused variable ‘errno’ [-Wunused-variable]
+  442 | #define NOP_DECLARATION_ extern int errno
+      |                                     ^~~~~
+./Assertions.h:447:24: note: in expansion of macro ‘NOP_DECLARATION_’
+  447 | #define PRE3(c1,c2,c3) NOP_DECLARATION_
+      |                        ^~~~~~~~~~~~~~~~
+Stream.c:1682:3: note: in expansion of macro ‘PRE3’
+ 1682 |   PRE3( isReadable( self ), a,
+      |   ^~~~
+Stream.c: In function ‘read64BitReals’:
+./Assertions.h:442:37: warning: unused variable ‘errno’ [-Wunused-variable]
+  442 | #define NOP_DECLARATION_ extern int errno
+      |                                     ^~~~~
+./Assertions.h:447:24: note: in expansion of macro ‘NOP_DECLARATION_’
+  447 | #define PRE3(c1,c2,c3) NOP_DECLARATION_
+      |                        ^~~~~~~~~~~~~~~~
+Stream.c:1748:3: note: in expansion of macro ‘PRE3’
+ 1748 |   PRE3( isReadable( self ), a,
+      |   ^~~~
+Stream.c: In function ‘writeString’:
+./Assertions.h:442:37: warning: unused variable ‘errno’ [-Wunused-variable]
+  442 | #define NOP_DECLARATION_ extern int errno
+      |                                     ^~~~~
+./Assertions.h:446:21: note: in expansion of macro ‘NOP_DECLARATION_’
+  446 | #define PRE2(c1,c2) NOP_DECLARATION_
+      |                     ^~~~~~~~~~~~~~~~
+Stream.c:1810:3: note: in expansion of macro ‘PRE2’
+ 1810 |   PRE2( isWritable( self ), format );
+      |   ^~~~
+Stream.c: In function ‘writeByte’:
+./Assertions.h:442:37: warning: unused variable ‘errno’ [-Wunused-variable]
+  442 | #define NOP_DECLARATION_ extern int errno
+      |                                     ^~~~~
+./Assertions.h:445:17: note: in expansion of macro ‘NOP_DECLARATION_’
+  445 | #define PRE(c1) NOP_DECLARATION_
+      |                 ^~~~~~~~~~~~~~~~
+Stream.c:1836:3: note: in expansion of macro ‘PRE’
+ 1836 |   PRE( isWritable( self ) );
+      |   ^~~
+Stream.c: In function ‘write8BitInteger’:
+./Assertions.h:442:37: warning: unused variable ‘errno’ [-Wunused-variable]
+  442 | #define NOP_DECLARATION_ extern int errno
+      |                                     ^~~~~
+./Assertions.h:445:17: note: in expansion of macro ‘NOP_DECLARATION_’
+  445 | #define PRE(c1) NOP_DECLARATION_
+      |                 ^~~~~~~~~~~~~~~~
+Stream.c:1866:3: note: in expansion of macro ‘PRE’
+ 1866 |   PRE( isWritable( self ) );
+      |   ^~~
+Stream.c: In function ‘write16BitInteger’:
+./Assertions.h:442:37: warning: unused variable ‘errno’ [-Wunused-variable]
+  442 | #define NOP_DECLARATION_ extern int errno
+      |                                     ^~~~~
+./Assertions.h:445:17: note: in expansion of macro ‘NOP_DECLARATION_’
+  445 | #define PRE(c1) NOP_DECLARATION_
+      |                 ^~~~~~~~~~~~~~~~
+Stream.c:1898:3: note: in expansion of macro ‘PRE’
+ 1898 |   PRE( isWritable( self ) );
+      |   ^~~
+Stream.c: In function ‘write32BitInteger’:
+./Assertions.h:442:37: warning: unused variable ‘errno’ [-Wunused-variable]
+  442 | #define NOP_DECLARATION_ extern int errno
+      |                                     ^~~~~
+./Assertions.h:445:17: note: in expansion of macro ‘NOP_DECLARATION_’
+  445 | #define PRE(c1) NOP_DECLARATION_
+      |                 ^~~~~~~~~~~~~~~~
+Stream.c:1938:3: note: in expansion of macro ‘PRE’
+ 1938 |   PRE( isWritable( self ) );
+      |   ^~~
+Stream.c: In function ‘write64BitInteger’:
+./Assertions.h:442:37: warning: unused variable ‘errno’ [-Wunused-variable]
+  442 | #define NOP_DECLARATION_ extern int errno
+      |                                     ^~~~~
+./Assertions.h:445:17: note: in expansion of macro ‘NOP_DECLARATION_’
+  445 | #define PRE(c1) NOP_DECLARATION_
+      |                 ^~~~~~~~~~~~~~~~
+Stream.c:1977:3: note: in expansion of macro ‘PRE’
+ 1977 |   PRE( isWritable( self ) );
+      |   ^~~
+Stream.c: In function ‘write32BitReal’:
+./Assertions.h:442:37: warning: unused variable ‘errno’ [-Wunused-variable]
+  442 | #define NOP_DECLARATION_ extern int errno
+      |                                     ^~~~~
+./Assertions.h:445:17: note: in expansion of macro ‘NOP_DECLARATION_’
+  445 | #define PRE(c1) NOP_DECLARATION_
+      |                 ^~~~~~~~~~~~~~~~
+Stream.c:2013:3: note: in expansion of macro ‘PRE’
+ 2013 |   PRE( isWritable( self ) );
+      |   ^~~
+Stream.c: In function ‘write64BitReal’:
+./Assertions.h:442:37: warning: unused variable ‘errno’ [-Wunused-variable]
+  442 | #define NOP_DECLARATION_ extern int errno
+      |                                     ^~~~~
+./Assertions.h:445:17: note: in expansion of macro ‘NOP_DECLARATION_’
+  445 | #define PRE(c1) NOP_DECLARATION_
+      |                 ^~~~~~~~~~~~~~~~
+Stream.c:2055:3: note: in expansion of macro ‘PRE’
+ 2055 |   PRE( isWritable( self ) );
+      |   ^~~
+Stream.c: In function ‘writeBytes’:
+./Assertions.h:442:37: warning: unused variable ‘errno’ [-Wunused-variable]
+  442 | #define NOP_DECLARATION_ extern int errno
+      |                                     ^~~~~
+./Assertions.h:447:24: note: in expansion of macro ‘NOP_DECLARATION_’
+  447 | #define PRE3(c1,c2,c3) NOP_DECLARATION_
+      |                        ^~~~~~~~~~~~~~~~
+Stream.c:2089:3: note: in expansion of macro ‘PRE3’
+ 2089 |   PRE3( isWritable( self ), a, n > 0 );
+      |   ^~~~
+Stream.c: In function ‘write8BitIntegers’:
+./Assertions.h:442:37: warning: unused variable ‘errno’ [-Wunused-variable]
+  442 | #define NOP_DECLARATION_ extern int errno
+      |                                     ^~~~~
+./Assertions.h:447:24: note: in expansion of macro ‘NOP_DECLARATION_’
+  447 | #define PRE3(c1,c2,c3) NOP_DECLARATION_
+      |                        ^~~~~~~~~~~~~~~~
+Stream.c:2129:3: note: in expansion of macro ‘PRE3’
+ 2129 |   PRE3( isWritable( self ), a, n > 0 );
+      |   ^~~~
+Stream.c: In function ‘write16BitIntegers’:
+./Assertions.h:442:37: warning: unused variable ‘errno’ [-Wunused-variable]
+  442 | #define NOP_DECLARATION_ extern int errno
+      |                                     ^~~~~
+./Assertions.h:447:24: note: in expansion of macro ‘NOP_DECLARATION_’
+  447 | #define PRE3(c1,c2,c3) NOP_DECLARATION_
+      |                        ^~~~~~~~~~~~~~~~
+Stream.c:2159:3: note: in expansion of macro ‘PRE3’
+ 2159 |   PRE3( isWritable( self ), a,
+      |   ^~~~
+Stream.c: In function ‘write32BitIntegers’:
+./Assertions.h:442:37: warning: unused variable ‘errno’ [-Wunused-variable]
+  442 | #define NOP_DECLARATION_ extern int errno
+      |                                     ^~~~~
+./Assertions.h:447:24: note: in expansion of macro ‘NOP_DECLARATION_’
+  447 | #define PRE3(c1,c2,c3) NOP_DECLARATION_
+      |                        ^~~~~~~~~~~~~~~~
+Stream.c:2190:3: note: in expansion of macro ‘PRE3’
+ 2190 |   PRE3( isWritable( self ), a,
+      |   ^~~~
+Stream.c: In function ‘write64BitIntegers’:
+./Assertions.h:442:37: warning: unused variable ‘errno’ [-Wunused-variable]
+  442 | #define NOP_DECLARATION_ extern int errno
+      |                                     ^~~~~
+./Assertions.h:447:24: note: in expansion of macro ‘NOP_DECLARATION_’
+  447 | #define PRE3(c1,c2,c3) NOP_DECLARATION_
+      |                        ^~~~~~~~~~~~~~~~
+Stream.c:2221:3: note: in expansion of macro ‘PRE3’
+ 2221 |   PRE3( isWritable( self ), a,
+      |   ^~~~
+Stream.c: In function ‘write32BitReals’:
+./Assertions.h:442:37: warning: unused variable ‘errno’ [-Wunused-variable]
+  442 | #define NOP_DECLARATION_ extern int errno
+      |                                     ^~~~~
+./Assertions.h:447:24: note: in expansion of macro ‘NOP_DECLARATION_’
+  447 | #define PRE3(c1,c2,c3) NOP_DECLARATION_
+      |                        ^~~~~~~~~~~~~~~~
+Stream.c:2269:3: note: in expansion of macro ‘PRE3’
+ 2269 |   PRE3( isWritable( self ), a,
+      |   ^~~~
+Stream.c: In function ‘write64BitReals’:
+./Assertions.h:442:37: warning: unused variable ‘errno’ [-Wunused-variable]
+  442 | #define NOP_DECLARATION_ extern int errno
+      |                                     ^~~~~
+./Assertions.h:447:24: note: in expansion of macro ‘NOP_DECLARATION_’
+  447 | #define PRE3(c1,c2,c3) NOP_DECLARATION_
+      |                        ^~~~~~~~~~~~~~~~
+Stream.c:2370:3: note: in expansion of macro ‘PRE3’
+ 2370 |   PRE3( isWritable( self ), a,
+      |   ^~~~
+Stream.c: In function ‘ok’:
+./Assertions.h:442:37: warning: unused variable ‘errno’ [-Wunused-variable]
+  442 | #define NOP_DECLARATION_ extern int errno
+      |                                     ^~~~~
+./Assertions.h:445:17: note: in expansion of macro ‘NOP_DECLARATION_’
+  445 | #define PRE(c1) NOP_DECLARATION_
+      |                 ^~~~~~~~~~~~~~~~
+Stream.c:2513:3: note: in expansion of macro ‘PRE’
+ 2513 |   PRE( self );
+      |   ^~~
+Stream.c: In function ‘isReadable’:
+./Assertions.h:442:37: warning: unused variable ‘errno’ [-Wunused-variable]
+  442 | #define NOP_DECLARATION_ extern int errno
+      |                                     ^~~~~
+./Assertions.h:445:17: note: in expansion of macro ‘NOP_DECLARATION_’
+  445 | #define PRE(c1) NOP_DECLARATION_
+      |                 ^~~~~~~~~~~~~~~~
+Stream.c:2532:3: note: in expansion of macro ‘PRE’
+ 2532 |   PRE( self );
+      |   ^~~
+Stream.c: In function ‘isWritable’:
+./Assertions.h:442:37: warning: unused variable ‘errno’ [-Wunused-variable]
+  442 | #define NOP_DECLARATION_ extern int errno
+      |                                     ^~~~~
+./Assertions.h:445:17: note: in expansion of macro ‘NOP_DECLARATION_’
+  445 | #define PRE(c1) NOP_DECLARATION_
+      |                 ^~~~~~~~~~~~~~~~
+Stream.c:2551:3: note: in expansion of macro ‘PRE’
+ 2551 |   PRE( self );
+      |   ^~~
+Stream.c: In function ‘isSeekable’:
+./Assertions.h:442:37: warning: unused variable ‘errno’ [-Wunused-variable]
+  442 | #define NOP_DECLARATION_ extern int errno
+      |                                     ^~~~~
+./Assertions.h:445:17: note: in expansion of macro ‘NOP_DECLARATION_’
+  445 | #define PRE(c1) NOP_DECLARATION_
+      |                 ^~~~~~~~~~~~~~~~
+Stream.c:2574:3: note: in expansion of macro ‘PRE’
+ 2574 |   PRE( self );
+      |   ^~~
+Stream.c: In function ‘isBlocking’:
+./Assertions.h:442:37: warning: unused variable ‘errno’ [-Wunused-variable]
+  442 | #define NOP_DECLARATION_ extern int errno
+      |                                     ^~~~~
+./Assertions.h:445:17: note: in expansion of macro ‘NOP_DECLARATION_’
+  445 | #define PRE(c1) NOP_DECLARATION_
+      |                 ^~~~~~~~~~~~~~~~
+Stream.c:2596:3: note: in expansion of macro ‘PRE’
+ 2596 |   PRE( isReadable( self ) );
+      |   ^~~
+Stream.c: In function ‘isAtEnd’:
+./Assertions.h:442:37: warning: unused variable ‘errno’ [-Wunused-variable]
+  442 | #define NOP_DECLARATION_ extern int errno
+      |                                     ^~~~~
+./Assertions.h:445:17: note: in expansion of macro ‘NOP_DECLARATION_’
+  445 | #define PRE(c1) NOP_DECLARATION_
+      |                 ^~~~~~~~~~~~~~~~
+Stream.c:2621:3: note: in expansion of macro ‘PRE’
+ 2621 |   PRE( isReadable( self ) );
+      |   ^~~
+Stream.c: In function ‘offset’:
+Stream.c:249:15: warning: implicit declaration of function ‘ftello64’; did you mean ‘ftello’? [-Wimplicit-function-declaration]
+  249 | #define FTELL ftello64
+      |               ^~~~~~~~
+Stream.c:2649:20: note: in expansion of macro ‘FTELL’
+ 2649 |   Integer result = FTELL( (FILE*) self->data->file );
+      |                    ^~~~~
+In file included from Stream.c:225:
+./Assertions.h:442:37: warning: unused variable ‘errno’ [-Wunused-variable]
+  442 | #define NOP_DECLARATION_ extern int errno
+      |                                     ^~~~~
+./Assertions.h:445:17: note: in expansion of macro ‘NOP_DECLARATION_’
+  445 | #define PRE(c1) NOP_DECLARATION_
+      |                 ^~~~~~~~~~~~~~~~
+Stream.c:2645:3: note: in expansion of macro ‘PRE’
+ 2645 |   PRE( isSeekable( self ) );
+      |   ^~~
+Stream.c: In function ‘size’:
+./Assertions.h:442:37: warning: unused variable ‘errno’ [-Wunused-variable]
+  442 | #define NOP_DECLARATION_ extern int errno
+      |                                     ^~~~~
+./Assertions.h:445:17: note: in expansion of macro ‘NOP_DECLARATION_’
+  445 | #define PRE(c1) NOP_DECLARATION_
+      |                 ^~~~~~~~~~~~~~~~
+Stream.c:2669:3: note: in expansion of macro ‘PRE’
+ 2669 |   PRE( isSeekable( self ) );
+      |   ^~~
+Stream.c: In function ‘name’:
+./Assertions.h:442:37: warning: unused variable ‘errno’ [-Wunused-variable]
+  442 | #define NOP_DECLARATION_ extern int errno
+      |                                     ^~~~~
+./Assertions.h:445:17: note: in expansion of macro ‘NOP_DECLARATION_’
+  445 | #define PRE(c1) NOP_DECLARATION_
+      |                 ^~~~~~~~~~~~~~~~
+Stream.c:2695:3: note: in expansion of macro ‘PRE’
+ 2695 |   PRE( self );
+      |   ^~~
+Stream.c: In function ‘file’:
+./Assertions.h:442:37: warning: unused variable ‘errno’ [-Wunused-variable]
+  442 | #define NOP_DECLARATION_ extern int errno
+      |                                     ^~~~~
+./Assertions.h:445:17: note: in expansion of macro ‘NOP_DECLARATION_’
+  445 | #define PRE(c1) NOP_DECLARATION_
+      |                 ^~~~~~~~~~~~~~~~
+Stream.c:2715:3: note: in expansion of macro ‘PRE’
+ 2715 |   PRE( self );
+      |   ^~~
+Stream.c: In function ‘descriptor’:
+./Assertions.h:442:37: warning: unused variable ‘errno’ [-Wunused-variable]
+  442 | #define NOP_DECLARATION_ extern int errno
+      |                                     ^~~~~
+./Assertions.h:445:17: note: in expansion of macro ‘NOP_DECLARATION_’
+  445 | #define PRE(c1) NOP_DECLARATION_
+      |                 ^~~~~~~~~~~~~~~~
+Stream.c:2735:3: note: in expansion of macro ‘PRE’
+ 2735 |   PRE( self );
+      |   ^~~
+Stream.c: In function ‘deallocate’:
+./Assertions.h:442:37: warning: unused variable ‘errno’ [-Wunused-variable]
+  442 | #define NOP_DECLARATION_ extern int errno
+      |                                     ^~~~~
+./Assertions.h:445:17: note: in expansion of macro ‘NOP_DECLARATION_’
+  445 | #define PRE(c1) NOP_DECLARATION_
+      |                 ^~~~~~~~~~~~~~~~
+./Assertions.h:508:14: note: in expansion of macro ‘PRE’
+  508 | #define PRE0 PRE
+      |              ^~~
+Stream.c:2756:3: note: in expansion of macro ‘PRE0’
+ 2756 |   PRE0( self );
+      |   ^~~~
+Stream.c: In function ‘newSocketStream’:
+./Assertions.h:442:37: warning: unused variable ‘errno’ [-Wunused-variable]
+  442 | #define NOP_DECLARATION_ extern int errno
+      |                                     ^~~~~
+./Assertions.h:446:21: note: in expansion of macro ‘NOP_DECLARATION_’
+  446 | #define PRE2(c1,c2) NOP_DECLARATION_
+      |                     ^~~~~~~~~~~~~~~~
+./Assertions.h:509:15: note: in expansion of macro ‘PRE2’
+  509 | #define PRE02 PRE2
+      |               ^~~~
+Stream.c:2812:3: note: in expansion of macro ‘PRE02’
+ 2812 |   PRE02( IN_RANGE( port, 1, 65535 ), IMPLIES( host, *host ) );
+      |   ^~~~~
+Stream.c: In function ‘typeName’:
+./Assertions.h:442:37: warning: unused variable ‘errno’ [-Wunused-variable]
+  442 | #define NOP_DECLARATION_ extern int errno
+      |                                     ^~~~~
+./Assertions.h:445:17: note: in expansion of macro ‘NOP_DECLARATION_’
+  445 | #define PRE(c1) NOP_DECLARATION_
+      |                 ^~~~~~~~~~~~~~~~
+Stream.c:2875:3: note: in expansion of macro ‘PRE’
+ 2875 |   PRE( self );
+      |   ^~~
+Stream.c: In function ‘ensureReadMode’:
+./Assertions.h:442:37: warning: unused variable ‘errno’ [-Wunused-variable]
+  442 | #define NOP_DECLARATION_ extern int errno
+      |                                     ^~~~~
+./Assertions.h:445:17: note: in expansion of macro ‘NOP_DECLARATION_’
+  445 | #define PRE(c1) NOP_DECLARATION_
+      |                 ^~~~~~~~~~~~~~~~
+Stream.c:2937:3: note: in expansion of macro ‘PRE’
+ 2937 |   PRE( isReadable( self ) );
+      |   ^~~
+Stream.c: In function ‘ensureWriteMode’:
+./Assertions.h:442:37: warning: unused variable ‘errno’ [-Wunused-variable]
+  442 | #define NOP_DECLARATION_ extern int errno
+      |                                     ^~~~~
+./Assertions.h:445:17: note: in expansion of macro ‘NOP_DECLARATION_’
+  445 | #define PRE(c1) NOP_DECLARATION_
+      |                 ^~~~~~~~~~~~~~~~
+Stream.c:2960:3: note: in expansion of macro ‘PRE’
+ 2960 |   PRE( isWritable( self ) );
+      |   ^~~
+Stream.c: In function ‘seekStream’:
+Stream.c:248:15: warning: implicit declaration of function ‘fseeko64’; did you mean ‘fseeko’? [-Wimplicit-function-declaration]
+  248 | #define FSEEK fseeko64
+      |               ^~~~~~~~
+Stream.c:2995:16: note: in expansion of macro ‘FSEEK’
+ 2995 |     data->ok = FSEEK( data->file, byteOffset, whence ) == 0;
+      |                ^~~~~
+In file included from Stream.c:225:
+./Assertions.h:442:37: warning: unused variable ‘errno’ [-Wunused-variable]
+  442 | #define NOP_DECLARATION_ extern int errno
+      |                                     ^~~~~
+./Assertions.h:447:24: note: in expansion of macro ‘NOP_DECLARATION_’
+  447 | #define PRE3(c1,c2,c3) NOP_DECLARATION_
+      |                        ^~~~~~~~~~~~~~~~
+Stream.c:2986:3: note: in expansion of macro ‘PRE3’
+ 2986 |   PRE3( isSeekable( self ), IN4( whence, SEEK_SET, SEEK_CUR, SEEK_END ),
+      |   ^~~~
+Stream.c: In function ‘streamArrayBuffered’:
+./Assertions.h:442:37: warning: unused variable ‘errno’ [-Wunused-variable]
+  442 | #define NOP_DECLARATION_ extern int errno
+      |                                     ^~~~~
+./Assertions.h:448:27: note: in expansion of macro ‘NOP_DECLARATION_’
+  448 | #define PRE4(c1,c2,c3,c4) NOP_DECLARATION_
+      |                           ^~~~~~~~~~~~~~~~
+Stream.c:3038:3: note: in expansion of macro ‘PRE4’
+ 3038 |   PRE4( self, IN5( sizeOfItem, 1, 2, 4, 8 ),
+      |   ^~~~
+Stream.c: In function ‘writeClampedCopy’:
+./Assertions.h:442:37: warning: unused variable ‘errno’ [-Wunused-variable]
+  442 | #define NOP_DECLARATION_ extern int errno
+      |                                     ^~~~~
+./Assertions.h:451:36: note: in expansion of macro ‘NOP_DECLARATION_’
+  451 | #define PRE7(c1,c2,c3,c4,c5,c6,c7) NOP_DECLARATION_
+      |                                    ^~~~~~~~~~~~~~~~
+Stream.c:3122:3: note: in expansion of macro ‘PRE7’
+ 3122 |   PRE7( isWritable( self ), a, IN5( bytesPerItem, 1, 2, 4, 8 ),
+      |   ^~~~
+Stream.c: In function ‘checkAndReport’:
+./Assertions.h:442:37: warning: unused variable ‘errno’ [-Wunused-variable]
+  442 | #define NOP_DECLARATION_ extern int errno
+      |                                     ^~~~~
+./Assertions.h:450:33: note: in expansion of macro ‘NOP_DECLARATION_’
+  450 | #define PRE6(c1,c2,c3,c4,c5,c6) NOP_DECLARATION_
+      |                                 ^~~~~~~~~~~~~~~~
+Stream.c:3184:3: note: in expansion of macro ‘PRE6’
+ 3184 |   PRE6( self, readOrWrite, matchesWord( readOrWrite, " read write " ),
+      |   ^~~~
+Stream.c: In function ‘allocate’:
+./Assertions.h:442:37: warning: unused variable ‘errno’ [-Wunused-variable]
+  442 | #define NOP_DECLARATION_ extern int errno
+      |                                     ^~~~~
+./Assertions.h:446:21: note: in expansion of macro ‘NOP_DECLARATION_’
+  446 | #define PRE2(c1,c2) NOP_DECLARATION_
+      |                     ^~~~~~~~~~~~~~~~
+./Assertions.h:509:15: note: in expansion of macro ‘PRE2’
+  509 | #define PRE02 PRE2
+      |               ^~~~
+Stream.c:3209:3: note: in expansion of macro ‘PRE02’
+ 3209 |   PRE02( nameLength > 0, modeLength > 0 );
+      |   ^~~~~
+Stream.c: In function ‘clampTo8BitInteger’:
+./Assertions.h:442:37: warning: unused variable ‘errno’ [-Wunused-variable]
+  442 | #define NOP_DECLARATION_ extern int errno
+      |                                     ^~~~~
+./Assertions.h:448:27: note: in expansion of macro ‘NOP_DECLARATION_’
+  448 | #define PRE4(c1,c2,c3,c4) NOP_DECLARATION_
+      |                           ^~~~~~~~~~~~~~~~
+./Assertions.h:511:15: note: in expansion of macro ‘PRE4’
+  511 | #define PRE04 PRE4
+      |               ^~~~
+Stream.c:3306:3: note: in expansion of macro ‘PRE04’
+ 3306 |   PRE04( src, count > 0, dst, (const void*) src != (const void*) dst );
+      |   ^~~~~
+Stream.c: In function ‘clampTo16BitInteger’:
+./Assertions.h:442:37: warning: unused variable ‘errno’ [-Wunused-variable]
+  442 | #define NOP_DECLARATION_ extern int errno
+      |                                     ^~~~~
+./Assertions.h:448:27: note: in expansion of macro ‘NOP_DECLARATION_’
+  448 | #define PRE4(c1,c2,c3,c4) NOP_DECLARATION_
+      |                           ^~~~~~~~~~~~~~~~
+./Assertions.h:511:15: note: in expansion of macro ‘PRE4’
+  511 | #define PRE04 PRE4
+      |               ^~~~
+Stream.c:3333:3: note: in expansion of macro ‘PRE04’
+ 3333 |   PRE04( src, IN_RANGE( count, 1, INTEGER_MAX / 8 ),
+      |   ^~~~~
+Stream.c: In function ‘clampTo32BitInteger’:
+./Assertions.h:442:37: warning: unused variable ‘errno’ [-Wunused-variable]
+  442 | #define NOP_DECLARATION_ extern int errno
+      |                                     ^~~~~
+./Assertions.h:448:27: note: in expansion of macro ‘NOP_DECLARATION_’
+  448 | #define PRE4(c1,c2,c3,c4) NOP_DECLARATION_
+      |                           ^~~~~~~~~~~~~~~~
+./Assertions.h:511:15: note: in expansion of macro ‘PRE4’
+  511 | #define PRE04 PRE4
+      |               ^~~~
+Stream.c:3365:3: note: in expansion of macro ‘PRE04’
+ 3365 |   PRE04( src, IN_RANGE( count, 1, INTEGER_MAX / 8 ),
+      |   ^~~~~
+Stream.c: In function ‘clampTo64BitInteger’:
+./Assertions.h:442:37: warning: unused variable ‘errno’ [-Wunused-variable]
+  442 | #define NOP_DECLARATION_ extern int errno
+      |                                     ^~~~~
+./Assertions.h:449:30: note: in expansion of macro ‘NOP_DECLARATION_’
+  449 | #define PRE5(c1,c2,c3,c4,c5) NOP_DECLARATION_
+      |                              ^~~~~~~~~~~~~~~~
+./Assertions.h:512:15: note: in expansion of macro ‘PRE5’
+  512 | #define PRE05 PRE5
+      |               ^~~~
+Stream.c:3400:3: note: in expansion of macro ‘PRE05’
+ 3400 |   PRE05( src, IN_RANGE( count, 1, INTEGER_MAX / 8 ),
+      |   ^~~~~
+Stream.c: In function ‘createSocket’:
+./Assertions.h:442:37: warning: unused variable ‘errno’ [-Wunused-variable]
+  442 | #define NOP_DECLARATION_ extern int errno
+      |                                     ^~~~~
+./Assertions.h:446:21: note: in expansion of macro ‘NOP_DECLARATION_’
+  446 | #define PRE2(c1,c2) NOP_DECLARATION_
+      |                     ^~~~~~~~~~~~~~~~
+./Assertions.h:509:15: note: in expansion of macro ‘PRE2’
+  509 | #define PRE02 PRE2
+      |               ^~~~
+Stream.c:3421:3: note: in expansion of macro ‘PRE02’
+ 3421 |   PRE02( IN_RANGE( port, 1, 65535 ), IMPLIES( host, *host ) );
+      |   ^~~~~
+Stream.c: In function ‘createServerSocket’:
+./Assertions.h:442:37: warning: unused variable ‘errno’ [-Wunused-variable]
+  442 | #define NOP_DECLARATION_ extern int errno
+      |                                     ^~~~~
+./Assertions.h:445:17: note: in expansion of macro ‘NOP_DECLARATION_’
+  445 | #define PRE(c1) NOP_DECLARATION_
+      |                 ^~~~~~~~~~~~~~~~
+./Assertions.h:508:14: note: in expansion of macro ‘PRE’
+  508 | #define PRE0 PRE
+      |              ^~~
+Stream.c:3475:3: note: in expansion of macro ‘PRE0’
+ 3475 |   PRE0( IN_RANGE( port, 1, 65535 ) );
+      |   ^~~~
+Stream.c: In function ‘createClientSocket’:
+./Assertions.h:442:37: warning: unused variable ‘errno’ [-Wunused-variable]
+  442 | #define NOP_DECLARATION_ extern int errno
+      |                                     ^~~~~
+./Assertions.h:447:24: note: in expansion of macro ‘NOP_DECLARATION_’
+  447 | #define PRE3(c1,c2,c3) NOP_DECLARATION_
+      |                        ^~~~~~~~~~~~~~~~
+./Assertions.h:510:15: note: in expansion of macro ‘PRE3’
+  510 | #define PRE03 PRE3
+      |               ^~~~
+Stream.c:3572:3: note: in expansion of macro ‘PRE03’
+ 3572 |   PRE03( IN_RANGE( port, 1, 65535 ), hostName, *hostName );
+      |   ^~~~~
+Stream.c: In function ‘enablePortReusability’:
+./Assertions.h:442:37: warning: unused variable ‘errno’ [-Wunused-variable]
+  442 | #define NOP_DECLARATION_ extern int errno
+      |                                     ^~~~~
+./Assertions.h:445:17: note: in expansion of macro ‘NOP_DECLARATION_’
+  445 | #define PRE(c1) NOP_DECLARATION_
+      |                 ^~~~~~~~~~~~~~~~
+./Assertions.h:508:14: note: in expansion of macro ‘PRE’
+  508 | #define PRE0 PRE
+      |              ^~~
+Stream.c:3648:3: note: in expansion of macro ‘PRE0’
+ 3648 |   PRE0( IN_RANGE( theSocket, 0, INT_MAX ) );
+      |   ^~~~
+Stream.c: In function ‘setSocketBufferSize’:
+./Assertions.h:442:37: warning: unused variable ‘errno’ [-Wunused-variable]
+  442 | #define NOP_DECLARATION_ extern int errno
+      |                                     ^~~~~
+./Assertions.h:445:17: note: in expansion of macro ‘NOP_DECLARATION_’
+  445 | #define PRE(c1) NOP_DECLARATION_
+      |                 ^~~~~~~~~~~~~~~~
+./Assertions.h:508:14: note: in expansion of macro ‘PRE’
+  508 | #define PRE0 PRE
+      |              ^~~
+Stream.c:3668:3: note: in expansion of macro ‘PRE0’
+ 3668 |   PRE0( IN_RANGE( theSocket, 0, INT_MAX ) );
+      |   ^~~~
+Stream.c: In function ‘establishSocketProperty’:
+./Assertions.h:442:37: warning: unused variable ‘errno’ [-Wunused-variable]
+  442 | #define NOP_DECLARATION_ extern int errno
+      |                                     ^~~~~
+./Assertions.h:449:30: note: in expansion of macro ‘NOP_DECLARATION_’
+  449 | #define PRE5(c1,c2,c3,c4,c5) NOP_DECLARATION_
+      |                              ^~~~~~~~~~~~~~~~
+./Assertions.h:512:15: note: in expansion of macro ‘PRE5’
+  512 | #define PRE05 PRE5
+      |               ^~~~
+Stream.c:3706:3: note: in expansion of macro ‘PRE05’
+ 3706 |   PRE05( IN_RANGE( theSocket, 0, INT_MAX ),
+      |   ^~~~~
+Stream.c: In function ‘fileOfSocket’:
+./Assertions.h:442:37: warning: unused variable ‘errno’ [-Wunused-variable]
+  442 | #define NOP_DECLARATION_ extern int errno
+      |                                     ^~~~~
+./Assertions.h:445:17: note: in expansion of macro ‘NOP_DECLARATION_’
+  445 | #define PRE(c1) NOP_DECLARATION_
+      |                 ^~~~~~~~~~~~~~~~
+./Assertions.h:508:14: note: in expansion of macro ‘PRE’
+  508 | #define PRE0 PRE
+      |              ^~~
+Stream.c:3769:3: note: in expansion of macro ‘PRE0’
+ 3769 |   PRE0( IN_RANGE( theSocket, 0, INT_MAX ) );
+      |   ^~~~
+Stream.c: In function ‘matchesWord’:
+./Assertions.h:442:37: warning: unused variable ‘errno’ [-Wunused-variable]
+  442 | #define NOP_DECLARATION_ extern int errno
+      |                                     ^~~~~
+./Assertions.h:449:30: note: in expansion of macro ‘NOP_DECLARATION_’
+  449 | #define PRE5(c1,c2,c3,c4,c5) NOP_DECLARATION_
+      |                              ^~~~~~~~~~~~~~~~
+./Assertions.h:512:15: note: in expansion of macro ‘PRE5’
+  512 | #define PRE05 PRE5
+      |               ^~~~
+Stream.c:3795:3: note: in expansion of macro ‘PRE05’
+ 3795 |   PRE05(word, *word, words, *words == ' ', words[ strlen(words) - 1 ] == ' ');
+      |   ^~~~~
+Stream.c: In function ‘swap8Bytes’:
+./Assertions.h:442:37: warning: unused variable ‘errno’ [-Wunused-variable]
+  442 | #define NOP_DECLARATION_ extern int errno
+      |                                     ^~~~~
+./Assertions.h:447:24: note: in expansion of macro ‘NOP_DECLARATION_’
+  447 | #define PRE3(c1,c2,c3) NOP_DECLARATION_
+      |                        ^~~~~~~~~~~~~~~~
+./Assertions.h:510:15: note: in expansion of macro ‘PRE3’
+  510 | #define PRE03 PRE3
+      |               ^~~~
+Stream.c:3859:3: note: in expansion of macro ‘PRE03’
+ 3859 |   PRE03( dst, src, count > 0 );
+      |   ^~~~~
+gcc: warning: Pr: linker input file unused because linking not done
+gcc: error: Pr: linker input file not found: No such file or directory
+makeit: line 18: ojector.c: command not found
+-rw-rw-r--. 1 tplessel staff 17144 Aug 15 19:40 BasicNumerics.o
+-rw-rw-r--. 1 tplessel staff 15648 Aug 15 19:40 DateTime.o
+-rw-rw-r--. 1 tplessel staff  8392 Aug 15 19:40 Failure.o
+-rw-rw-r--. 1 tplessel staff  3328 Aug 15 19:40 Memory.o
+-rw-rw-r--. 1 tplessel staff 31544 Aug 15 19:40 Stream.o
+-rw-rw-r--. 1 tplessel staff  9360 Aug 15 19:40 Utilities.o
+In file included from Utilities/Utilities.h:17,
+                 from CeilometerSubset.c:20:
+CeilometerSubset.c: In function ‘isValidElevationRange’:
+Utilities/Assertions.h:364:3: warning: implicit declaration of function ‘__assert’; did you mean ‘assert’? [-Wimplicit-function-declaration]
+  364 | :(__assert(#prefix": "#expression,__FILE__,__LINE__), 0)))
+      |   ^~~~~~~~
+Utilities/Assertions.h:366:34: note: in expansion of macro ‘ASSERT2_’
+  366 | #define POST_ASSERT_(expression) ASSERT2_(POST,expression)
+      |                                  ^~~~~~~~
+Utilities/Assertions.h:1399:18: note: in expansion of macro ‘POST_ASSERT_’
+ 1399 | #define POST0(c) POST_ASSERT_(c)
+      |                  ^~~~~~~~~~~~
+CeilometerSubset.c:46:3: note: in expansion of macro ‘POST0’
+   46 |   POST0( IS_BOOL( result ) );
+      |   ^~~~~
+In file included from Utilities/Utilities.h:21,
+                 from CeilometerSubset.c:20:
+CeilometerSubset.c: In function ‘main’:
+Utilities/Memory.h:119:30: warning: the address of ‘data’ will always evaluate as ‘true’ [-Waddress]
+  119 | #define ZERO_OBJECT(p) (((p) ? memset( (p), 0, sizeof *(p) ) : (void*) 0))
+      |                              ^
+CeilometerSubset.c:325:5: note: in expansion of macro ‘ZERO_OBJECT’
+  325 |     ZERO_OBJECT( &data );
+      |     ^~~~~~~~~~~
+/bin/ld: /tmp/cc8Tjg8N.o: in function `isValidProfile':
+CeilometerSubset.c:(.text+0x70e): undefined reference to `isValidLongitude'
+/bin/ld: CeilometerSubset.c:(.text+0x71d): undefined reference to `isValidLatitude'
+/bin/ld: /tmp/cc8Tjg8N.o: in function `main':
+CeilometerSubset.c:(.text+0x1b1b): undefined reference to `newVoidList'
+/bin/ld: /tmp/ccjxSDRA.o: in function `readSubsetCeilometerData':
+ReadData.c:(.text+0x18d): undefined reference to `isValidLongitude'
+/bin/ld: ReadData.c:(.text+0x1cd): undefined reference to `isValidLatitude'
+collect2: error: ld returned 1 exit status
+strip: 'CeilometerSubset': No such file
+ls: cannot access 'CeilometerSubset': No such file or directory
+CeilometerSubset: cannot open `CeilometerSubset' (No such file or directory)
+ldd: ./CeilometerSubset: No such file or directory

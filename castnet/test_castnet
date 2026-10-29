@@ -1,0 +1,89 @@
+#!/bin/csh -f
+
+echo ; echo TEST CASTNET ; echo
+
+if ( 0 ) then
+
+sleep 2 ; echo ; echo TEST GetCapabilities ; echo
+curl --silent --retry 0 'https://maple.hesc.epa.gov/rsig/rsigserver?SERVICE=wcs&VERSION=1.0.0&REQUEST=GetCapabilities' > junk ; head junk ; echo '...' ; grep -i CASTNET junk
+
+sleep 2 ; echo ; echo TEST DescribeCoverage ; echo
+curl --silent --retry 0 'https://maple.hesc.epa.gov/rsig/rsigserver?SERVICE=wcs&VERSION=1.0.0&REQUEST=DescribeCoverage' > junk ; head junk ; echo '...' ; grep -i CASTNET junk
+
+endif
+
+set variables = ( \
+  purpleair.hour_valid \
+  purpleair.humidity \
+  purpleair.pm25_corrected \
+  purpleair.temperature \
+  quantaq.co \
+  quantaq.hour_valid \
+  quantaq.humidity \
+  quantaq.no \
+  quantaq.no2 \
+  quantaq.o3 \
+  quantaq.pm1 \
+  quantaq.pm10 \
+  quantaq.pm25 \
+  quantaq.temperature \
+)
+
+# DescribeCoverage:
+
+foreach variable ( $variables )
+  sleep 1 ; echo ; echo TEST DescribeCoverage $variable ; echo
+  curl --silent --retry 0 "https://maple.hesc.epa.gov/rsig/rsigserver?SERVICE=wcs&VERSION=1.0.0&REQUEST=DescribeCoverage&COVERAGE=CASTNET.$variable" > junk ; echo $? ; cat junk
+end
+
+
+# GetMetadata:
+
+sleep 2 ; echo ; echo TEST GetMetadata quantaq.pm25 ; echo
+curl --silent --retry 0 'https://maple.hesc.epa.gov/rsig/rsigserver?SERVICE=wcs&VERSION=1.0.0&REQUEST=GetMetadata&COVERAGE=CASTNET.PurpleAir.pm25_corrected&FORMAT=xdr&TIME=2026-06-01T00:00:00Z/2026-06-02T23:59:59Z&BBOX=-126,24,-65,50' > junk ; echo $? ; cat junk
+
+sleep 2 ; echo ; echo TEST GetMetadata quantaq.pm25 ; echo
+curl --silent --retry 0 'https://maple.hesc.epa.gov/rsig/rsigserver?SERVICE=wcs&VERSION=1.0.0&REQUEST=GetMetadata&COVERAGE=CASTNET.QuantAQ.pm25&FORMAT=xdr&TIME=2026-06-01T00:00:00Z/2026-06-02T23:59:59Z&BBOX=-126,24,-65,50' > junk ; echo $? ; cat junk
+
+
+# Original:
+
+sleep 2 ; echo ; echo TEST quantaq.pm25 original ; echo
+curl --silent --retry 0 'https://maple.hesc.epa.gov/rsig/rsigserver?SERVICE=wcs&VERSION=1.0.0&REQUEST=GetCoverage&COVERAGE=CASTNET.QuantAQ.pm25&FORMAT=original&TIME=2026-06-01T00:00:00Z/2026-06-02T23:59:59Z&BBOX=-126,24,-65,50' > junk ; echo $? ; tar -ztf junk
+
+sleep 2 ; echo ; echo TEST quantaq.pm25 original ; echo
+curl --silent --retry 0 'https://maple.hesc.epa.gov/rsig/rsigserver?SERVICE=wcs&VERSION=1.0.0&REQUEST=GetCoverage&COVERAGE=CASTNET.PurpleAir.pm25_corrected&FORMAT=original&TIME=2026-06-01T00:00:00Z/2026-06-02T23:59:59Z&BBOX=-126,24,-65,50' > junk ; echo $? ; tar -ztf junk
+
+
+# GetCoverage:
+
+foreach format ( xdr ascii netcdf-coards )
+  set dumper = /rsig/current/code/bin/Linux.x86_64/xdrdump junk
+
+  if ( $format == 'ascii' ) then
+    set dumper = cat
+  else if ( $format == 'netcdf-coards' ) then
+    set dumper = '/rsig/current/code/bin/Linux.x86_64/ncdump -h'
+  endif
+
+  foreach variable ( $variables )
+    sleep 1 ; echo ; echo TEST $variable $format ; echo
+    curl --silent --retry 0 "https://maple.hesc.epa.gov/rsig/rsigserver?SERVICE=wcs&VERSION=1.0.0&REQUEST=GetCoverage&COVERAGE=CASTNET.$variable&FORMAT=$format&TIME=2026-06-01T00:00:00Z/2026-06-02T23:59:59Z&BBOX=-126,24,-65,50" > junk ; echo $? ; $dumper junk | head -30
+  end
+end
+
+sleep 1 ; echo ; echo TEST pm25 ascii aggregate daily ; echo
+curl --silent --retry 0 'https://maple.hesc.epa.gov/rsig/rsigserver?SERVICE=wcs&VERSION=1.0.0&REQUEST=GetCoverage&COVERAGE=CASTNET.PurpleAir.pm25_corrected&FORMAT=ascii&TIME=2026-06-01T00:00:00Z/2026-06-02T23:59:59Z&BBOX=-126,24,-65,50&AGGREGATE=daily' > junk ; echo $? ; cat junk | head -30
+
+sleep 1 ; echo ; echo TEST pm25 ascii aggregate daily ; echo
+curl --silent --retry 0 'https://maple.hesc.epa.gov/rsig/rsigserver?SERVICE=wcs&VERSION=1.0.0&REQUEST=GetCoverage&COVERAGE=CASTNET.QuantAQ.pm25&FORMAT=ascii&TIME=2026-06-01T00:00:00Z/2026-06-02T23:59:59Z&BBOX=-126,24,-65,50&AGGREGATE=daily' > junk ; echo $? ; cat junk | head -30
+
+
+# NetCDF-IOAPI:
+
+sleep 2 ; echo ; echo TEST pm25 netcdf-ioapi ; echo
+curl --silent --retry 0 'https://maple.hesc.epa.gov/rsig/rsigserver?SERVICE=wcs&VERSION=1.0.0&REQUEST=GetCoverage&COVERAGE=CASTNET.QuantAQ.pm25&FORMAT=netcdf-ioapi&TIME=2026-06-01T00:00:00Z/2026-06-02T23:59:59Z&BBOX=-126,24,-65,50&REGRID=weighted&LAMBERT=33,45,-97,40&ELLIPSOID=6370000,6370000&GRID=459,299,-2556000,-1728000,12000,12000&COMPRESS=1' | gzip -d > junk ; echo $? ; /rsig/current/code/bin/Linux.x86_64/ncdump -h junk
+
+
+/bin/rm -f junk
+echo ; echo DONE CASTNET ; echo

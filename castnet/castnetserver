@@ -1,0 +1,605 @@
+#!/usr/bin/perl -wT
+
+##############################################################################
+# PURPOSE: castnetserver - Serve CASTNET hourly sensor data
+#          subsetted by date/time range,
+#          variable, and longitude-latitude box, in ASCII, XDR, original,
+#          NetCDF-COARDS, and NetCDF-IOAPI formats for use by other programs
+#          (e.g., via curl).
+#
+# NOTES:   Server is WCS-compliant:
+#          https://www.opengeospatial.org/standards/wcs
+#          https://datafed.net/xs/OpenGIS/wcs/1.0.0/
+#          and modeled after a similar webserver application:
+#          https://webapps.datafed.net/ogc_EPA.wsfl
+#
+#          Launches the C program fdd which streams data on STDOUT.
+#
+#          Original csv files downloaded from:
+#          https://gaftp.epa.gov/castnet/CASTNET_Outgoing/data/purpleair_web.zip
+#          https://gaftp.epa.gov/castnet/CASTNET_Outgoing/data/quantaq_web.zip
+#
+#          Example:
+#
+#          curl -k --silent --retry 0 'https://ofmpub.epa.gov/rsig/rsigserver?\
+#                    SERVICE=wcs&\
+#                    VERSION=1.0.0&\
+#                    REQUEST=GetCoverage&\
+#                    COVERAGE=castnet.quantaq.pm25&\
+#                    TIME=2026-06-01T00:00:00Z/2026-06-01T23:59:59Z&\
+#                    BBOX=-126,24,-60,50&\
+#                    FORMAT=ascii'
+#
+# HISTORY: 2026-07-01 plessel.todd@epa.gov 1-919-541-5500
+#
+# STATUS:  unreviewed tested
+##############################################################################
+
+use strict;
+#BEGIN { push @INC, '/Users/plessel/projects/rsig/code/perl'; }
+BEGIN { push @INC, '/data/Apache/cgi-bin'; }
+use emvl; # Local OGC-WCS query string parsing and printing utility functions.
+use castnet; # For castnet::get_coverage_metadata_reference();
+pop @INC;
+
+package main;
+$| = 1; # Turn off output buffering so messages appear in correct order.
+alarm( 3600 ); # Kill process after 1 hour. Legitimate usage could be an hour!
+# Restrict PATH and ENV. (But before popen, ENV is cleared!)
+delete @ENV{ 'PATH', 'IFS', 'CDPATH', 'ENV', 'BASH_ENV' };
+
+############################## TUNABLE CONSTANTS #############################
+
+emvl::set_debugging( 1 ); # 1 = print debug messages to STDERR logs/error_log
+
+my $data_source = 'CASTNET';
+my $desc = "https://gaftp.epa.gov/castnet/CASTNET_Outgoing/data,castnetserver";
+my $data_directory = "/data/CASTNET/data"; # Contains input csv files.
+my $original_purpleair_data_file = "$data_directory/purpleair_web.csv";
+my $original_quantaq_data_file = "$data_directory/quantaq_web.csv";
+my $original_site_file = "$data_directory/site.csv";
+my $purpleair_data_file = "$data_directory/PurpleAir.txt";
+my $quantaq_data_file = "$data_directory/QuantAQ.txt";
+my $temp_directory = '/data/tmp';
+my $temp_txt_file_name = "$temp_directory/junk_castnet_txt.$$";
+my $temp_out_file_name = "$temp_directory/junk_castnet_out.$$";
+my $bindir = '/rsig/current/code/bin/Linux.x86_64';
+my $xdrconvert  = "$bindir/XDRConvert";
+my $fdd         = "$bindir/fdd";
+my $compressor  = "/usr/bin/gzip -c -1";
+my $tar         = "/usr/bin/tar -zcO";
+my $cat         = '/bin/cat';
+my $cut         = '/bin/cut';
+my $sort        = '/bin/sort';
+my $mv          = '/bin/mv';
+
+# Output messages when REQUEST=GetMetadata.
+# Print this message first:
+
+my $metadata_content = '
+US EPA CASTNET hourly sensor data accessed using RSIG.
+https://gaftp.epa.gov/castnet
+RSIG: https://www.epa.gov/rsig
+';
+
+# If FORMAT=original then print this message second:
+
+my $metadata_content_original = '
+The list of original data files are shown below.
+';
+
+# Else FORMAT!=original then print this message second:
+
+my $metadata_content_processed = '
+Data processing was done using the RSIG programs castnetserver, fdd and XDRConvert.
+castnetserver is used to subset (by variable, lon-lat box and time range)
+and reorganize/reformat and filter the data.
+fdd and XDRConvert are optionally used to regrid, aggregate and reformat the
+data to other file formats.
+The list of original data files and the RSIG command used to process them
+are shown below.
+';
+
+
+
+################################## VARIABLES #################################
+
+# All data variables are available within this date range and bounds:
+
+my $west_bound = -158;
+my $east_bound = -64;
+my $south_bound = 18;
+my $north_bound = 68;
+
+my $aggregate = ''; # none, all, daily.
+my $subset_points = 0;
+
+################################## ROUTINES ##################################
+
+
+main();
+
+
+sub main {
+  my $result = 0;
+
+  # Before calling emvl::parse_url(), specify various options so the default
+  # functions work:
+
+  emvl::set_source( $data_source );
+  emvl::set_coverage_metadata( castnet::get_coverage_metadata_reference() );
+  emvl::set_metadata_west_bound( $west_bound );
+  emvl::set_metadata_east_bound( $east_bound );
+  emvl::set_metadata_south_bound( $south_bound );
+  emvl::set_metadata_north_bound( $north_bound );
+  emvl::append_parser( 'aggregate', \&parse_aggregate_option );
+
+  if ( ! emvl::parse_url() ) {
+    print "Content-type: text/plain; charset=iso-8859-1\n\n"; # For webserver
+  } else {
+    my $request = emvl::get_request();
+    my $format = emvl::get_format();
+    my $time = emvl::get_time();
+
+    if ( $request eq 'getcapabilities' ) {
+      print "Content-type: text/xml; charset=iso-8859-1\n\n"; # For webserver
+      emvl::print_capabilities();
+      $result = 1;
+    } elsif ( $request eq 'describecoverage' ) {
+      print "Content-type: text/xml; charset=iso-8859-1\n\n"; # For webserver
+      emvl::print_coverage_description();
+      $result = 1;
+    } elsif ( $request eq 'getcoverage' ) {
+      my $header = emvl::get_content_type_header(); # Based on parsed FORMAT.
+      print "$header\n\n";
+
+      if ( $format eq 'original' ) {
+        my $coverage = lc( emvl::get_coverage() );
+        my $original_data_file =
+          index( $coverage, 'purpleair.' ) == 0 ? $original_purpleair_data_file
+          : index( $coverage, 'quantaq.' ) == 0 ? $original_quantaq_data_file
+          : '';
+        $result =
+          execute_command( "$tar $original_site_file $original_data_file" );
+      } else {
+        $result = process_data(); # Read input data file. Write txt file.
+
+        if ( $result ) {
+          $result = stream_temp_file(); # Write and stream temp out file.
+        }
+
+        if ( ! emvl::get_debugging() ) {
+          unlink( $temp_txt_file_name );
+          unlink( $temp_out_file_name );
+        }
+      }
+
+    } elsif ( $request eq 'getmetadata' ) {
+      print "Content-type: text/plain; charset=iso-8859-1\n\n"; # For webserver
+      print $metadata_content;
+      my $coverage = lc( emvl::get_coverage() );
+      my $original_data_file =
+        index( $coverage, 'purpleair.' ) == 0 ? $original_purpleair_data_file
+        : index( $coverage, 'quantaq.' ) == 0 ? $original_quantaq_data_file
+        : '';
+
+      if ( $format eq 'original' ) {
+        print $metadata_content_original;
+        print "\n$tar $original_site_file $original_data_file\n";
+      } else {
+        print $metadata_content_processed;
+        print "\nExtract subset of measures matching BBOX/TIME/COVERAGE " .
+              "from the files $original_site_file and $original_data_file and " .
+              "reformat and stream the result.\n";
+      }
+
+      $result = 1;
+    }
+  }
+
+  $result = 1 - $result; # UNIX: zero is success, non-zero is failure.
+  emvl::debug( "exit result = $result" );
+
+  # Must return some bytes to avoid 30 second timeout delay when unsuccessful:
+
+  if ( $result != 0 ) {
+    print STDOUT "\nFAILED\n";
+  }
+
+  exit $result;
+}
+
+
+
+# Parse aggregate option:
+
+sub parse_aggregate_option {
+  my $value = shift;
+  my $result = emvl::parse_option( $aggregate, $value, 'AGGREGATE',
+                                   'none all daily' );
+  return $result;
+}
+
+
+
+# Process input data file. and write temp file.
+# returns 1 if successful, else 0.
+
+sub process_data {
+  $subset_points = 0;
+  my $coverage = lc( emvl::get_coverage() );
+  my $data_file =
+    index( $coverage, 'purpleair.' ) == 0 ? $purpleair_data_file
+    : index( $coverage, 'quantaq.' ) == 0 ? $quantaq_data_file
+    : '';
+
+  if ( open my $input_file, '<', $data_file ) {
+    emvl::debug( "reading data file $data_file" );
+    my @data_lines = <$input_file>;
+    close $input_file;
+    my $data_line_count = @data_lines;
+    emvl::debug( "data file lines = $data_line_count" );
+
+    if ( $data_line_count > 1 ) {
+      my $header_line = $data_lines[ 0 ];
+      my @header = split( /\t/, $header_line );
+      my $header_columns = @header;
+      my $coverage_index = emvl::get_coverage_index();
+      my $coverage_metadata_reference =
+        castnet::get_coverage_metadata_reference();
+      my $coverage_info = $coverage_metadata_reference->[ $coverage_index ];
+      my $name = $coverage_info->{ name };
+      $name = substr( $name, index( $name, '.' ) + 1 );
+      my $units = $coverage_info->{ units };
+      my $name_units = $name . '(' . $units . ')';
+      my $variable_column = 0;
+
+      while ( $variable_column < $header_columns &&
+              $header[ $variable_column ] ne $name_units ) {
+        ++$variable_column;
+      }
+
+      emvl::debug( "$name_units variable_column = $variable_column" );
+
+      if ( $variable_column < $header_columns - 1 ) {
+
+        if ( open my $temp_txt_file, '>', "$temp_txt_file_name" ) {
+          my $time = emvl::get_time();
+          my $time1 =  substr( uc( $time ),  0, 19 ) . '-0000';
+          my $time2 =  substr( uc( $time ), 21, 19 ) . '-0000';
+          my $west = emvl::get_west();
+          my $east = emvl::get_east();
+          my $south = emvl::get_south();
+          my $north = emvl::get_north();
+          my $output_ascii = emvl::get_format() eq 'ascii';
+          my $previous_yyyymmddhh = 0;
+          my $previous_site_number = 0;
+          emvl::debug( "$time1 $time2" );
+
+          for ( my $line_index = 1;
+                $line_index < $data_line_count;
+                ++$line_index ) {
+            my $data_line = $data_lines[ $line_index ];
+            my @data_parts = split( /\t/, $data_line );
+            my $data_columns = @data_parts;
+
+            if ( $data_columns == $header_columns ) {
+              my $timestamp = $data_parts[ 0 ];
+
+              if ( $timestamp lt $time1 ) {
+                next;
+              } elsif ( $timestamp gt $time2 ) {
+                emvl::debug( "subset_points = $subset_points $timestamp last" );
+                last;
+              }
+
+              my $longitude = $data_parts[ 1 ];
+
+              if ( emvl::in_range( $longitude, $west, $east ) ) {
+                my $latitude = $data_parts[ 2 ];
+
+                if ( emvl::in_range( $latitude, $south, $north ) ) {
+                  my $measure = $data_parts[ $variable_column ];
+
+                  if ( $measure > -9999 ) {
+                    my $site_number = $data_parts[ 3 ];
+                    my $note = $data_parts[ $data_columns - 1 ];
+                    my $yyyymmddhh = substr( $timestamp, 0, 13 );
+                    $yyyymmddhh =~ s/[T-]//g;
+                    $yyyymmddhh = int( $yyyymmddhh );
+
+                    if ( ! ( $site_number == $previous_site_number &&
+                             $yyyymmddhh == $previous_yyyymmddhh ) ) {
+
+                      if ( $output_ascii ) {
+                        printf $temp_txt_file
+                          "%s\t%10.6f\t%10.6f\t%10d\t%10.3f\t%-79s",
+                          $timestamp,
+                          $longitude, $latitude, $site_number, $measure,
+                          $note;
+                      } else {
+                        printf $temp_txt_file
+                          "%d0000\t%10.6f\t%10.6f\t%10d\t%10.3f\t%-79s",
+                          $yyyymmddhh,
+                          $longitude, $latitude, $site_number, $measure,
+                          $note;
+                      }
+
+                      $previous_site_number = $site_number;
+                      $previous_yyyymmddhh = $yyyymmddhh;
+                      ++$subset_points;
+                    }
+                  }
+                }
+              }
+            }
+          }
+
+          close( $temp_txt_file );
+        }
+      }
+    }
+  }
+
+  my $result = $subset_points > 0;
+
+  if ( $subset_points == 0 ) {
+    emvl::debug( "No points were in the subset." );
+  } elsif ( $aggregate ne '' && $aggregate ne 'none' ) {
+    $result = aggregate();
+  }
+
+  return $result;
+}
+
+
+
+# Aggregate temp file:
+
+sub aggregate {
+
+  # Sort by id then timestamp:
+
+  my $command =
+    "$sort -s -n -k 4 -k 1 $temp_txt_file_name -o $temp_out_file_name ; " .
+    "$mv $temp_out_file_name $temp_txt_file_name";
+  my $result = execute_command( $command );
+
+  if ( $result ) {
+
+    if ( open my $input_file, '<', $temp_txt_file_name ) {
+      emvl::debug( "reading data file $temp_txt_file_name" );
+      my @data_lines = <$input_file>;
+      close $input_file;
+      my $data_line_count = @data_lines;
+      emvl::debug( "data file lines = $data_line_count" );
+
+      if ( $data_line_count > 1 ) {
+
+        if ( open my $temp_out_file, '>', "$temp_out_file_name" ) {
+          my $output_timestamp = '';
+          my $previous_timestamp = '';
+          my $previous_longitude = '';
+          my $previous_latitude = '';
+          my $previous_id = 0;
+          my $previous_note = '';
+          my $previous_yyyymmdd = 0;
+          my $sum = 0.0;
+          my $count = 0;
+          my @data_parts = ();
+          my $aggregate_all = $aggregate eq 'all' ? 1 : 0;
+
+          for ( my $line_index = 0;
+                $line_index < $data_line_count;
+                ++$line_index ) {
+            my $data_line = $data_lines[ $line_index ];
+            @data_parts = split( /\t/, $data_line );
+            my $measure = $data_parts[ 4 ];
+            my $id = $data_parts[ 3 ];
+            my $this_yyyymmdd = 0;
+
+            if ( emvl::get_format() eq 'ascii' ) {
+              $this_yyyymmdd = substr( $data_parts[ 0 ], 0, 10 );
+              $this_yyyymmdd =~ s/-//g;
+              $this_yyyymmdd = int( $this_yyyymmdd );
+            } else {
+              $this_yyyymmdd = int( substr( $data_parts[ 0 ], 0, 8 ) );
+            }
+
+            if ( $previous_id == 0 ) {
+              $previous_id = $id;
+              $previous_timestamp = $data_parts[ 0 ];
+              $previous_longitude = $data_parts[ 1 ];
+              $previous_latitude  = $data_parts[ 2 ];
+              $previous_note      = $data_parts[ 5 ];
+              $previous_yyyymmdd = $this_yyyymmdd;
+            }
+
+            if ( $id == $previous_id &&
+                   ( $aggregate_all ||
+                     $this_yyyymmdd == $previous_yyyymmdd ) ) {
+              $sum += $measure;
+              ++$count;
+            } else {
+              $output_timestamp =
+                substr( $previous_timestamp, 0, 10 ) . 'T00:00:00-0000';
+              printf $temp_out_file
+                    "%s\t%s\t%s\t%s\t%10.3f\t%-79s",
+                    $output_timestamp,
+                    $previous_longitude, $previous_latitude, $previous_id,
+                    $sum / $count, $previous_note;
+              $sum = $measure;
+              $count = 1;
+              $previous_timestamp = $data_parts[ 0 ];
+              $previous_longitude = $data_parts[ 1 ];
+              $previous_latitude  = $data_parts[ 2 ];
+              $previous_id        = $id;
+              $previous_note      = $data_parts[ 5 ];
+              $previous_yyyymmdd = $this_yyyymmdd;
+            }
+          } # End loop on data lines.
+
+          # Output last aggregated value measure:
+
+          $output_timestamp =
+            substr( $previous_timestamp, 0, 10 ) . 'T00:00:00-0000';
+
+          printf $temp_out_file
+                 "%s\t%s\t%s\t%s\t%10.3f\t%-79s",
+                 $output_timestamp,
+                 $previous_longitude, $previous_latitude, $previous_id,
+                 $sum / $count, $previous_note;
+
+          close( $temp_out_file );
+
+          # Sort by timestamp then id:
+
+          $command =
+            "$sort $temp_out_file_name -o $temp_txt_file_name";
+          $result = execute_command( $command );
+        }
+      }
+    }
+  }
+
+  return $result;
+}
+
+
+
+# Output ASCII or XDR header and stream temp files in binary XDR format.
+
+sub stream_temp_file {
+  my $result = 0;
+  my $format = emvl::get_format();
+  my $regrid = emvl::get_regrid();
+  my $output_ascii = ( $format eq 'ascii' && $regrid eq '' ) ? 1 : 0;
+  my $my_xdrconvert = '';
+
+  # Determine if XDRConvert must be used for reformatting and/or regridding:
+
+  if ( $regrid ne '' ||
+       $format eq 'netcdf-coards' || $format eq 'netcdf-ioapi' ) {
+    my $xdrconvert_format = emvl::xdrconvert_format();
+    my $regrid_args = emvl::xdrconvert_regrid_args( 0 );
+    $my_xdrconvert = " | $xdrconvert $regrid_args -$xdrconvert_format";
+  }
+
+  if ( open my $temp_out_file, '>', "$temp_out_file_name" ) {
+    my $coverage = emvl::get_coverage();
+    my $coverage_index = emvl::get_coverage_index();
+    my $coverage_metadata_reference =
+      castnet::get_coverage_metadata_reference();
+    my $units = $coverage_metadata_reference->[ $coverage_index ]-> { units };
+    my $variable = substr( $coverage, index( $coverage, '.' ) + 1 );
+
+    if ( $aggregate eq 'all' ) {
+      $variable .= '_mean';
+    } elsif ( $aggregate eq 'daily' ) {
+      $variable .= '_daily';
+    }
+
+    my $command = '';
+
+    if ( $output_ascii ) {
+      my $tag = sprintf( "%s(%s)", lc( $variable ), $units );
+      my $header =
+        "Timestamp(UTC)\tLongitude(deg)\tLatitude(deg)\tid(-)\t$tag\tNote(-)\n";
+      printf $temp_out_file $header;
+      close( $temp_out_file );
+      my $command = "$cat $temp_txt_file_name >> $temp_out_file_name";
+      $result = execute_command( $command );
+    } else {
+      my $time = emvl::get_time();
+      my $timestamps = $time;
+      $timestamps =~ tr/\// /;
+      $timestamps =~ tr/t/T/;
+      $timestamps =~ s/z/-0000/g;
+      printf $temp_out_file
+        "Point 1.0\n" .
+        "%s\n" .
+        "%s\n" .
+        "# Dimensions: variables points:\n" .
+        "5 %d\n" .
+        "# Variable names:\n" .
+        "Timestamp Longitude Latitude id $variable\n" .
+        "# Variable units:\n" .
+        "yyyymmddhhmmss deg deg - $units\n" .
+        "# char notes[points][80] and\n" .
+        "# IEEE-754 64-bit reals data[variables][points]:\n",
+        $desc, $timestamps, $subset_points;
+      close( $temp_out_file );
+
+      # Use fdd to convert text temp file values to XDR binary format.
+      # 1 = times, 2 = lon, 3 = lat, 4 = id, 5 = measure, 6 = notes.
+
+      $command =
+        "$cut -f 6 $temp_txt_file_name >> $temp_out_file_name ; " .
+        "$cut -f 1 $temp_txt_file_name" .
+        " | $fdd conv=ascii-real8 conv=swab8 >> $temp_out_file_name ; " .
+        "$cut -f 2 $temp_txt_file_name" .
+        " | $fdd conv=ascii-real8 conv=swab8 >> $temp_out_file_name ; " .
+        "$cut -f 3 $temp_txt_file_name" .
+        " | $fdd conv=ascii-real8 conv=swab8 >> $temp_out_file_name ; " .
+        "$cut -f 4 $temp_txt_file_name" .
+        " | $fdd conv=ascii-real8 conv=swab8 >> $temp_out_file_name ; " .
+        "$cut -f 5 $temp_txt_file_name" .
+        " | $fdd conv=ascii-real8 conv=swab8 >> $temp_out_file_name";
+      $result = execute_command( $command );
+    }
+
+    # Stream temp out file (maybe piped through XDRConvert, gzip) to stdout:
+
+    if ( $result ) {
+      my $my_compressor = emvl::get_compress() ? " | $compressor" : '';
+      $command = "$cat $temp_out_file_name $my_xdrconvert$my_compressor";
+      $result = execute_command( $command );
+    }
+  }
+
+  return $result;
+}
+
+
+
+# Execute command and echo its output to STDOUT.
+# E.g., execute_command( '/bin/ls' );
+
+sub execute_command {
+  my $command = shift;
+  my $result = 0;
+  my $the_pipe = 0;
+
+  # -T flag requires untainting $command by matching a minimal regex needed for
+  # system commands used by this program.
+
+  if ( $command =~ m#^(/[\w-]+/[\w -/>;=".|]+)$# )
+  {
+    $command = $1; # Re-assign first match, which is enough to satisfy -T.
+    emvl::debug( "$0 executing command = $command" );
+    %ENV = (); # Unset all environment variables prior to popen.
+    # Complicated, supposedly safer way to open a readable pipe to command:
+    my $pid = open( the_pipe, "-|" );
+
+    if ( ! defined( $pid ) ) {
+      die "Couldn't open pipe to subprocess";
+    } elsif ( $pid ) { # Parent process.
+
+      while ( <the_pipe> ) {
+        print;
+      }
+
+      close( the_pipe );
+      $result = ! $?;
+    } else { # Child process.
+      exec( $command ) or die "can't exec program: $!";
+    }
+  } else {
+    print STDERR "\n$0: command contains invalid characters.\n";
+  }
+
+  emvl::debug( "result = $result" );
+  return $result;
+}
+
+

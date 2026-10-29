@@ -1,0 +1,139 @@
+#!/bin/csh -f
+# listfiles - Cshell program to list OpenAQ compressed csv files for a given
+# VARIABLE YYYYMMDDHH HOURS BBOX.
+# 2026-06-15 plessel.todd@epa.gov
+
+############################## Tunable parameters #############################
+
+set directory = /data/OpenAQ
+set data_directory = $directory/data
+set location_info_file  = $data_directory/location_info
+set location_info2_file = $data_directory/location_info2
+set include_location_info2 = 1
+
+# Make tail +n work!
+setenv _POSIX2_VERSION 199209
+set _POSIX2_VERSION=199209
+
+
+###############################################################################
+# Read and check command-line arguments.
+
+@ ok = 0
+@ yyyymmddhh = 0
+@ hours      = 0
+set west_bound = 0
+set east_bound = 0
+set south_bound = 0
+set north_bound = 0
+
+if ( $#argv == 7 ) then
+  set variable    = $1
+  @ yyyymmddhh    = $2
+  @ hours         = $3
+  set west_bound  = $4
+  set south_bound = $5
+  set east_bound  = $6
+  set north_bound = $7
+  @ ok = ($yyyymmddhh >= 1990010100 && $yyyymmddhh <= 2147123123 && $hours >= 1)
+
+  if ( $ok ) then
+    @ ok = `echo $west_bound $east_bound $south_bound $north_bound | awk '{ west_bound = $1; east_bound = $2; south_bound = $3; north_bound = $4; print ( west_bound >= -180 && west_bound <= 180 && east_bound >= west_bound && east_bound <= 180 && south_bound >= -90 && south_bound <= 90 && north_bound >= south_bound && north_bound <= 90 ) }'`
+  endif
+
+endif
+
+
+
+###############################################################################
+# If invalid then print usage instructions and an example then exit:
+
+if ( ! $ok ) then
+  echo "$0 Invalid command-line arguments $*"
+  echo "Usage: $0 variable yyyymmddhh hours west_bound south_bound east_bound north_bound"
+  echo "Example: $0 pm25 2026060100 24 -126 24 -60 50"
+  exit 1
+endif
+
+
+
+###############################################################################
+# Compute the starting and ending dates. Extend dates one day before and after
+# to account for local time zones. UGLY.
+
+set days_per_month = ( 31 28 31 30 31 30 31 31 30 31 30 31 )
+
+@ yyyymmdd1 = $yyyymmddhh / 100
+@ hh = $yyyymmddhh % 100
+@ seconds1 = `date -u --date="$yyyymmdd1" "+%s"`
+@ seconds1 += $hh * 60 * 60
+@ seconds1 -= 24 * 60 * 60
+@ yyyymmdd1 = `date -u --date="@$seconds1" "+%Y%m%d"`
+
+@ seconds2 = $seconds1 + ( $hours - 1 ) * 60 * 60
+@ seconds2 += 48 * 60 * 60
+@ yyyymmdd2 = `date -u --date="@$seconds2" "+%Y%m%d"`
+
+
+###############################################################################
+# Get list of sites ids matching lon-lat bounds, yyyymmdd1, yyyymmdd2 and variable:
+
+set ids = `tail +2 $location_info_file | awk -F'\t' -v variable=$variable -v yyyymmdd1=$yyyymmdd1 -v yyyymmdd2=$yyyymmdd2 -v west_bound="$west_bound" -v east_bound="$east_bound" -v south_bound="$south_bound" -v north_bound="$north_bound" ' { id = $1; longitude = $2; latitude = $3; begin_yyyymmdd = $4; end_yyyymmdd = $5; if ( longitude >= west_bound && longitude <= east_bound && latitude >= south_bound && latitude <= north_bound && ! ( yyyymmdd1 > end_yyyymmdd || yyyymmdd2 < begin_yyyymmdd ) && index( $6, variable"(" ) ) { print id } }'`
+
+
+###############################################################################
+# Include location_info2 (aws sites that are not included in OpenAQ webservice)
+
+if ( $include_location_info2 ) then
+  set ids2 = `tail +2 $location_info2_file | awk -F'\t' -v variable=$variable -v yyyymmdd1=$yyyymmdd1 -v yyyymmdd2=$yyyymmdd2 -v west_bound="$west_bound" -v east_bound="$east_bound" -v south_bound="$south_bound" -v north_bound="$north_bound" ' { id = $1; longitude = $2; latitude = $3; begin_yyyymmdd = $4; end_yyyymmdd = $5; if ( longitude >= west_bound && longitude <= east_bound && latitude >= south_bound && latitude <= north_bound && ! ( yyyymmdd1 > end_yyyymmdd || yyyymmdd2 < begin_yyyymmdd ) && index( $6, variable"(" ) ) { print id } }'`
+  set all_ids = `echo "$ids $ids2" | tr ' ' '\n' | sort -n | uniq`
+  set ids = ( $all_ids )
+endif
+
+
+###############################################################################
+# Loop through days and output list of daily site data files:
+
+
+@ yyyymmdd = $yyyymmdd1
+@ yyyy = $yyyymmdd / 10000
+@ mm   = ( $yyyymmdd / 100 ) % 100
+@ dd   = $yyyymmdd % 100
+
+while ( $yyyymmdd <= $yyyymmdd2 )
+
+  foreach id ( $ids )
+    set mm = `printf "%02d" $mm`
+    set dd = `printf "%02d" $dd`
+    set data_file = $data_directory/locationid=$id/year=$yyyy/month=$mm/location-$id-$yyyy$mm$dd.csv.gz
+
+    if ( -f $data_file ) then
+      echo $data_file
+    endif
+  end
+
+  @ dd += 1
+
+  @ days_this_month = $days_per_month[$mm]
+
+  if ( $mm == 2 ) then
+    @ leap = ( $yyyy % 4 == 0 && ! ( $yyyy % 100 == 0 && ! $yyyy % 400 == 0 ) )
+    @ days_this_month += $leap
+  endif
+
+  if ( $dd > $days_this_month ) then
+    @ dd = 1
+    @ mm += 1
+
+    if ( $mm > 12 ) then
+      @ mm = 1
+      @ yyyy += 1
+    endif
+
+    @ yyyymmdd = ( $yyyy * 10000 ) + ( $mm * 100 ) + $dd
+  else
+    @ yyyymmdd += 1
+  endif
+end
+
+

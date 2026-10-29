@@ -1,0 +1,400 @@
+#!/usr/bin/perl -wT
+
+##############################################################################
+# PURPOSE: reformat_purpleair - Reformat purpleair_web.csv and site.csv files
+#          into a UTC time-sorted, tab-delimited ASCII file PurpleAir.txt
+#          so that subsequent WCS requests are much faster.
+#
+# NOTES:   See /data/CASTNET/data/{purpleair_web.csv, site.csv}
+#
+# HISTORY: 2026-07-03 plessel.todd@epa.gov 1-919-541-5500
+#
+# STATUS:  unreviewed tested
+##############################################################################
+
+use strict;
+#BEGIN { push @INC, '/Users/plessel/projects/rsig/code/perl'; }
+BEGIN { push @INC, '/data/Apache/cgi-bin'; }
+use emvl; # Local OGC-WCS query string parsing and printing utility functions.
+use castnet; # For castnet::get_coverage_metadata_reference();
+pop @INC;
+
+package main;
+$| = 1; # Turn off output buffering so messages appear in correct order.
+alarm( 3600 ); # Kill process after 1 hour. Legitimate usage could be an hour!
+# Restrict PATH and ENV. (But before popen, ENV is cleared!)
+delete @ENV{ 'PATH', 'IFS', 'CDPATH', 'ENV', 'BASH_ENV' };
+
+############################## TUNABLE CONSTANTS #############################
+
+emvl::set_debugging( 1 ); # 1 = print debug messages to STDERR logs/error_log
+
+my $data_directory = "/data/CASTNET/data"; # Contains input csv files.
+my $data_file = "$data_directory/purpleair_web.csv";
+my $site_file = "$data_directory/site.csv";
+my $temp_directory = '/data/tmp';
+my $temp_txt_file_name = "$temp_directory/junk_purpleair_txt.$$";
+my $temp_out_file_name = "$temp_directory/junk_purpleair_out.$$";
+my $output_file_name = "$data_directory/PurpleAir.txt";
+my $bindir = '/rsig/current/code/bin/Linux.x86_64';
+my $fdd    = "$bindir/fdd";
+my $cat    = '/bin/cat';
+my $cut    = '/bin/cut';
+my $sort   = '/bin/sort';
+my $mv     = '/bin/mv';
+my $touch  = '/bin/touch';
+my $chmod  = '/bin/chmod';
+
+my $use_purpleair_id = 1; # 0 = use CASTNET site id, 1 = purpleair sensor id.
+
+################################## ROUTINES ##################################
+
+
+main();
+
+
+sub main {
+  my $result = process_data(); # Read input data file. Write txt file.
+
+  if ( $result ) {
+    $result = write_ouput_file();
+  }
+
+  if ( ! emvl::get_debugging() ) {
+    unlink( $temp_txt_file_name );
+    unlink( $temp_out_file_name );
+  }
+
+  $result = 1 - $result; # UNIX: zero is success, non-zero is failure.
+  exit $result;
+}
+
+
+
+# Process input csv data files and output ASCII txt file.
+# returns 1 if successful, else 0.
+
+sub process_data {
+  my $subset_points = 0;
+
+  if ( open my $input_site_file, '<', $site_file ) {
+    emvl::debug( "reading site file $site_file" );
+    my @site_lines = <$input_site_file>;
+    close $input_site_file;
+    my $site_count = @site_lines;
+    emvl::debug( "site file line count = $site_count" );
+
+    if ( $site_count > 1 ) {
+
+      if ( open my $input_file, '<', $data_file ) {
+        emvl::debug( "reading data file $data_file" );
+        my @data_lines = <$input_file>;
+        close $input_file;
+        my $data_line_count = @data_lines;
+        emvl::debug( "data file lines = $data_line_count" );
+
+        if ( $data_line_count > 1 ) {
+
+          if ( open my $temp_txt_file, '>', "$temp_txt_file_name" ) {
+            my $header_line = $data_lines[ 0 ];
+            my @header = split( /,/, $header_line );
+            my $header_columns = @header;
+            my $coverage_metadata_reference =
+              castnet::get_coverage_metadata_reference();
+            my $coverage_count = scalar @$coverage_metadata_reference;
+            my $previous_site_code = '';
+            my $previous_site_index = -1;
+
+            # Process all unsorted data lines (but skip first header line):
+
+            for ( my $data_line_index = 1;
+                  $data_line_index < $data_line_count;
+                  ++$data_line_index ) {
+              my $line = $data_lines[ $data_line_index ];
+              my $edited_line =
+                emvl::erase_double_quoted_commas_and_quotes( $line );
+              my @data_parts = split( /,/, $edited_line );
+              my $data_columns = @data_parts;
+
+              if ( $data_columns == $header_columns ) {
+                my $site_code = $data_parts[ 0 ];
+                my $site_index = -1;
+
+                if ( $site_code eq $previous_site_code ) {
+                  $site_index = $previous_site_index;
+                } else {
+                  $site_index = find_site( $site_code, \@site_lines );
+                  $previous_site_code = $site_code;
+                  $previous_site_index = $site_index;
+                }
+
+                if ( $site_index >= 0 ) {
+                  my $site_line = $site_lines[ $site_index ];
+                  $site_line =
+                    emvl::erase_double_quoted_commas_and_quotes( $site_line );
+                  my @site_parts = split( /,/, $site_line );
+                  my $non_standard_timezone = $site_parts[ 8 ];
+                  my $local_timestamp = $data_parts[ 2 ];
+                  my $yyyymmddhh =
+                    convert_timestamp_to_utc( $local_timestamp,
+                                              $non_standard_timezone );
+                  my $site_number = $site_parts[ 1 ]; # CASTNET id.
+                  my $longitude   = $site_parts[ 10 ];
+                  my $latitude    = $site_parts[ 9 ];
+                  my $elevation   = int( $site_parts[ 11 ] );
+                  my $site_name   = $site_parts[ 2 ];
+                  my $agency      = $site_parts[ 5 ];
+                  my $state       = $site_parts[ 6 ];
+                  my $county      = $site_parts[ 7 ];
+                  my $map_id      = $site_parts[ 12 ];
+                  my $land_use    = $site_parts[ 13 ];
+                  my $terrain     = $site_parts[ 14 ];
+                  my $mlm         = $site_parts[ 15 ];
+                  my $nadp_id     = $site_parts[ 16 ];
+                  my $nadp_km     = $site_parts[ 17 ];
+                  my $sensor = $data_parts[ 1 ];
+                  $sensor =~ s/ //g;
+
+                  if ( $use_purpleair_id ) {
+                    $site_number = $sensor;
+                  }
+
+                  my $note =
+                    sprintf("%s;%s;%s;%s;%s;%gm;%s;%s;%s;%skm;%s;%s;%s",
+                             $site_code, $site_name, $agency, $state,
+                             $county, $elevation, $sensor, $map_id,
+                             $nadp_id, $nadp_km, $mlm,
+                             $land_use, $terrain );
+                  $note = substr( $note, 0, 79 );
+                  $note = sprintf( "%-79s", $note );
+                  my $yyyy = int( $yyyymmddhh / 1000000 );
+                  my $mm   = int( $yyyymmddhh / 10000 ) % 100;
+                  my $dd   = int( $yyyymmddhh / 100 ) % 100;
+                  my $hh = $yyyymmddhh % 100;
+                  my $measures = '';
+
+                  for ( my $coverage_index = 0;
+                        $coverage_index < $coverage_count;
+                        ++$coverage_index ) {
+                    my $coverage_info =
+                      $coverage_metadata_reference->[ $coverage_index ];
+                    my $coverage_name = lc( $coverage_info->{ name } );
+
+                    if ( index( $coverage_name, 'purpleair.' ) == 0 ) {
+                      my $column = $coverage_info->{ column } - 1;
+
+                      if ( $header_columns > $column ) {
+                        my $valid_minimum = $coverage_info->{ min };
+                        my $valid_maximum = $coverage_info->{ max };
+                        my $units = $coverage_info->{ units };
+                        my $scale = 1.0;
+
+                        if ( exists( $coverage_info->{ scale } ) ) {
+                          $scale = $coverage_info->{ scale };
+                        }
+
+                        my $measure = $data_parts[ $column ];
+
+                        if ( $measure eq '' ) {
+                          $measure = -9999;
+                        } else {
+                          $measure *= $scale;
+
+                          if ( ! ( $measure >= $valid_minimum &&
+                                   $measure <= $valid_maximum ) ) {
+                            $measure = -9999;
+                          }
+                        }
+
+                        $measures .= sprintf( "\t%10.3f", $measure );
+                      } # If enough header columns for coverages.
+                    } # If purpleair coverage.
+                  } # End loop on coverages
+
+                  printf $temp_txt_file
+                         "%04d-%02d-%02dT%02d:00:00-0000" .
+                         "\t%10.6f\t%10.6f\t%10d%s\t%-79s\n",
+                         $yyyy, $mm, $dd, $hh,
+                         $longitude, $latitude, $site_number, $measures,
+                         $note;
+                  ++$subset_points;
+                } # If found site.
+              } # If matched column count.
+            } # End loop on data lines.
+
+            close( $temp_txt_file );
+          } # If opened temp file.
+        } # If have data lines.
+      } # If opened data file.
+    } # If have site lines.
+  } # If opened site file.
+
+  my $result = 0;
+
+  if ( $subset_points > 0 ) {
+
+    # Sort by timestamp then id:
+
+    my $command =
+      "$sort -k 1 -k 4 $temp_txt_file_name -o $temp_out_file_name ; " .
+      "$mv $temp_out_file_name $temp_txt_file_name";
+    $result = execute_command( $command );
+  }
+
+  return $result;
+}
+
+
+
+# Write ASCII output file.
+
+sub write_ouput_file {
+  my $result = 0;
+
+  if ( open my $temp_out_file, '>', "$temp_out_file_name" ) {
+    my $header = "timestamp(UTC)\tlongitude(deg)\tlatitude(deg)\tid(-)";
+    my $coverage_metadata_reference =
+      castnet::get_coverage_metadata_reference();
+    my $coverage_count = scalar @$coverage_metadata_reference;
+
+    for ( my $coverage_index = 0;
+          $coverage_index < $coverage_count;
+          ++$coverage_index ) {
+      my $coverage_info = $coverage_metadata_reference->[ $coverage_index ];
+      my $name = $coverage_info->{ name };
+
+      if ( index( lc( $name ), 'purpleair.' ) == 0 ) {
+        my $units = $coverage_info->{ units };
+
+        if ( $units eq '%' ) {
+          $units .= '%';
+        }
+
+        my $variable = substr( $name, index( $name, '.' ) + 1 );
+        $header .= "\t$variable($units)";
+      }
+    }
+
+    $header .= "\tnote(-)\n";
+    printf $temp_out_file $header;
+    close( $temp_out_file );
+    my $command =
+      "$cat $temp_txt_file_name >> $temp_out_file_name ; " .
+      "$touch $output_file_name ; $chmod 664 $output_file_name";
+    $result = execute_command( $command );
+
+    if ( $result ) {
+
+      if ( -s $temp_out_file_name >= -s $output_file_name ) {
+        $command =
+          "$mv $temp_out_file_name $output_file_name ; ".
+          "$chmod 444 $output_file_name";
+        $result = execute_command( $command );
+      }
+    }
+  }
+
+  return $result;
+}
+
+
+
+# Return 0-based index of site code in sorted array of site lines or -1
+# if not found:
+
+sub find_site {
+  my ( $site_code, $site_lines_reference ) = @_;
+  my $tag = $site_code . ',';
+  my $line_count = scalar @$site_lines_reference;
+  my $result = -1;
+
+  for ( my $line_index = 0; $line_index < $line_count; ++$line_index ) {
+    my $line = $site_lines_reference->[ $line_index ];
+    my $tag_index = index( $line, $tag );
+
+    if ( $tag_index == 0 ) {
+      $result = $line_index;
+      $line_index = $line_count;
+    }
+  }
+
+  return $result;
+}
+
+
+
+# Convert local timestamp string "2026-05-18 02:00:00" and timezone "EA" to
+# UTC yyyymmddhh = 2026051807:
+
+sub convert_timestamp_to_utc {
+  my ( $timestamp, $non_standard_timezone ) = @_;
+  my $yyyymmddhh = 0;
+  my $utc_offset_hours = 0;
+  my $non_standard_timezone_2 = substr( $non_standard_timezone, 0, 2 );
+
+  if ( $non_standard_timezone_2 eq 'EA' ) {
+    $utc_offset_hours = -5;
+  } elsif ( $non_standard_timezone_2 eq 'CE' ) {
+    $utc_offset_hours = -6;
+  } elsif ( $non_standard_timezone_2 eq 'MO' ) {
+    $utc_offset_hours = -7;
+  } elsif ( $non_standard_timezone_2 eq 'PA' ) {
+    $utc_offset_hours = -8;
+  } elsif ( $non_standard_timezone_2 eq 'AL' ) {
+    $utc_offset_hours = -8;
+  } elsif ( $non_standard_timezone_2 eq 'AT' ) {
+    $utc_offset_hours = -5;
+  }
+
+  my $yyyy = int( substr( $timestamp, 0, 4 ) );
+  my $mm   = int( substr( $timestamp, 5, 2 ) );
+  my $dd   = int( substr( $timestamp, 8, 2 ) );
+  my $hh   = int( substr( $timestamp, 11, 2 ) );
+  emvl::increment_timestamp_hours( $yyyy, $mm, $dd, $hh, -$utc_offset_hours );
+  $yyyymmddhh = int( $yyyy * 1000000 + $mm * 10000 + $dd * 100 + $hh );
+  return $yyyymmddhh;
+}
+
+
+
+# Execute command and echo its output to STDOUT.
+# E.g., execute_command( '/bin/ls' );
+
+sub execute_command {
+  my $command = shift;
+  my $result = 0;
+  my $the_pipe = 0;
+
+  # -T flag requires untainting $command by matching a minimal regex needed for
+  # system commands used by this program.
+
+  if ( $command =~ m#^(/[\w-]+/[\w -/>;=".|]+)$# )
+  {
+    $command = $1; # Re-assign first match, which is enough to satisfy -T.
+    emvl::debug( "$0 executing command = $command" );
+    %ENV = (); # Unset all environment variables prior to popen.
+    # Complicated, supposedly safer way to open a readable pipe to command:
+    my $pid = open( the_pipe, "-|" );
+
+    if ( ! defined( $pid ) ) {
+      die "Couldn't open pipe to subprocess";
+    } elsif ( $pid ) { # Parent process.
+
+      while ( <the_pipe> ) {
+        print;
+      }
+
+      close( the_pipe );
+      $result = ! $?;
+    } else { # Child process.
+      exec( $command ) or die "can't exec program: $!";
+    }
+  } else {
+    print STDERR "\n$0: command contains invalid characters.\n";
+  }
+
+  emvl::debug( "result = $result" );
+  return $result;
+}
+
+

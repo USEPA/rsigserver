@@ -55,7 +55,7 @@ my $debugging = 0; # 1 = print debug messages to STDERR logs/error_log.
 my $concurrent_queries = 24;
 
 my $bindir = '/rsig/current/code/bin/Linux.x86_64';
-#my $wget_command = "$bindir/wget -q -t 1 -T 0 -O - ";
+#my $wget_command = "/usr/bin/wget -q -t 1 -T 0 -O - ";
 my $wget_command = '/usr/bin/curl -k -g --silent --max-time 3600 --retry 0 -L --max-redirs 10 --tcp-nodelay ';
 
 my $subsetter = "$bindir/ofssubset";

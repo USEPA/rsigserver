@@ -53,7 +53,7 @@ my $server_path = 'https://YOUR_WEBSERVER_HOST/cgi-bin';
 
 my $bindir     = '/rsig/current/code/bin/Linux.x86_64';
 my $subsetter  = "$bindir/CMAQSubset";
-my $compressor = "$bindir/gzip -c -1";
+my $compressor = "/usr/bin/gzip -c -1";
 
 # Output messages when REQUEST=GetMetadata.
 # Print this message first:

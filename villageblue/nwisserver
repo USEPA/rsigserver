@@ -38,7 +38,7 @@ my $downloader = '/rsig/villageblue/nwis_download';
 
 # Server where this program is installed:
 
-my $server_path = 'https://YOUR_WEBSERVER_HOST/cgi-bin';
+my $server_path = 'https://maple.hesc.epa.gov/cgi-bin';
 
 # Query string parsing routine dispatch table:
 
@@ -48,8 +48,12 @@ my %parsers = (
   'siteid'     => \&parse_siteid_option,
   'params'     => \&parse_params_option,
   'period'     => \&parse_period_option, # period is optional
-  'format'     => \&parse_format_option  # format is optional  
+  'format'     => \&parse_format_option,  # format is optional  
+  'rsig_id'    => \&parse_rsigid_option
 );
+
+sub parse_rsigid_option { return 1; }
+
 
 # Full URL path to this program:
 
@@ -93,6 +97,13 @@ sub main {
 
   $result = 1 - $result; # UNIX: zero is success, non-zero is failure.
   debug( "exit result = $result" );
+
+  # Must return some bytes to avoid 30 second timeout delay when unsuccessful:
+
+  if ( $result != 0 ) {
+    print STDOUT "\nFAILED\n";
+  }
+
   exit $result;
 }
 
@@ -296,7 +307,7 @@ sub execute_command {
         print;
       }
 
-      close( the_pipe ) or die $!;
+      close( the_pipe );
       $result = ! $?;
     } else { # Child process.
       exec( $command ) or die "can't exec program: $!";

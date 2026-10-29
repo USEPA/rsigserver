@@ -166,28 +166,35 @@ static char* readListFileAndAllocateTimestampsAndPoints( Data* const data );
 static void allocateTimestampsAndPoints( const char* const listFileContent,
                                          Data* const data );
 
-static long long swathFileTimestamp( const char* const fileName );
+static int swathFileTimestamps( const char* const fileName,
+                                long long* const yyyymmddhhmm1,
+                                long long* const yyyymmddhhmm2 );
 
 static int readFileInfo( const char* const fileName, const Bounds domain,
-                         int* const file, long long* const yyyymmddhhmm,
+                         int* const file,
+                         long long* const yyyymmddhhmm1,
+                         long long* const yyyymmddhhmm2,
                          size_t* const rows, size_t* const columns,
                          size_t* const size,
                          int* const changedDimensions );
 
-static void readCoordinatesAndValues( Data* const data,
-                                      const int file,
-                                      const size_t rows,
-                                      const size_t columns,
-                                      double* const longitudes,
-                                      double* const latitudes,
-                                      double* const values );
+static void readCoordinatesAndTimestampsAndValues( Data* const data,
+                                                   const int file,
+                                                   const size_t rows,
+                                                   const size_t columns,
+                                                   double* const longitudes,
+                                                   double* const latitudes,
+                                                   double* const timestamps,
+                                                   double* const values );
 
 static void writeDataSubset( Data* const data,
-                             const long long yyyymmddhhmm,
+                             const int yyyymmddhh1,
+                             const int yyyymmddhh2,
                              const size_t rows,
                              const size_t columns,
                              const double longitudes[],
                              const double latitudes[],
+                             const double timestamps[],
                              const double values[],
                              unsigned char mask[],
                              double longitudesSW[],
@@ -204,6 +211,7 @@ static void writeSubset( Data* const data,
                          const size_t subsetPoints,
                          const size_t points,
                          const unsigned char mask[],
+                         const int maskTaregt,
                          const double longitudes[],
                          const double latitudes[],
                          const double values[],
@@ -506,6 +514,7 @@ static void readData( Data* const data ) {
     double* buffer       = 0;
     double* longitudes   = 0;
     double* latitudes    = 0;
+    double* timestamps   = 0;
     double* values       = 0;
     double* longitudesSW = 0;
     double* longitudesSE = 0;
@@ -517,28 +526,57 @@ static void readData( Data* const data ) {
     double* latitudesNE  = 0;
     unsigned char* mask  = 0;
     char* fileName = listFileContent;
+    const int yyyymmddhh_first = arguments->yyyymmddhh;
+    const int yyyymmddhh_last =
+      incrementHours( yyyymmddhh_first, arguments->hours - 1 );
 
-    /* Get each line of list file. It is the VIIRS data file to read: */
+    /* Get each line of list file. It is the data file to read: */
 
     do {
       char* const newline = strchr( fileName, '\n' );
 
       if ( newline ) {
+        int file = 0;
+        long long yyyymmddhhmm1 = 0;
+        long long yyyymmddhhmm2 = 0;
+        int changedDimensions = 0;
+        int ok = 0;
+
         *newline = '\0';
+        data->ok = 1;
+        ok = readFileInfo( fileName, arguments->domain,
+                           &file, &yyyymmddhhmm1, &yyyymmddhhmm2,
+                           &rows, &columns, &size,
+                           &changedDimensions );
 
-        {
-          int file = 0;
-          long long yyyymmddhhmm = 0;
-          int changedDimensions = 0;
-          int ok = readFileInfo( fileName, arguments->domain,
-                                 &file, &yyyymmddhhmm, &rows, &columns, &size,
-                                 &changedDimensions );
+        if ( ok ) {
 
-          if ( ok ) {
+          /* Check if the file timestamps intersect the subset time range: */
+
+          int yyyymmddhh1 = yyyymmddhh_first;
+          int yyyymmddhh2 = yyyymmddhh_last;
+          const int yyyymmddhhf1 = yyyymmddhhmm1 / 100;
+          const int yyyymmddhhf2 = yyyymmddhhmm2 / 100;
+          const int outside =
+            yyyymmddhhf2 < yyyymmddhh1 || yyyymmddhhf1 > yyyymmddhh2;
+
+          if ( ! outside ) {
+
+            /* Reduce subset time range to within the file timestamp range: */
+
+            if ( yyyymmddhhf1 > yyyymmddhh1 ) {
+              yyyymmddhh1 = yyyymmddhhf1;
+            }
+
+            if ( yyyymmddhhf2 < yyyymmddhh2 ) {
+              yyyymmddhh2 = yyyymmddhhf2;
+            }
+
+            assert( yyyymmddhh1 <= yyyymmddhh2 );
 
             if ( changedDimensions ) {
               const int corners = arguments->corners;
-              const size_t variables = 3 + 8 * corners;
+              const size_t variables = 4 + 8 * corners;
               const size_t maskSize = size * sizeof (unsigned char);
               const size_t dataSize = variables * size * sizeof (double);
               const size_t bytes = dataSize + maskSize;
@@ -554,7 +592,8 @@ static void readData( Data* const data ) {
               if ( buffer ) {
                 longitudes   = buffer;
                 latitudes    = longitudes + size;
-                values       = latitudes  + size;
+                timestamps   = latitudes  + size;
+                values       = timestamps    + size;
 
                 if ( corners ) {
                   longitudesSW = values       + size;
@@ -577,16 +616,18 @@ static void readData( Data* const data ) {
             }
 
             if ( data->ok ) {
-              readCoordinatesAndValues( data, file, rows, columns,
-                                        longitudes, latitudes, values );
+              readCoordinatesAndTimestampsAndValues( data, file, rows, columns,
+                                                     longitudes, latitudes,
+                                                     timestamps, values );
             }
 
             closeFile( file );
             file = -1;
 
             if ( data->ok ) {
-              writeDataSubset( data, yyyymmddhhmm, rows, columns,
-                               longitudes, latitudes, values, mask,
+              writeDataSubset( data, yyyymmddhh1, yyyymmddhh2,
+                               rows, columns,
+                               longitudes, latitudes, timestamps, values, mask,
                                longitudesSW, longitudesSE,
                                longitudesNW, longitudesNE,
                                latitudesSW, latitudesSE,
@@ -596,21 +637,19 @@ static void readData( Data* const data ) {
                 wroteSomeData = 1;
               }
             }
-          }
+          } /* ! outside */
+        } /* if ( ok ) */
 
-          fileName = newline + 1;
-        }
+        fileName = newline + 1;
       } else {
         fileName = 0;
       }
     } while ( fileName ); /* End loop on listFile. */
 
-    free( listFileContent );
-    listFileContent = 0;
+    free( listFileContent ), listFileContent = 0;
 
     if ( data->tempFile ) { /* Done writing to temp file so close it: */
-      fclose( data->tempFile );
-      data->tempFile = 0;
+      fclose( data->tempFile ), data->tempFile = 0;
     }
   }
 
@@ -671,13 +710,14 @@ static void allocateTimestampsAndPoints( const char* const listFileContent,
   assert( data->points == 0 );
 
   {
-    const size_t lines = linesInString( listFileContent );
-    data->ok = lines != 0;
+    const size_t files = linesInString( listFileContent );
+    data->ok = files != 0;
 
-    if ( ! lines ) {
+    if ( ! files ) {
       fprintf(stderr, "\nInvalid list file '%s'.\n", data->arguments.listFile);
     } else {
-      const size_t bytes = lines * sizeof (long long);
+      enum { MAXIMUM_HOURS_PER_FILE = 24 }; /* UGLY HACK. */
+      const size_t bytes = files * MAXIMUM_HOURS_PER_FILE * sizeof (long long);
       data->yyyydddhhmm = malloc( bytes );
       data->points = data->yyyydddhhmm ? malloc( bytes ) : 0;
       data->ok = data->points != 0;
@@ -693,15 +733,20 @@ static void allocateTimestampsAndPoints( const char* const listFileContent,
 
 
 /******************************************************************************
-PURPOSE: swathFileTimestamp - Timestamp of swath file.
+PURPOSE: swathFileTimestamps - Starting and ending timestamps of file name.
 INPUTS:  const char* const fileName   Name of TROPOMI file.
-RETURNS: long long yyyymmddhhmm of file or 0 if failed and message on stderr.
+OUTPUTS: long long* const yyyymmddhhmm1  Starting timestamp of file name.
+         long long* const yyyymmddhhmm2  Ending timestamp of file name.
+RETURNS: int 1 or 0 if failed and message on stderr.
 NOTES: File names look like:
 S5P_OFFL_L2__NO2____20171128T163259_20171128T181628_00657_03_001108_20171220T145115.nc
+yyyymmddhhmm1 = 201711281632 and yyyymmddhhmm2 = 201711281816
 ******************************************************************************/
 
-static long long swathFileTimestamp( const char* const fileName ) {
-  long long result = 0;
+static int swathFileTimestamps( const char* const fileName,
+                                long long* const yyyymmddhhmm1,
+                                long long* const yyyymmddhhmm2 ) {
+  int result = 0;
   const char* const tags[] = {
       "_L2__NO2____",
       "_L2__HCHO___",
@@ -711,6 +756,8 @@ static long long swathFileTimestamp( const char* const fileName ) {
   const size_t count = sizeof tags / sizeof *tags;
   size_t index = 0;
   const char* s = 0;
+
+  *yyyymmddhhmm1 = *yyyymmddhhmm2 = 0;
 
   for ( index = 0; index < count && s == 0; ++index ) {
     const char* const tag = tags[ index ];
@@ -722,27 +769,44 @@ static long long swathFileTimestamp( const char* const fileName ) {
   }
 
   if ( s ) {
-    int c = 0;
+    int counter = 2;
 
-    /* Parse YYYYMMDD: */
+    while ( counter-- ) {
+      long long yyyymmddhhmm = 0;
+      int c = 0;
 
-    for ( c = 0; *s && *s != '_' && c < 8; ++c, ++s ) {
-      result = result * 10 + *s - '0';
-    }
+      /* Parse YYYYMMDD: */
 
-    /* Parse HHMM: */
-
-    if ( *s == 'T' ) {
-      ++s;
-
-      for ( c = 0; *s && *s != '_' && c < 4; ++c, ++s ) {
-        result = result * 10 + *s - '0';
+      for ( c = 0; *s && *s != '_' && c < 8; ++c, ++s ) {
+        yyyymmddhhmm = yyyymmddhhmm * 10 + *s - '0';
       }
+
+      /* Parse HHMM: */
+
+      if ( *s == 'T' ) {
+        ++s;
+
+        for ( c = 0; *s && *s != '_' && c < 4; ++c, ++s ) {
+          yyyymmddhhmm = yyyymmddhhmm * 10 + *s - '0';
+        }
+      }
+
+      if ( counter == 1 ) {
+        *yyyymmddhhmm1 = yyyymmddhhmm;
+      } else {
+        *yyyymmddhhmm2 = yyyymmddhhmm;
+      }
+
+      s += 3; /* Skip mm_ */
     }
   }
 
-  if ( ! isValidYYYYMMDDHHMM( result ) ) {
-    fprintf( stderr, "\nInvalid file name timestamp '%s'.\n", fileName );
+  result = isValidYYYYMMDDHHMM( *yyyymmddhhmm1 ) &&
+           isValidYYYYMMDDHHMM( *yyyymmddhhmm2 ) &&
+           *yyyymmddhhmm1 <= *yyyymmddhhmm2;
+
+  if ( ! result ) {
+    fprintf( stderr, "\nInvalid file name timestamps '%s'.\n", fileName );
     result = 0;
   }
 
@@ -760,7 +824,8 @@ INPUTS:  const char* const fileName    Name of file to check bounds/dims.
          size_t* const columns         Columns of data in previous file or 0.
 OUTPUTS: Data* const data              data->ok.
          int* const file               NetCDF file id of file.
-         long long* const yyyymmddhhmm Timestamp of file.
+         long long* const yyyymmddhhmm1 Starting timestamp of file.
+         long long* const yyyymmddhhmm2 Ending timestamp of file.
          size_t* const rows            Rows of data in file.
          size_t* const columns         Columns of data in file.
          size_t* const size            rows * columns.
@@ -769,19 +834,20 @@ RETURNS: int 1 if in domain else 0.
 ******************************************************************************/
 
 static int readFileInfo( const char* const fileName, const Bounds domain,
-                         int* const file, long long* const yyyymmddhhmm,
+                         int* const file,
+                         long long* const yyyymmddhhmm1,
+                         long long* const yyyymmddhhmm2,
                          size_t* const rows, size_t* const columns,
                          size_t* const size,
                          int* const changedDimensions ) {
 
   int result = 0;
   assert( fileName ); assert( *fileName ); assert( domain ), assert( file );
-  assert( yyyymmddhhmm );
+  assert( yyyymmddhhmm1 ); assert( yyyymmddhhmm2 );
   assert( rows ); assert( columns ); assert( size );
   assert( changedDimensions );
 
-  *yyyymmddhhmm = swathFileTimestamp( fileName );
-  result = *yyyymmddhhmm != 0;
+  result = swathFileTimestamps( fileName, yyyymmddhhmm1, yyyymmddhhmm2 );
   *changedDimensions = 0;
 
   if ( result ) {
@@ -832,7 +898,8 @@ static int readFileInfo( const char* const fileName, const Bounds domain,
 
 
 /******************************************************************************
-PURPOSE: readCoordinatesAndValues - Read lon-lats and variable data.
+PURPOSE: readCoordinatesAndTimestampsAndValues - Read lon-lats, point
+         timestamps and variable data.
 INPUTS:  Data* const data              data->arguments.variable
          const int file                NetCDF file id of file to read.
          const size_t rows             Rows of data to read.
@@ -840,44 +907,54 @@ INPUTS:  Data* const data              data->arguments.variable
 OUTPUTS: Data* const data              data->ok, data->units[ 80 ]
          double* const longitudes[ rows * columns ]  Longitudes read.
          double* const latitudes[  rows * columns ]  Latitudes read.
+         double* const timestamps[ rows * columns ]  Point timestamps read.
          double* const values[     rows * columns ]  Values read.
 ******************************************************************************/
 
-static void readCoordinatesAndValues( Data* const data,
-                                      const int file,
-                                      const size_t rows,
-                                      const size_t columns,
-                                      double* const longitudes,
-                                      double* const latitudes,
-                                      double* const values ) {
+static void readCoordinatesAndTimestampsAndValues( Data* const data,
+                                                   const int file,
+                                                   const size_t rows,
+                                                   const size_t columns,
+                                                   double* const longitudes,
+                                                   double* const latitudes,
+                                                   double* const timestamps,
+                                                   double* const values ) {
 
   char unused[ 80 ] = "";
 
   assert( data ); assert( data->ok ); assert( data->arguments.variable );
   assert( file > -1 );
   assert( rows != 0 ); assert( columns != 0 );
-  assert( longitudes ); assert( latitudes ); assert( values );
+  assert( longitudes ); assert( latitudes ); assert( timestamps );
+  assert( values );
 
   data->ok =
     readFileData( file, "longitude", rows, columns,
-                  100, -1, -1, 1.0, 0, unused, longitudes );
+                  0, -1, -1, 1.0, 0, unused, longitudes );
 
   if ( data->ok ) {
     data->ok =
       readFileData( file, "latitude", rows, columns,
-                    100, -1, -1, 1.0, 0, unused, latitudes );
+                    0, -1, -1, 1.0, 0, unused, latitudes );
 
     if ( data->ok ) {
       data->ok = clampInvalidCoordinates(rows * columns, longitudes, latitudes);
 
       if ( data->ok ) {
-        data->ok = readFileData( file, data->arguments.variable, rows, columns,
-                                 data->arguments.minimumQuality,
-                                 data->arguments.minimumGroundPixel,
-                                 data->arguments.maximumGroundPixel,
-                                 data->arguments.maximumCloudFraction,
-                                 data->arguments.allowNegativeCounts,
-                                 data->units, values );
+        data->ok =
+          readFileData( file, "delta_time", rows, columns,
+                        0, -1, -1, 1.0, 0, unused, timestamps );
+
+        if ( data->ok ) {
+          data->ok = readFileData( file, data->arguments.variable,
+                                   rows, columns,
+                                   data->arguments.minimumQuality,
+                                   data->arguments.minimumGroundPixel,
+                                   data->arguments.maximumGroundPixel,
+                                   data->arguments.maximumCloudFraction,
+                                   data->arguments.allowNegativeCounts,
+                                   data->units, values );
+        }
       }
     }
   }
@@ -888,11 +965,13 @@ static void readCoordinatesAndValues( Data* const data,
 /******************************************************************************
 PURPOSE: writeDataSubset - Write subset of data (and corners) to temp file.
 INPUTS:  Data* const data                     Data description.
-         const long long yyyymmddhhmm         File timestamp.
+         const int yyyymmddhh1                First timestamp of subset.
+         const int yyyymmddhh2                Last timestamp of subset.
          const size_t rows                    Rows of input data points.
          const size_t columns                 Columns of input data points.
          const double longitudes[   points ]  Longitudes to write.
          const double latitudes[    points ]  Latitudes to write.
+         const double timestamps[   points ]  Pixel timestamps since 1970.
          const double values[       points ]  Values to write.
 OUTPUTS: const unsigned char mask[  points ]  Subset mask.
          double longitudesSW[ points ]  0 or computed corners to written.
@@ -907,11 +986,13 @@ OUTPUTS: Data* data  data->ok.
 ******************************************************************************/
 
 static void writeDataSubset( Data* const data,
-                             const long long yyyymmddhhmm,
+                             const int yyyymmddhh1,
+                             const int yyyymmddhh2,
                              const size_t rows,
                              const size_t columns,
                              const double longitudes[],
                              const double latitudes[],
+                             const double timestamps[],
                              const double values[],
                              unsigned char mask[],
                              double longitudesSW[],
@@ -923,14 +1004,23 @@ static void writeDataSubset( Data* const data,
                              double latitudesNW[],
                              double latitudesNE[] ) {
 
+  const size_t points = rows * columns;
+  size_t subsetPoints = 0;
+  size_t totalSubsetPoints = 0;
+
   assert( data ); assert( data->ok );
-  assert( isValidYYYYMMDDHHMM( yyyymmddhhmm ) );
-  assert( rows != 0 ); assert( columns != 0 ); assert( mask );
-  assert( longitudes ); assert( latitudes ); assert( values );
+  assert( isValidYYYYMMDDHH( yyyymmddhh1 ) );
+  assert( isValidYYYYMMDDHH( yyyymmddhh2 ) );
+  assert( yyyymmddhh1 <= yyyymmddhh2 );
+  assert( rows != 0 ); assert( columns != 0 );
+  assert( longitudes ); assert( latitudes );
+  assert( timestamps ); assert( values );
+  assert( mask );
+
+  /* Compute initial (spatial) mask values, 0 or 1: */
 
   {
-    const size_t points = rows * columns;
-    const size_t subsetPoints =
+    subsetPoints =
       pointsInDomain( (const double (*)[2]) data->arguments.domain,
                       points, longitudes, latitudes, values, mask );
 
@@ -943,15 +1033,73 @@ static void writeDataSubset( Data* const data,
                         latitudesSW, latitudesSE,
                         latitudesNW, latitudesNE );
       }
-
-      writeSubset( data, yyyymmddhhmm, subsetPoints, points,
-                   mask, longitudes, latitudes, values,
-                   longitudesSW, longitudesSE,
-                   longitudesNW, longitudesNE,
-                   latitudesSW, latitudesSE,
-                   latitudesNW, latitudesNE );
     }
   }
+
+  if ( subsetPoints ) {
+    enum {
+      SECONDS_PER_MINUTE = 60,
+      MINUTES_PER_HOUR = 60,
+      SECONDS_PER_HOUR = SECONDS_PER_MINUTE * MINUTES_PER_HOUR
+    };
+    int yyyymmddhh = yyyymmddhh1;
+    int maskTarget = 2; /* Set matched hour non-zero mask = maskTarget. */
+
+    while ( yyyymmddhh <= yyyymmddhh2 ) {
+      const long long seconds1 = secondsFrom1970( (int) yyyymmddhh );
+      const long long seconds2 = seconds1 + SECONDS_PER_HOUR - 1;
+      long long yyyymmddhhmm = 0;
+      size_t point = 0;
+      subsetPoints = 0;
+
+      /*
+       * Reduce mask to hour-matched subset (1 becomes markTarget 2, 3,...)
+       * and use first hour-matched point timestamp as the swath timestamp:
+       */
+
+      for ( point = 0; point < points; ++point ) {
+        const unsigned char m = mask[ point ];
+
+        if ( m  == 1 ) {
+          const double dseconds = timestamps[ point ];
+          const long long seconds = dseconds;
+          const int pointMatchesHour =
+            seconds >= seconds1 && seconds <= seconds2;
+
+          if ( pointMatchesHour ) {
+            mask[ point ] = maskTarget;
+            ++subsetPoints;
+
+            if ( yyyymmddhhmm == 0 ) {
+              yyyymmddhhmm = yyyymmddhhmmFromSeconds( seconds );
+              assert( yyyymmddhhmm / 100 == yyyymmddhh );
+            }
+          }
+        }
+      }
+
+      if ( yyyymmddhhmm ) {
+        writeSubset( data, yyyymmddhhmm, subsetPoints, points,
+                     mask, maskTarget, longitudes, latitudes, values,
+                     longitudesSW, longitudesSE,
+                     longitudesNW, longitudesNE,
+                     latitudesSW, latitudesSE,
+                     latitudesNW, latitudesNE );
+
+        if ( data->ok ) {
+          totalSubsetPoints += subsetPoints;
+        }
+      }
+
+      yyyymmddhh = incrementHours( yyyymmddhh, 1 );
+
+      if ( subsetPoints ) {
+        ++maskTarget;
+      }
+    }
+  }
+
+  data->ok = totalSubsetPoints > 0;
 }
 
 
@@ -964,6 +1112,7 @@ INPUTS:  Data* const data                     Data description.
          const size_t subsetPoints            Points in subset domain.
          const size_t points                  Input data points.
          const unsigned char mask[  points ]  Subset mask.
+         const int maskTarget                 Subset mask value to match.
          const double longitudes[   points ]  Longitudes to write.
          const double latitudes[    points ]  Latitudes to write.
          const double values[       points ]  Values to write.
@@ -983,6 +1132,7 @@ static void writeSubset( Data* const data,
                          const size_t subsetPoints,
                          const size_t points,
                          const unsigned char mask[],
+                         const int maskTarget,
                          const double longitudes[],
                          const double latitudes[],
                          const double values[],
@@ -998,6 +1148,7 @@ static void writeSubset( Data* const data,
   assert( data );
   assert( isValidYYYYMMDDHHMM( yyyymmddhhmm ) );
   assert( subsetPoints != 0 ); assert( points != 0 ); assert( mask );
+  assert( maskTarget > 1 );
   assert( longitudes ); assert( latitudes ); assert( values );
 
   /* Open temp file for writing if it does not yet exist: */
@@ -1063,7 +1214,7 @@ static void writeSubset( Data* const data,
       for ( point = 0; point < points; ++point ) {
         const int m = mask[ point ];
 
-        if ( m ) {
+        if ( m == maskTarget ) {
           subsetLongitudes[ outputPoints ] = longitudes[ point ];
           subsetLatitudes[  outputPoints ] = latitudes[  point ];
           subsetValues[     outputPoints ] = values[     point ];

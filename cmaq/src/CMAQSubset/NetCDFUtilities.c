@@ -42,13 +42,13 @@ int printM3IOVariables( const char* const name ) {
   typedef char VariableName[ NAME_SIZE ];
   enum { MAXIMUM_VARIABLES = 512 };
   static VariableName listing[ MAXIMUM_VARIABLES ]; /* 16KB. */
-  size_t count = 0;
   int result = 0;
   const int file = openNetCDFFile( name, 'r' );
 
   if ( file ) {
     int variables = 0;
     int status = nc_inq_nvars( file, &variables );
+    size_t count = 0;
 
     if ( status != NC_NOERR ) {
       const char* const message = nc_strerror( status );

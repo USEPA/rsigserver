@@ -1,0 +1,113 @@
+#!/bin/csh -f
+
+echo ; echo TEST landuse ; echo
+
+if ( 0 ) then
+
+sleep 2 ; echo ; echo TEST GetCapabilities ; echo
+curl --silent --retry 0 'https://maple.hesc.epa.gov/rsig/rsigserver?SERVICE=wcs&VERSION=1.0.0&REQUEST=GetCapabilities' > junk ; head junk ; echo '...' ; grep -i landuse junk
+
+sleep 2 ; echo ; echo TEST DescribeCoverage ; echo
+curl --silent --retry 0 'https://maple.hesc.epa.gov/rsig/rsigserver?SERVICE=wcs&VERSION=1.0.0&REQUEST=DescribeCoverage' > junk ; head junk ; echo '...' ; grep -i landuse junk
+
+endif
+
+
+
+# DescribeCoverage:
+
+sleep 2 ; echo ; echo TEST DescribeCoverage landuse.atlantic.elevation ; echo
+curl --silent --retry 0 'https://maple.hesc.epa.gov/rsig/rsigserver?SERVICE=wcs&VERSION=1.0.0&REQUEST=DescribeCoverage&COVERAGE=landuse.atlantic.elevation' > junk ; echo $? ; cat junk
+
+sleep 2 ; echo ; echo TEST DescribeCoverage landuse.atlantic.elevation ; echo
+curl --silent --retry 0 'https://maple.hesc.epa.gov/rsig/rsigserver?SERVICE=wcs&VERSION=1.0.0&REQUEST=DescribeCoverage' | grep landuse | grep '^        <name>' > junk ; echo $? ; cat junk
+
+
+
+
+# GetMetadata:
+
+sleep 2 ; echo ; echo TEST GetMetadata landuse.atlantic.elevation ; echo
+curl --silent --retry 0 'https://maple.hesc.epa.gov/rsig/rsigserver?SERVICE=wcs&VERSION=1.0.0&REQUEST=GetMetadata&COVERAGE=landuse.atlantic.elevation&FORMAT=original&TIME=2023-04-15T00:00:00Z/2023-04-15T23:59:59Z&BBOX=-85,25,-80,30' > junk ; echo $? ; cat junk
+
+
+
+
+# Original:
+
+#sleep 2 ; echo ; echo TEST landuse.atlantic.elevation original ; echo
+#curl --silent --retry 0 'https://maple.hesc.epa.gov/rsig/rsigserver?SERVICE=wcs&VERSION=1.0.0&REQUEST=GetCoverage&COVERAGE=landuse.atlantic.elevation&FORMAT=original&TIME=2023-04-15T00:00:00Z/2023-04-15T23:59:59Z&BBOX=-85,25,-80,30' > junk ; echo $? ; tar -ztf junk
+
+
+
+
+# bin:
+
+set coverages = ( \
+  Atlantic.states \
+  Atlantic.sediment_calculated \
+  Atlantic.soil \
+  Atlantic.coastal_vulnerability \
+  Atlantic.groundwater_contact_watershed \
+  Atlantic.elevation \
+  elevation_tampa_bay_fl_mhw \
+  Atlantic.seagrass \
+  Atlantic.seagrass_point \
+  Atlantic.seagrass_point2 \
+  Atlantic.seagrass_polygon \
+  meris_weekly_cyanobacteria_fl \
+  Atlantic.wetlands \
+  Atlantic.monthly_precipitation_mean \
+  Atlantic.population_iclus1 \
+  Atlantic.land_use_nlcd_2011_watershed \
+  Atlantic.total_nitrogen.estuary_cmaq \
+  Atlantic.total_nitrogen.subestuary_cmaq \
+  Atlantic.nadp.gridded.annual_wet_totn \
+  Atlantic.nitrogen.source_gridded.crops \
+  Atlantic.nitrogen.source_watershed_point \
+  Atlantic.nitrogen.load_estuary_sparrow_1992 \
+  Atlantic.yearly.stream_discharge_usgs_point \
+  Atlantic.sensitivity_estuary \
+  Atlantic.yearly.tide_point \
+  Atlantic.yearly.estuary_flushing_FFM \
+  hspf_blackstone10_huc10_point.hydrology \
+  hspf_blackstone10_huc10_polygon.hydrology \
+  greenspace_housing \
+  flowlines_puget_sound_watershed \
+  discharge_points_federal_puget_sound_watershed \
+  wwtp_baseline_removal.csv \
+)
+
+foreach coverage ( $coverages )
+  sleep 2 ; echo ; echo TEST bin landuse.$coverage ; echo
+
+  @ is_seagrass = `echo $coverage | awk '{ i = index( $0, "seagrass_p" ) != 0; print i }'`
+  @ is_hspf = `echo $coverage | awk '{ i = index( $0, "hspf" ) != 0; print i }'`
+
+  if ( $is_seagrass ) then
+    set estcode_option = ''
+
+    if ( $coverage == 'Atlantic.seagrass_point2' || $coverage == 'Atlantic.seagrass_polygon' ) then
+      set estcode = '&ESTCODE=FLOR'
+    endif
+
+    curl --silent --retry 0 "https://maple.hesc.epa.gov/rsig/rsigserver?SERVICE=wcs&VERSION=1.0.0&REQUEST=GetCoverage&COVERAGE=landuse.$coverage&FORMAT=bin&TIME=2009-07-01T00:00:00Z/2009-07-01T23:59:59Z&BBOX=-180,-90,180,90#estcode_option" > junk ; echo $? ; head -1 junk
+  else if ( $coverage == 'Atlantic.meris_weekly_cyanobacteria_fl' ) then
+    curl --silent --retry 0 "https://maple.hesc.epa.gov/rsig/rsigserver?SERVICE=wcs&VERSION=1.0.0&REQUEST=GetCoverage&COVERAGE=landuse.$coverage&FORMAT=bin&TIME=2009-07-01T00:00:00Z/2009-07-01T23:59:59Z&BBOX=-85,25,-80,30" > junk ; echo $? ; head -1 junk
+  else if ( $coverage == 'greenspace_housing' ) then
+    curl --silent --retry 0 "https://maple.hesc.epa.gov/rsig/rsigserver?SERVICE=wcs&VERSION=1.0.0&REQUEST=GetCoverage&COVERAGE=landuse.$coverage&FORMAT=bin&TIME=2009-07-01T00:00:00Z/2009-07-01T23:59:59Z&BBOX=-180,-90,180,90&HUC=31200011002" > junk ; echo $? ; head -1 junk
+  else if ( $is_hspf ) then
+    curl --silent --retry 0 "https://maple.hesc.epa.gov/rsig/rsigserver?SERVICE=wcs&VERSION=1.0.0&REQUEST=GetCoverage&COVERAGE=landuse.$coverage&FORMAT=bin&TIME=2009-07-01T00:00:00Z/2009-07-01T23:59:59Z&BBOX=-78.700068,34.899932,-64.499932,49.100068" > junk ; echo $? ; head -1 junk
+  else if ( $coverage == 'flowlines_puget_sound_watershed' ) then
+    curl --silent --retry 0 "https://maple.hesc.epa.gov/rsig/rsigserver?SERVICE=wcs&VERSION=1.0.0&REQUEST=GetCoverage&FORMAT=bin&COVERAGE=landuse.$coverage&TIME=2012-07-01T00:00:00Z/2012-07-01T23:59:59Z&BBOX=-123.5238,46.444,-120.6538,49.314&COMPRESS=1" | gzip -d  > junk ; echo $? ; head -1 junk
+  else if ( $coverage == 'discharge_points_federal_puget_sound_watershed' ) then
+    curl --silent --retry 0 "https://maple.hesc.epa.gov/rsig/rsigserver?SERVICE=wcs&VERSION=1.0.0&REQUEST=GetCoverage&FORMAT=bin&COVERAGE=landuse.$coverage&TIME=2012-07-01T00:00:00Z/2012-07-01T23:59:59Z&BBOX=-123.5238,46.444,-120.6538,49.314&COMPRESS=1" | gzip -d  > junk ; echo $? ; head -1 junk
+  else
+    curl --silent --retry 0 "https://maple.hesc.epa.gov/rsig/rsigserver?SERVICE=wcs&VERSION=1.0.0&REQUEST=GetCoverage&COVERAGE=landuse.$coverage&FORMAT=bin&TIME=2011-07-15T00:00:00Z/2011-07-15T23:59:59Z&BBOX=-85,25,-80,30&AGGREGATE=1116,mean&MINDIST=0.00604839" > junk ; echo $? ; head -1 junk
+  endif
+end
+
+
+
+/bin/rm -f junk
+echo ; echo DONE landuse ; echo

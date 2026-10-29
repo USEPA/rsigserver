@@ -51,7 +51,7 @@ my $server_path = 'https://YOUR_WEBSERVER_HOST/cgi-bin';
 
 my $bindir = '/rsig/current/code/bin/Linux.x86_64';
 
-#my $wget = "$bindir/wget -q -t 1 -T 0 -O - '";
+#my $wget = "/usr/bin/wget -q -t 1 -T 0 -O - '";
 my $wget = '/usr/bin/curl -k --silent --max-time 3600 --retry 0 -L --tcp-nodelay';
 
 my $wget_command =

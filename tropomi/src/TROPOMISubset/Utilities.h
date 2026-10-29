@@ -63,11 +63,17 @@ extern int isLeapYear( const int yyyy );
 
 extern int isValidYYYYMMDDHH( const int yyyymmddhh );
 
+extern int incrementHours( const int yyyymmddhh, const int hours );
+
 extern int isValidYYYYMMDDHHMM( const long long yyyymmddhhmm );
 
 extern int isValidYYYYDDDHHMM( const long long yyyymmddhhmm );
 
 extern long long convertTimestamp( const long long yyyymmddhhmm );
+
+extern long long secondsFrom1970( const int yyyymmddhh );
+
+extern long long yyyymmddhhmmFromSeconds( const long long seconds );
 
 extern int isValidBounds( const Bounds bounds );
 

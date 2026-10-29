@@ -1307,7 +1307,7 @@ int isNetCDFFile( const char* const name ) {
 
   if ( stat( name, &buffer ) == 0 ) {
 
-    if ( buffer.st_size > 10000 ) { /* Minimal CMAQ file header size. */
+    if ( buffer.st_size > 5000 ) { /* Minimal CMAQ file header size. */
 #ifdef _WIN32
       const int onTape = 0;
 #else

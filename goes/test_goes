@@ -1,0 +1,91 @@
+#!/bin/csh -f
+
+echo ; echo TEST GOES ; echo
+
+if ( 0 ) then
+
+sleep 2 ; echo ; echo TEST GetCapabilities ; echo
+curl --silent --retry 0 'https://maple.hesc.epa.gov/rsig/rsigserver?SERVICE=wcs&VERSION=1.0.0&REQUEST=GetCapabilities' > junk ; head junk ; echo '...' ; grep -i goes junk
+
+sleep 2 ; echo ; echo TEST DescribeCoverage ; echo
+curl --silent --retry 0 'https://maple.hesc.epa.gov/rsig/rsigserver?SERVICE=wcs&VERSION=1.0.0&REQUEST=DescribeCoverage' > junk ; head junk ; echo '...' ; grep -i goes junk
+
+endif
+
+# DescribeCoverage:
+
+sleep 2 ; echo ; echo TEST DescribeCoverage goes.imager.calb ; echo
+curl --silent --retry 0 'https://maple.hesc.epa.gov/rsig/rsigserver?SERVICE=wcs&VERSION=1.0.0&REQUEST=DescribeCoverage&COVERAGE=goes.imager.calb' > junk ; echo $? ; cat junk
+
+sleep 2 ; echo ; echo TEST DescribeCoverage goes.daily_aod ; echo
+curl --silent --retry 0 'https://maple.hesc.epa.gov/rsig/rsigserver?SERVICE=wcs&VERSION=1.0.0&REQUEST=DescribeCoverage&COVERAGE=goes.sounder.ctp' > junk ; echo $? ; cat junk
+
+
+# GetMetadata:
+
+sleep 2 ; echo ; echo TEST GetMetadata goes.imager.calb ; echo
+curl --silent --retry 0 'https://maple.hesc.epa.gov/rsig/rsigserver?SERVICE=wcs&VERSION=1.0.0&REQUEST=GetMetadata&COVERAGE=goes.imager.calb&FORMAT=xdr&TIME=2013-09-01T00:00:00Z/2013-09-02T23:59:59Z&BBOX=-77,36,-75,38&CORNERS=1' > junk ; echo $? ; cat junk
+
+sleep 2 ; echo ; echo TEST GetMetadata goes.sounder.ctp ; echo
+curl --silent --retry 0 'https://maple.hesc.epa.gov/rsig/rsigserver?SERVICE=wcs&VERSION=1.0.0&REQUEST=GetMetadata&COVERAGE=goes.sounder.ctp&FORMAT=xdr&TIME=2013-09-01T00:00:00Z/2013-09-02T23:59:59Z&BBOX=-77,36,-75,38&CORNERS=1' > junk ; echo $? ; cat junk
+
+
+# Original:
+
+sleep 2 ; echo ; echo TEST goes.imager.calb original ; echo
+curl --silent --retry 0 'https://maple.hesc.epa.gov/rsig/rsigserver?SERVICE=wcs&VERSION=1.0.0&REQUEST=GetCoverage&COVERAGE=goes.imager.calb&FORMAT=original&TIME=2013-09-01T00:00:00Z/2013-09-02T23:59:59Z&BBOX=-77,36,-75,38&CORNERS=1' > junk ; echo $? ; tar -ztf junk
+
+sleep 2 ; echo ; echo TEST goes.sounder.ctp original ; echo
+curl --silent --retry 0 'https://maple.hesc.epa.gov/rsig/rsigserver?SERVICE=wcs&VERSION=1.0.0&REQUEST=GetCoverage&COVERAGE=goes.sounder.ctp&FORMAT=original&TIME=2013-09-01T00:00:00Z/2013-09-02T23:59:59Z&BBOX=-77,36,-75,38&CORNERS=1' > junk ; echo $? ; tar -ztf junk
+
+
+# XDR:
+
+sleep 2 ; echo ; echo TEST goes.imager.calb xdr ; echo
+curl --silent --retry 0 'https://maple.hesc.epa.gov/rsig/rsigserver?SERVICE=wcs&VERSION=1.0.0&REQUEST=GetCoverage&COVERAGE=goes.imager.calb&FORMAT=xdr&TIME=2013-09-01T00:00:00Z/2013-09-02T23:59:59Z&BBOX=-77,36,-75,38&CORNERS=1' > junk ; echo $? ; ~/bin/Linux.x86_64/xdrdump junk | head -30
+
+sleep 2 ; echo ; echo TEST goes.sounder.ctp xdr ; echo
+curl --silent --retry 0 'https://maple.hesc.epa.gov/rsig/rsigserver?SERVICE=wcs&VERSION=1.0.0&REQUEST=GetCoverage&COVERAGE=goes.sounder.ctp&FORMAT=xdr&TIME=2013-09-01T00:00:00Z/2013-09-02T23:59:59Z&BBOX=-77,36,-75,38&CORNERS=1' > junk ; echo $? ; ~/bin/Linux.x86_64/xdrdump junk | head -30
+
+sleep 2 ; echo ; echo TEST goes.sounder.ctp daily xdr; echo
+curl --silent --retry 0 'https://maple.hesc.epa.gov/rsig/rsigserver?SERVICE=wcs&VERSION=1.0.0&REQUEST=GetCoverage&COVERAGE=goes.sounder.ctp&FORMAT=xdr&TIME=2013-09-01T00:00:00Z/2013-09-02T23:59:59Z&BBOX=-77,36,-75,38&CORNERS=1&AGGREGATE=daily' > junk ; echo $? ; ~/bin/Linux.x86_64/xdrdump junk | head -30
+
+
+# ASCII:
+
+sleep 2 ; echo ; echo TEST goes.imager.calb ascii ; echo
+curl --silent --retry 0 'https://maple.hesc.epa.gov/rsig/rsigserver?SERVICE=wcs&VERSION=1.0.0&REQUEST=GetCoverage&COVERAGE=goes.imager.calb&FORMAT=ascii&TIME=2013-09-01T00:00:00Z/2013-09-02T23:59:59Z&BBOX=-77,36,-75,38&CORNERS=1' > junk ; echo $? ; head -30 junk
+
+sleep 2 ; echo ; echo TEST goes.sounder.ctp ascii ; echo
+curl --silent --retry 0 'https://maple.hesc.epa.gov/rsig/rsigserver?SERVICE=wcs&VERSION=1.0.0&REQUEST=GetCoverage&COVERAGE=goes.sounder.ctp&FORMAT=ascii&TIME=2013-09-01T00:00:00Z/2013-09-02T23:59:59Z&BBOX=-77,36,-75,38&CORNERS=1' > junk ; echo $? ; head -30 junk
+
+sleep 2 ; echo ; echo TEST goes.sounder.ctp daily ascii ; echo
+curl --silent --retry 0 'https://maple.hesc.epa.gov/rsig/rsigserver?SERVICE=wcs&VERSION=1.0.0&REQUEST=GetCoverage&COVERAGE=goes.sounder.ctp&FORMAT=ascii&TIME=2013-09-01T00:00:00Z/2013-09-02T23:59:59Z&BBOX=-77,36,-75,38&CORNERS=1&AGGREGATE=daily' > junk ; echo $? ; head -30 junk
+
+
+# NetCDF-COARDS:
+
+sleep 2 ; echo ; echo TEST goes.imager.calb netcdf-coards ; echo
+curl --silent --retry 0 'https://maple.hesc.epa.gov/rsig/rsigserver?SERVICE=wcs&VERSION=1.0.0&REQUEST=GetCoverage&COVERAGE=goes.imager.calb&FORMAT=netcdf-coards&TIME=2013-09-01T00:00:00Z/2013-09-02T23:59:59Z&BBOX=-77,36,-75,38&CORNERS=1' > junk ; echo $? ; ~/bin/Linux.x86_64/ncdump -h junk
+
+sleep 2 ; echo ; echo TEST goes.sounder.ctp netcdf-coards ; echo
+curl --silent --retry 0 'https://maple.hesc.epa.gov/rsig/rsigserver?SERVICE=wcs&VERSION=1.0.0&REQUEST=GetCoverage&COVERAGE=goes.sounder.ctp&FORMAT=netcdf-coards&TIME=2013-09-01T00:00:00Z/2013-09-02T23:59:59Z&BBOX=-77,36,-75,38&CORNERS=1' > junk ; echo $? ; ~/bin/Linux.x86_64/ncdump -h junk
+
+sleep 2 ; echo ; echo TEST goes.sounder.ctp daily netcdf-coards ; echo
+curl --silent --retry 0 'https://maple.hesc.epa.gov/rsig/rsigserver?SERVICE=wcs&VERSION=1.0.0&REQUEST=GetCoverage&COVERAGE=goes.sounder.ctp&FORMAT=netcdf-coards&TIME=2013-09-01T00:00:00Z/2013-09-02T23:59:59Z&BBOX=-77,36,-75,38&CORNERS=1&AGGREGATE=daily' > junk ; echo $? ; ~/bin/Linux.x86_64/ncdump -h junk
+
+
+# NetCDF-IOAPI:
+
+sleep 2 ; echo ; echo TEST goes.imager.calb netcdf-ioapi ; echo
+curl --silent --retry 0 'https://maple.hesc.epa.gov/rsig/rsigserver?SERVICE=wcs&VERSION=1.0.0&REQUEST=GetCoverage&COVERAGE=goes.imager.calb&FORMAT=netcdf-ioapi&TIME=2013-09-01T00:00:00Z/2013-09-02T23:59:59Z&BBOX=-77,36,-75,38&CORNERS=1&REGRID=weighted&LAMBERT=33,45,-97,40&ELLIPSOID=6370000,6370000&GRID=459,299,-2556000,-1728000,12000,12000&COMPRESS=1' | gzip -d > junk ; echo $? ; ~/bin/Linux.x86_64/ncdump -h junk
+
+sleep 2 ; echo ; echo TEST goes.sounder.ctp netcdf-ioapi ; echo
+curl --silent --retry 0 'https://maple.hesc.epa.gov/rsig/rsigserver?SERVICE=wcs&VERSION=1.0.0&REQUEST=GetCoverage&COVERAGE=goes.sounder.ctp&FORMAT=netcdf-ioapi&TIME=2013-09-01T00:00:00Z/2013-09-02T23:59:59Z&BBOX=-77,36,-75,38&CORNERS=1&REGRID=weighted&LAMBERT=33,45,-97,40&ELLIPSOID=6370000,6370000&GRID=459,299,-2556000,-1728000,12000,12000&COMPRESS=1' | gzip -d > junk ; echo $? ; ~/bin/Linux.x86_64/ncdump -h junk
+
+sleep 2 ; echo ; echo TEST goes.sounder.ctp daily netcdf-ioapi ; echo
+curl --silent --retry 0 'https://maple.hesc.epa.gov/rsig/rsigserver?SERVICE=wcs&VERSION=1.0.0&REQUEST=GetCoverage&COVERAGE=goes.sounder.ctp&FORMAT=netcdf-ioapi&TIME=2013-09-01T00:00:00Z/2013-09-02T23:59:59Z&BBOX=-77,36,-75,38&CORNERS=1&AGGREGATE=daily&REGRID=weighted&LAMBERT=33,45,-97,40&ELLIPSOID=6370000,6370000&GRID=459,299,-2556000,-1728000,12000,12000&COMPRESS=1' | gzip -d > junk ; echo $? ; ~/bin/Linux.x86_64/ncdump -h junk
+
+
+/bin/rm -f junk
+echo ; echo DONE GOES ; echo

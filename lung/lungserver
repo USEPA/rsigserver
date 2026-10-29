@@ -88,6 +88,13 @@ sub main {
 
   # UNIX: zero is success, non-zero is failure.
   debug( "exit $result" );
+
+  # Must return some bytes to avoid 30 second timeout delay when unsuccessful:
+
+  if ( $result != 0 ) {
+    print STDOUT "\nFAILED\n";
+  }
+
   exit $result;
 }
 
@@ -133,7 +140,7 @@ sub execute_command {
         print;
       }
 
-      close( the_pipe ) or die $!;
+      close( the_pipe );
       $result = $?;
     } else { # Child process.
       exec( $command ) or die "can't exec program: $!";

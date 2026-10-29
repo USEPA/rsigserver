@@ -12,6 +12,7 @@ STATUS: inchoate
 #include <assert.h>    /* For assert(). */
 #include <stdio.h>     /* For FILE, stderr, fprintf(). */
 #include <stdlib.h>    /* For malloc(), free(), abs(). */
+#include <string.h>    /* For strchr(). */
 #include <float.h>     /* For DBL_MAX. */
 #include <sys/types.h> /* For struct stat. */
 #include <sys/stat.h>  /* For stat(). */
@@ -862,7 +863,7 @@ void copyVectorComponent( const size_t count, const size_t components,
   assert( IN_RANGE( component, 0, components - 1 ) );
   assert( input ); assert( output );
 
-/* #pragma omp parallel for private( index2 ) */
+#pragma omp parallel for private( index2 )
 
   for ( index = 0, index2 = component; index < count;
         ++index, index2 += components ) {
@@ -1050,20 +1051,58 @@ void controlMToSpace( char* string ) {
 
 
 /******************************************************************************
-PURPOSE: spacesToUnderscores - Convert any ' ' characters to '_'.
+PURPOSE: filterUnits - Filter problematic characters from units.
 INPUTS:  char* string  String to filter.
 OUTPUTS: char* string  Filtered string.
 ******************************************************************************/
 
-void spacesToUnderscores( char* string ) {
-  char* s = 0;
+void filterUnits( char* string ) {
+  static const char* const filterThese = "()[]{}<>=,;:?@\\~|!&`'\"";
+  char* r = string;
+  char* w = string;
   assert( string );
 
-  for ( s = string; *s; ++s ) {
+  for ( ; *r; ++r ) {
+    const char c = *r;
 
-    if ( *s == ' ' ) {
-      *s = '_';
+    if ( c == '\260' && r[1] == 'C' ) {
+      *w++ = 'C';
+      r += 2;
+    } else if ( ( c == ' ' || c == '_' ) && r[1] == '\267' ) {
+      *w++ = '/';
+      r += 2;
+    } else if ( c == '\267' ) {
+      *w++ = '/';
+    } else if ( c == '\247' ) {
+      *w++ = '/';
+    } else if ( r[1] == '\210' ) {
+      *w++ = '^';
+    } else if ( r[1] == '\225' ) {
+      *w++ = '*';
+    } else if ( c == '\262' ) {
+      *w++ = '2';
+    } else if ( c == '\263' ) {
+      *w++ = '3';
+    } else if ( c == '\327' ) {
+      *w++ = '*';
+    } else if ( c == '\367' ) {
+      *w++ = '/';
+    } else if ( c == ' ' || c == '\t' ) {
+      *w++ = '_';
+    } else {
+      const int ok = c >= '#' && c <= 'z' && strchr( filterThese, c ) == 0;
+
+      if ( ok ) {
+        *w++ = c;
+      }
     }
+  }
+
+  *w = '\0';
+
+  if ( *string == '\0' ) {
+    string[ 0 ] = '-';
+    string[ 1 ] = '\0';
   }
 }
 

@@ -1,0 +1,242 @@
+#!/bin/csh -f
+
+echo ; echo TEST CMAQ ; echo
+
+if ( 0 ) then
+
+sleep 2 ; echo ; echo TEST GetCapabilities ; echo
+curl --silent --retry 0 'https://maple.hesc.epa.gov/rsig/rsigserver?SERVICE=wcs&VERSION=1.0.0&REQUEST=GetCapabilities' > junk ; head junk ; echo '...' ; grep -i cmaq junk
+
+sleep 2 ; echo ; echo TEST DescribeCoverage ; echo
+curl --silent --retry 0 'https://maple.hesc.epa.gov/rsig/rsigserver?SERVICE=wcs&VERSION=1.0.0&REQUEST=DescribeCoverage' > junk ; head junk ; echo '...' ; grep -i cmaq junk
+
+endif
+
+
+# DescribeCoverage:
+
+sleep 2 ; echo ; echo TEST DescribeCoverage equates.conus.aconc.air_dens ; echo
+curl --silent --retry 0 'https://maple.hesc.epa.gov/rsig/rsigserver?SERVICE=wcs&VERSION=1.0.0&REQUEST=DescribeCoverage&COVERAGE=cmaq.equates.conus.aconc.air_dens' > junk ; echo $? ; cat junk
+
+sleep 2 ; echo ; echo TEST DescribeCoverage equates.conus.aconc.air_dens,equates.conus.aconc.pm25 ; echo
+curl --silent --retry 0 'https://maple.hesc.epa.gov/rsig/rsigserver?SERVICE=wcs&VERSION=1.0.0&REQUEST=DescribeCoverage&COVERAGE=cmaq.equates.conus.aconc.air_dens,cmaq.equates.conus.aconc.pm25' > junk ; echo $? ; cat junk
+
+sleep 2 ; echo ; echo TEST DescribeCoverage equates.conus.lstaconc.daily_o3max8 ; echo
+curl --silent --retry 0 'https://maple.hesc.epa.gov/rsig/rsigserver?SERVICE=wcs&VERSION=1.0.0&REQUEST=DescribeCoverage&COVERAGE=cmaq.equates.conus.lstaconc.daily_o3max8' > junk ; echo $? ; cat junk
+
+sleep 2 ; echo ; echo TEST DescribeCoverage equates.hemi.metdot3d.wind ; echo
+curl --silent --retry 0 'https://maple.hesc.epa.gov/rsig/rsigserver?SERVICE=wcs&VERSION=1.0.0&REQUEST=DescribeCoverage&COVERAGE=cmaq.equates.hemi.metdot3d.wind' > junk ; echo $? ; cat junk
+
+sleep 2 ; echo ; echo TEST DescribeCoverage cdc.conus.pm25.pm25 ; echo
+curl --silent --retry 0 'https://maple.hesc.epa.gov/rsig/rsigserver?SERVICE=wcs&VERSION=1.0.0&REQUEST=DescribeCoverage&COVERAGE=cmaq.cdc.conus.pm25.pm25' > junk ; echo $? ; cat junk
+
+sleep 2 ; echo ; echo TEST DescribeCoverage cdc.east.pm25.pm25 ; echo
+curl --silent --retry 0 'https://maple.hesc.epa.gov/rsig/rsigserver?SERVICE=wcs&VERSION=1.0.0&REQUEST=DescribeCoverage&COVERAGE=cmaq.cdc.east.pm25.pm25' > junk ; echo $? ; cat junk
+
+sleep 2 ; echo ; echo TEST DescribeCoverage discover.conus.pm25.pm25 ; echo
+curl --silent --retry 0 'https://maple.hesc.epa.gov/rsig/rsigserver?SERVICE=wcs&VERSION=1.0.0&REQUEST=DescribeCoverage&COVERAGE=cmaq.discover.conus.pm25.pm25' > junk ; echo $? ; cat junk
+
+sleep 2 ; echo ; echo TEST DescribeCoverage discover.east.pm25.pm25 ; echo
+curl --silent --retry 0 'https://maple.hesc.epa.gov/rsig/rsigserver?SERVICE=wcs&VERSION=1.0.0&REQUEST=DescribeCoverage&COVERAGE=cmaq.discover.east.pm25.pm25' > junk ; echo $? ; cat junk
+
+sleep 2 ; echo ; echo TEST DescribeCoverage discover.md.pm25.pm25 ; echo
+curl --silent --retry 0 'https://maple.hesc.epa.gov/rsig/rsigserver?SERVICE=wcs&VERSION=1.0.0&REQUEST=DescribeCoverage&COVERAGE=cmaq.discover.md.pm25.pm25' > junk ; echo $? ; cat junk
+
+sleep 2 ; echo ; echo TEST DescribeCoverage listos.lis.metdot3d.wind ; echo
+curl --silent --retry 0 'https://maple.hesc.epa.gov/rsig/rsigserver?SERVICE=wcs&VERSION=1.0.0&REQUEST=DescribeCoverage&COVERAGE=cmaq.listos.lis.metdot3d.wind' > junk ; echo $? ; cat junk
+
+sleep 2 ; echo ; echo TEST DescribeCoverage oaqps.conus.integrated.o3 ; echo
+curl --silent --retry 0 'https://maple.hesc.epa.gov/rsig/rsigserver?SERVICE=wcs&VERSION=1.0.0&REQUEST=DescribeCoverage&COVERAGE=cmaq.oaqps.conus.integrated.o3&KEY=OAQPSST' > junk ; echo $? ; cat junk
+
+sleep 2 ; echo ; echo TEST DescribeCoverage wdt.conus.ddep.dd_oxn_tot ; echo
+curl --silent --retry 0 'https://maple.hesc.epa.gov/rsig/rsigserver?SERVICE=wcs&VERSION=1.0.0&REQUEST=DescribeCoverage&COVERAGE=cmaq.wdt.conus.ddep.dd_oxn_tot' > junk ; echo $? ; cat junk
+
+
+# GetMetadata:
+
+sleep 2 ; echo ; echo TEST GetMetadata equates.conus.aconc.air_dens ; echo
+curl --silent --retry 0 'https://maple.hesc.epa.gov/rsig/rsigserver?SERVICE=wcs&VERSION=1.0.0&REQUEST=GetMetadata&COVERAGE=cmaq.equates.conus.aconc.air_dens&FORMAT=xdr&TIME=2019-07-01T00:00:00Z/2019-07-02T23:59:59Z&BBOX=-74,40,-73,41' > junk ; echo $? ; cat junk
+
+sleep 2 ; echo ; echo TEST GetMetadata equates.conus.aconc.air_dens,equates.conus.aconc.pm25 ; echo
+curl --silent --retry 0 'https://maple.hesc.epa.gov/rsig/rsigserver?SERVICE=wcs&VERSION=1.0.0&REQUEST=GetMetadata&COVERAGE=cmaq.equates.conus.aconc.air_dens,cmaq.equates.conus.aconc.pm25&FORMAT=xdr&TIME=2019-07-01T00:00:00Z/2019-07-02T23:59:59Z&BBOX=-74,40,-73,41' > junk ; echo $? ; cat junk
+
+sleep 2 ; echo ; echo TEST GetMetadata equates.conus.lstaconc.daily_o3max8 ; echo
+curl --silent --retry 0 'https://maple.hesc.epa.gov/rsig/rsigserver?SERVICE=wcs&VERSION=1.0.0&REQUEST=GetMetadata&COVERAGE=cmaq.equates.conus.lstaconc.daily_o3max8&FORMAT=xdr&TIME=2019-07-01T00:00:00Z/2019-07-02T23:59:59Z&BBOX=-74,40,-73,41' > junk ; echo $? ; cat junk
+
+sleep 2 ; echo ; echo TEST GetMetadata equates.hemi.metdot3d.wind ; echo
+curl --silent --retry 0 'https://maple.hesc.epa.gov/rsig/rsigserver?SERVICE=wcs&VERSION=1.0.0&REQUEST=GetMetadata&COVERAGE=cmaq.equates.hemi.metdot3d.wind&FORMAT=xdr&TIME=2019-07-01T00:00:00Z/2019-07-02T23:59:59Z&BBOX=-74,40,-73,41' > junk ; echo $? ; cat junk
+
+sleep 2 ; echo ; echo TEST GetMetadata cdc.conus.pm25.pm25 ; echo
+curl --silent --retry 0 'https://maple.hesc.epa.gov/rsig/rsigserver?SERVICE=wcs&VERSION=1.0.0&REQUEST=GetMetadata&COVERAGE=cmaq.cdc.conus.pm25.pm25&FORMAT=xdr&TIME=2011-07-01T00:00:00Z/2011-07-02T23:59:59Z&BBOX=-74,40,-73,41' > junk ; echo $? ; cat junk
+
+sleep 2 ; echo ; echo TEST GetMetadata cdc.east.pm25.pm25 ; echo
+curl --silent --retry 0 'https://maple.hesc.epa.gov/rsig/rsigserver?SERVICE=wcs&VERSION=1.0.0&REQUEST=GetMetadata&COVERAGE=cmaq.cdc.east.pm25.pm25&FORMAT=xdr&TIME=2006-07-01T00:00:00Z/2006-07-02T23:59:59Z&BBOX=-74,40,-73,41' > junk ; echo $? ; cat junk
+
+sleep 2 ; echo ; echo TEST GetMetadata discover.conus.pm25.pm25 ; echo
+curl --silent --retry 0 'https://maple.hesc.epa.gov/rsig/rsigserver?SERVICE=wcs&VERSION=1.0.0&REQUEST=GetMetadata&COVERAGE=cmaq.discover.conus.pm25.pm25&FORMAT=xdr&TIME=2011-07-01T00:00:00Z/2011-07-02T23:59:59Z&BBOX=-74,40,-73,41' > junk ; echo $? ; cat junk
+
+sleep 2 ; echo ; echo TEST GetMetadata discover.east.pm25.pm25 ; echo
+curl --silent --retry 0 'https://maple.hesc.epa.gov/rsig/rsigserver?SERVICE=wcs&VERSION=1.0.0&REQUEST=GetMetadata&COVERAGE=cmaq.discover.east.pm25.pm25&FORMAT=xdr&TIME=2011-07-01T00:00:00Z/2011-07-02T23:59:59Z&BBOX=-74,40,-73,41' > junk ; echo $? ; cat junk
+
+sleep 2 ; echo ; echo TEST GetMetadata listos.lis.metdot3d.wind ; echo
+curl --silent --retry 0 'https://maple.hesc.epa.gov/rsig/rsigserver?SERVICE=wcs&VERSION=1.0.0&REQUEST=GetMetadata&COVERAGE=cmaq.listos.lis.metdot3d.wind&FORMAT=xdr&TIME=2018-07-01T00:00:00Z/2018-07-02T23:59:59Z&BBOX=-74,40,-73,41' > junk ; echo $? ; cat junk
+
+sleep 2 ; echo ; echo TEST GetMetadata oaqps.conus.integrated.o3 ; echo
+curl --silent --retry 0 'https://maple.hesc.epa.gov/rsig/rsigserver?SERVICE=wcs&VERSION=1.0.0&REQUEST=GetMetadata&COVERAGE=cmaq.oaqps.conus.integrated.o3&FORMAT=xdr&TIME=2022-07-01T00:00:00Z/2022-07-02T23:59:59Z&BBOX=-74,40,-73,41&KEY=OAQPSST' > junk ; echo $? ; cat junk
+
+sleep 2 ; echo ; echo TEST GetMetadata wdt.conus.ddep.dd_oxn_tot ; echo
+curl --silent --retry 0 'https://maple.hesc.epa.gov/rsig/rsigserver?SERVICE=wcs&VERSION=1.0.0&REQUEST=GetMetadata&COVERAGE=cmaq.wdt.conus.ddep.dd_oxn_tot&FORMAT=xdr&TIME=2012-07-01T00:00:00Z/2012-07-02T23:59:59Z&BBOX=-74,40,-73,41' > junk ; echo $? ; cat junk
+
+
+# Original:
+
+sleep 2 ; echo ; echo TEST equates.conus.aconc.air_dens xdr ; echo
+curl --silent --retry 0 'https://maple.hesc.epa.gov/rsig/rsigserver?SERVICE=wcs&VERSION=1.0.0&REQUEST=GetCoverage&COVERAGE=cmaq.equates.conus.aconc.air_dens&FORMAT=original&TIME=2019-07-01T00:00:00Z/2019-07-02T23:59:59Z&BBOX=-74,40,-73,41' > junk ; echo $? ; tar -ztf junk
+
+
+# XDR:
+
+sleep 2 ; echo ; echo TEST equates.conus.aconc.air_dens xdr ; echo
+curl --silent --retry 0 'https://maple.hesc.epa.gov/rsig/rsigserver?SERVICE=wcs&VERSION=1.0.0&REQUEST=GetCoverage&COVERAGE=cmaq.equates.conus.aconc.air_dens&FORMAT=xdr&TIME=2019-07-01T00:00:00Z/2019-07-02T23:59:59Z&BBOX=-74,40,-73,41' > junk ; echo $? ; ~/bin/Linux.x86_64/xdrdump junk | head -30
+
+sleep 2 ; echo ; echo TEST equates.conus.aconc.air_dens,equates.conus.aconc.pm25 xdr ; echo
+curl --silent --retry 0 'https://maple.hesc.epa.gov/rsig/rsigserver?SERVICE=wcs&VERSION=1.0.0&REQUEST=GetCoverage&COVERAGE=cmaq.equates.conus.aconc.air_dens,cmaq.equates.conus.aconc.pm25&FORMAT=xdr&TIME=2019-07-01T00:00:00Z/2019-07-02T23:59:59Z&BBOX=-74,40,-73,41' > junk ; echo $? ; ~/bin/Linux.x86_64/xdrdump junk | head -30
+
+sleep 2 ; echo ; echo TEST equates.conus.lstaconc.daily_o3max8 xdr ; echo
+curl --silent --retry 0 'https://maple.hesc.epa.gov/rsig/rsigserver?SERVICE=wcs&VERSION=1.0.0&REQUEST=GetCoverage&COVERAGE=cmaq.equates.conus.lstaconc.daily_o3max8&FORMAT=xdr&TIME=2019-07-01T00:00:00Z/2019-07-02T23:59:59Z&BBOX=-74,40,-73,41' > junk ; echo $? ; ~/bin/Linux.x86_64/xdrdump junk | head -30
+
+sleep 2 ; echo ; echo TEST equates.hemi.metdot3d.wind xdr ; echo
+curl --silent --retry 0 'https://maple.hesc.epa.gov/rsig/rsigserver?SERVICE=wcs&VERSION=1.0.0&REQUEST=GetCoverage&COVERAGE=cmaq.equates.hemi.metdot3d.wind&FORMAT=xdr&TIME=2019-07-01T00:00:00Z/2019-07-02T23:59:59Z&BBOX=-74,40,-73,41' > junk ; echo $? ; ~/bin/Linux.x86_64/xdrdump junk | head -30
+
+sleep 2 ; echo ; echo TEST cdc.conus.pm25.pm25 xdr ; echo
+curl --silent --retry 0 'https://maple.hesc.epa.gov/rsig/rsigserver?SERVICE=wcs&VERSION=1.0.0&REQUEST=GetCoverage&COVERAGE=cmaq.cdc.conus.pm25.pm25&FORMAT=xdr&TIME=2011-07-01T00:00:00Z/2011-07-02T23:59:59Z&BBOX=-74,40,-73,41' > junk ; echo $? ; ~/bin/Linux.x86_64/xdrdump junk | head -30
+
+sleep 2 ; echo ; echo TEST cdc.east.pm25.pm25 xdr ; echo
+curl --silent --retry 0 'https://maple.hesc.epa.gov/rsig/rsigserver?SERVICE=wcs&VERSION=1.0.0&REQUEST=GetCoverage&COVERAGE=cmaq.cdc.east.pm25.pm25&FORMAT=xdr&TIME=2006-07-01T00:00:00Z/2006-07-02T23:59:59Z&BBOX=-74,40,-73,41' > junk ; echo $? ; ~/bin/Linux.x86_64/xdrdump junk | head -30
+
+sleep 2 ; echo ; echo TEST discover.conus.pm25.pm25 xdr ; echo
+curl --silent --retry 0 'https://maple.hesc.epa.gov/rsig/rsigserver?SERVICE=wcs&VERSION=1.0.0&REQUEST=GetCoverage&COVERAGE=cmaq.discover.conus.pm25.pm25&FORMAT=xdr&TIME=2011-07-01T00:00:00Z/2011-07-02T23:59:59Z&BBOX=-74,40,-73,41' > junk ; echo $? ; ~/bin/Linux.x86_64/xdrdump junk | head -30
+
+sleep 2 ; echo ; echo TEST discover.east.pm25.pm25 xdr ; echo
+curl --silent --retry 0 'https://maple.hesc.epa.gov/rsig/rsigserver?SERVICE=wcs&VERSION=1.0.0&REQUEST=GetCoverage&COVERAGE=cmaq.discover.east.pm25.pm25&FORMAT=xdr&TIME=2011-07-01T00:00:00Z/2011-07-02T23:59:59Z&BBOX=-74,40,-73,41' > junk ; echo $? ; ~/bin/Linux.x86_64/xdrdump junk | head -30
+
+sleep 2 ; echo ; echo TEST listos.lis.metdot3d.wind xdr ; echo
+curl --silent --retry 0 'https://maple.hesc.epa.gov/rsig/rsigserver?SERVICE=wcs&VERSION=1.0.0&REQUEST=GetCoverage&COVERAGE=cmaq.listos.lis.metdot3d.wind&FORMAT=xdr&TIME=2018-07-01T00:00:00Z/2018-07-02T23:59:59Z&BBOX=-74,40,-73,41' > junk ; echo $? ; ~/bin/Linux.x86_64/xdrdump junk | head -30
+
+sleep 2 ; echo ; echo TEST oaqps.conus.integrated.o3 xdr ; echo
+curl --silent --retry 0 'https://maple.hesc.epa.gov/rsig/rsigserver?SERVICE=wcs&VERSION=1.0.0&REQUEST=GetCoverage&COVERAGE=cmaq.oaqps.conus.integrated.o3&FORMAT=xdr&TIME=2022-07-01T00:00:00Z/2022-07-02T23:59:59Z&BBOX=-74,40,-73,41&KEY=OAQPSST' > junk ; echo $? ; ~/bin/Linux.x86_64/xdrdump junk | head -30
+
+sleep 2 ; echo ; echo TEST wdt.conus.ddep.dd_oxn_tot xdr ; echo
+curl --silent --retry 0 'https://maple.hesc.epa.gov/rsig/rsigserver?SERVICE=wcs&VERSION=1.0.0&REQUEST=GetCoverage&COVERAGE=cmaq.wdt.conus.ddep.dd_oxn_tot&FORMAT=xdr&TIME=2012-07-01T00:00:00Z/2012-07-02T23:59:59Z&BBOX=-74,40,-73,41' > junk ; echo $? ; ~/bin/Linux.x86_64/xdrdump junk | head -30
+
+
+# ASCII:
+
+sleep 2 ; echo ; echo TEST equates.conus.aconc.air_dens ascii ; echo
+curl --silent --retry 0 'https://maple.hesc.epa.gov/rsig/rsigserver?SERVICE=wcs&VERSION=1.0.0&REQUEST=GetCoverage&COVERAGE=cmaq.equates.conus.aconc.air_dens&FORMAT=ascii&TIME=2019-07-01T00:00:00Z/2019-07-02T23:59:59Z&BBOX=-74,40,-73,41' > junk ; echo $? ; head -30 junk
+
+sleep 2 ; echo ; echo TEST equates.conus.aconc.air_dens,equates.conus.aconc.pm25 ascii ; echo
+curl --silent --retry 0 'https://maple.hesc.epa.gov/rsig/rsigserver?SERVICE=wcs&VERSION=1.0.0&REQUEST=GetCoverage&COVERAGE=cmaq.equates.conus.aconc.air_dens,cmaq.equates.conus.aconc.pm25&FORMAT=ascii&TIME=2019-07-01T00:00:00Z/2019-07-02T23:59:59Z&BBOX=-74,40,-73,41' > junk ; echo $? ; head -30 junk
+
+sleep 2 ; echo ; echo TEST equates.conus.lstaconc.daily_o3max8 ascii ; echo
+curl --silent --retry 0 'https://maple.hesc.epa.gov/rsig/rsigserver?SERVICE=wcs&VERSION=1.0.0&REQUEST=GetCoverage&COVERAGE=cmaq.equates.conus.lstaconc.daily_o3max8&FORMAT=ascii&TIME=2019-07-01T00:00:00Z/2019-07-02T23:59:59Z&BBOX=-74,40,-73,41' > junk ; echo $? ; head -30 junk
+
+sleep 2 ; echo ; echo TEST equates.hemi.metdot3d.wind ascii ; echo
+curl --silent --retry 0 'https://maple.hesc.epa.gov/rsig/rsigserver?SERVICE=wcs&VERSION=1.0.0&REQUEST=GetCoverage&COVERAGE=cmaq.equates.hemi.metdot3d.wind&FORMAT=ascii&TIME=2019-07-01T00:00:00Z/2019-07-02T23:59:59Z&BBOX=-74,40,-73,41' > junk ; echo $? ; head -30 junk
+
+sleep 2 ; echo ; echo TEST cdc.conus.pm25.pm25 ascii ; echo
+curl --silent --retry 0 'https://maple.hesc.epa.gov/rsig/rsigserver?SERVICE=wcs&VERSION=1.0.0&REQUEST=GetCoverage&COVERAGE=cmaq.cdc.conus.pm25.pm25&FORMAT=ascii&TIME=2011-07-01T00:00:00Z/2011-07-02T23:59:59Z&BBOX=-74,40,-73,41' > junk ; echo $? ; head -30 junk
+
+sleep 2 ; echo ; echo TEST cdc.east.pm25.pm25 ascii ; echo
+curl --silent --retry 0 'https://maple.hesc.epa.gov/rsig/rsigserver?SERVICE=wcs&VERSION=1.0.0&REQUEST=GetCoverage&COVERAGE=cmaq.cdc.east.pm25.pm25&FORMAT=ascii&TIME=2006-07-01T00:00:00Z/2006-07-02T23:59:59Z&BBOX=-74,40,-73,41' > junk ; echo $? ; head -30 junk
+
+sleep 2 ; echo ; echo TEST discover.conus.pm25.pm25 ascii ; echo
+curl --silent --retry 0 'https://maple.hesc.epa.gov/rsig/rsigserver?SERVICE=wcs&VERSION=1.0.0&REQUEST=GetCoverage&COVERAGE=cmaq.discover.conus.pm25.pm25&FORMAT=ascii&TIME=2011-07-01T00:00:00Z/2011-07-02T23:59:59Z&BBOX=-74,40,-73,41' > junk ; echo $? ; head -30 junk
+
+sleep 2 ; echo ; echo TEST discover.east.pm25.pm25 ascii ; echo
+curl --silent --retry 0 'https://maple.hesc.epa.gov/rsig/rsigserver?SERVICE=wcs&VERSION=1.0.0&REQUEST=GetCoverage&COVERAGE=cmaq.discover.east.pm25.pm25&FORMAT=ascii&TIME=2011-07-01T00:00:00Z/2011-07-02T23:59:59Z&BBOX=-74,40,-73,41' > junk ; echo $? ; head -30 junk
+
+sleep 2 ; echo ; echo TEST listos.lis.metdot3d.wind ascii ; echo
+curl --silent --retry 0 'https://maple.hesc.epa.gov/rsig/rsigserver?SERVICE=wcs&VERSION=1.0.0&REQUEST=GetCoverage&COVERAGE=cmaq.listos.lis.metdot3d.wind&FORMAT=ascii&TIME=2018-07-01T00:00:00Z/2018-07-02T23:59:59Z&BBOX=-74,40,-73,41' > junk ; echo $? ; head -30 junk
+
+sleep 2 ; echo ; echo TEST oaqps.conus.integrated.o3 ascii ; echo
+curl --silent --retry 0 'https://maple.hesc.epa.gov/rsig/rsigserver?SERVICE=wcs&VERSION=1.0.0&REQUEST=GetCoverage&COVERAGE=cmaq.oaqps.conus.integrated.o3&FORMAT=ascii&TIME=2022-07-01T00:00:00Z/2022-07-02T23:59:59Z&BBOX=-74,40,-73,41&KEY=OAQPSST' > junk ; echo $? ; head -30 junk
+
+sleep 2 ; echo ; echo TEST wdt.conus.ddep.dd_oxn_tot ascii ; echo
+curl --silent --retry 0 'https://maple.hesc.epa.gov/rsig/rsigserver?SERVICE=wcs&VERSION=1.0.0&REQUEST=GetCoverage&COVERAGE=cmaq.wdt.conus.ddep.dd_oxn_tot&FORMAT=ascii&TIME=2012-07-01T00:00:00Z/2012-07-02T23:59:59Z&BBOX=-74,40,-73,41' > junk ; echo $? ; head -30 junk
+
+
+# NetCDF-COARDS:
+
+sleep 2 ; echo ; echo TEST equates.conus.aconc.air_dens netcdf-coards ; echo
+curl --silent --retry 0 'https://maple.hesc.epa.gov/rsig/rsigserver?SERVICE=wcs&VERSION=1.0.0&REQUEST=GetCoverage&COVERAGE=cmaq.equates.conus.aconc.air_dens&FORMAT=netcdf-coards&TIME=2019-07-01T00:00:00Z/2019-07-02T23:59:59Z&BBOX=-74,40,-73,41' > junk ; echo $? ; ~/bin/Linux.x86_64/ncdump -h junk
+
+sleep 2 ; echo ; echo TEST equates.conus.aconc.air_dens,equates.conus.aconc.pm25 netcdf-coards ; echo
+curl --silent --retry 0 'https://maple.hesc.epa.gov/rsig/rsigserver?SERVICE=wcs&VERSION=1.0.0&REQUEST=GetCoverage&COVERAGE=cmaq.equates.conus.aconc.air_dens,cmaq.equates.conus.aconc.pm25&FORMAT=netcdf-coards&TIME=2019-07-01T00:00:00Z/2019-07-02T23:59:59Z&BBOX=-74,40,-73,41' > junk ; echo $? ; ~/bin/Linux.x86_64/ncdump -h junk
+
+sleep 2 ; echo ; echo TEST equates.conus.lstaconc.daily_o3max8 netcdf-coards ; echo
+curl --silent --retry 0 'https://maple.hesc.epa.gov/rsig/rsigserver?SERVICE=wcs&VERSION=1.0.0&REQUEST=GetCoverage&COVERAGE=cmaq.equates.conus.lstaconc.daily_o3max8&FORMAT=netcdf-coards&TIME=2019-07-01T00:00:00Z/2019-07-02T23:59:59Z&BBOX=-74,40,-73,41' > junk ; echo $? ; ~/bin/Linux.x86_64/ncdump -h junk
+
+sleep 2 ; echo ; echo TEST equates.hemi.metdot3d.wind netcdf-coards ; echo
+curl --silent --retry 0 'https://maple.hesc.epa.gov/rsig/rsigserver?SERVICE=wcs&VERSION=1.0.0&REQUEST=GetCoverage&COVERAGE=cmaq.equates.hemi.metdot3d.wind&FORMAT=netcdf-coards&TIME=2019-07-01T00:00:00Z/2019-07-02T23:59:59Z&BBOX=-74,40,-73,41' > junk ; echo $? ; ~/bin/Linux.x86_64/ncdump -h junk
+
+sleep 2 ; echo ; echo TEST cdc.conus.pm25.pm25 netcdf-coards ; echo
+curl --silent --retry 0 'https://maple.hesc.epa.gov/rsig/rsigserver?SERVICE=wcs&VERSION=1.0.0&REQUEST=GetCoverage&COVERAGE=cmaq.cdc.conus.pm25.pm25&FORMAT=netcdf-coards&TIME=2011-07-01T00:00:00Z/2011-07-02T23:59:59Z&BBOX=-74,40,-73,41' > junk ; echo $? ; ~/bin/Linux.x86_64/ncdump -h junk
+
+sleep 2 ; echo ; echo TEST cdc.east.pm25.pm25 netcdf-coards ; echo
+curl --silent --retry 0 'https://maple.hesc.epa.gov/rsig/rsigserver?SERVICE=wcs&VERSION=1.0.0&REQUEST=GetCoverage&COVERAGE=cmaq.cdc.east.pm25.pm25&FORMAT=netcdf-coards&TIME=2006-07-01T00:00:00Z/2006-07-02T23:59:59Z&BBOX=-74,40,-73,41' > junk ; echo $? ; ~/bin/Linux.x86_64/ncdump -h junk
+
+sleep 2 ; echo ; echo TEST discover.conus.pm25.pm25 netcdf-coards ; echo
+curl --silent --retry 0 'https://maple.hesc.epa.gov/rsig/rsigserver?SERVICE=wcs&VERSION=1.0.0&REQUEST=GetCoverage&COVERAGE=cmaq.discover.conus.pm25.pm25&FORMAT=netcdf-coards&TIME=2011-07-01T00:00:00Z/2011-07-02T23:59:59Z&BBOX=-74,40,-73,41' > junk ; echo $? ; ~/bin/Linux.x86_64/ncdump -h junk
+
+sleep 2 ; echo ; echo TEST discover.east.pm25.pm25 netcdf-coards ; echo
+curl --silent --retry 0 'https://maple.hesc.epa.gov/rsig/rsigserver?SERVICE=wcs&VERSION=1.0.0&REQUEST=GetCoverage&COVERAGE=cmaq.discover.east.pm25.pm25&FORMAT=netcdf-coards&TIME=2011-07-01T00:00:00Z/2011-07-02T23:59:59Z&BBOX=-74,40,-73,41' > junk ; echo $? ; ~/bin/Linux.x86_64/ncdump -h junk
+
+sleep 2 ; echo ; echo TEST listos.lis.metdot3d.wind netcdf-coards ; echo
+curl --silent --retry 0 'https://maple.hesc.epa.gov/rsig/rsigserver?SERVICE=wcs&VERSION=1.0.0&REQUEST=GetCoverage&COVERAGE=cmaq.listos.lis.metdot3d.wind&FORMAT=netcdf-coards&TIME=2018-07-01T00:00:00Z/2018-07-02T23:59:59Z&BBOX=-74,40,-73,41' > junk ; echo $? ; ~/bin/Linux.x86_64/ncdump -h junk
+
+sleep 2 ; echo ; echo TEST oaqps.conus.integrated.o3 netcdf-coards ; echo
+curl --silent --retry 0 'https://maple.hesc.epa.gov/rsig/rsigserver?SERVICE=wcs&VERSION=1.0.0&REQUEST=GetCoverage&COVERAGE=cmaq.oaqps.conus.integrated.o3&FORMAT=netcdf-coards&TIME=2022-07-01T00:00:00Z/2022-07-02T23:59:59Z&BBOX=-74,40,-73,41&KEY=OAQPSST' > junk ; echo $? ; ~/bin/Linux.x86_64/ncdump -h junk
+
+sleep 2 ; echo ; echo TEST wdt.conus.ddep.dd_oxn_tot netcdf-coards ; echo
+curl --silent --retry 0 'https://maple.hesc.epa.gov/rsig/rsigserver?SERVICE=wcs&VERSION=1.0.0&REQUEST=GetCoverage&COVERAGE=cmaq.wdt.conus.ddep.dd_oxn_tot&FORMAT=netcdf-coards&TIME=2012-07-01T00:00:00Z/2012-07-02T23:59:59Z&BBOX=-74,40,-73,41' > junk ; echo $? ; ~/bin/Linux.x86_64/ncdump -h junk
+
+
+# NetCDF-IOAPI:
+
+sleep 2 ; echo ; echo TEST equates.conus.aconc.air_dens netcdf-ioapi ; echo
+curl --silent --retry 0 'https://maple.hesc.epa.gov/rsig/rsigserver?SERVICE=wcs&VERSION=1.0.0&REQUEST=GetCoverage&FORMAT=netcdf-ioapi&TIME=2019-07-01T00:00:00Z/2019-07-02T23:59:59Z&BBOX=-74,40,-73,41&COVERAGE=cmaq.equates.conus.aconc.air_dens&COMPRESS=1' | gzip -d > junk ; echo $? ; ~/bin/Linux.x86_64/ncdump -h junk
+
+sleep 2 ; echo ; echo TEST equates.conus.aconc.air_dens,equates.conus.aconc.pm25 netcdf-ioapi ; echo
+curl --silent --retry 0 'https://maple.hesc.epa.gov/rsig/rsigserver?SERVICE=wcs&VERSION=1.0.0&REQUEST=GetCoverage&COVERAGE=cmaq.equates.conus.aconc.air_dens,cmaq.equates.conus.aconc.pm25&FORMAT=netcdf-ioapi&TIME=2019-07-01T00:00:00Z/2019-07-02T23:59:59Z&BBOX=-74,40,-73,41' > junk ; echo $? ; ~/bin/Linux.x86_64/ncdump -h junk
+
+sleep 2 ; echo ; echo TEST equates.conus.lstaconc.daily_o3max8 netcdf-ioapi ; echo
+curl --silent --retry 0 'https://maple.hesc.epa.gov/rsig/rsigserver?SERVICE=wcs&VERSION=1.0.0&REQUEST=GetCoverage&FORMAT=netcdf-ioapi&TIME=2019-07-01T00:00:00Z/2019-07-02T23:59:59Z&BBOX=-74,40,-73,41&COVERAGE=cmaq.equates.conus.lstaconc.daily_o3max8&COMPRESS=1' | gzip -d > junk ; echo $? ; ~/bin/Linux.x86_64/ncdump -h junk
+
+sleep 2 ; echo ; echo TEST equates.hemi.metdot3d.wind netcdf-ioapi ; echo
+curl --silent --retry 0 'https://maple.hesc.epa.gov/rsig/rsigserver?SERVICE=wcs&VERSION=1.0.0&REQUEST=GetCoverage&FORMAT=netcdf-ioapi&TIME=2019-07-01T00:00:00Z/2019-07-02T23:59:59Z&BBOX=-74,40,-73,41&COVERAGE=cmaq.equates.hemi.metdot3d.wind&COMPRESS=1' | gzip -d > junk ; echo $? ; ~/bin/Linux.x86_64/ncdump -h junk
+
+sleep 2 ; echo ; echo TEST cdc.conus.pm25.pm25 netcdf-ioapi ; echo
+curl --silent --retry 0 'https://maple.hesc.epa.gov/rsig/rsigserver?SERVICE=wcs&VERSION=1.0.0&REQUEST=GetCoverage&COVERAGE=cmaq.cdc.conus.pm25.pm25&FORMAT=netcdf-ioapi&TIME=2011-07-01T00:00:00Z/2011-07-02T23:59:59Z&BBOX=-74,40,-73,41&COMPRESS=1' | gzip -d > junk ; echo $? ; ~/bin/Linux.x86_64/ncdump -h junk
+
+sleep 2 ; echo ; echo TEST cdc.east.pm25.pm25 netcdf-ioapi ; echo
+curl --silent --retry 0 'https://maple.hesc.epa.gov/rsig/rsigserver?SERVICE=wcs&VERSION=1.0.0&REQUEST=GetCoverage&COVERAGE=cmaq.cdc.east.pm25.pm25&FORMAT=netcdf-ioapi&TIME=2006-07-01T00:00:00Z/2006-07-02T23:59:59Z&BBOX=-74,40,-73,41&COMPRESS=1' | gzip -d > junk ; echo $? ; ~/bin/Linux.x86_64/ncdump -h junk
+
+sleep 2 ; echo ; echo TEST discover.conus.pm25.pm25 netcdf-ioapi ; echo
+curl --silent --retry 0 'https://maple.hesc.epa.gov/rsig/rsigserver?SERVICE=wcs&VERSION=1.0.0&REQUEST=GetCoverage&COVERAGE=cmaq.discover.conus.pm25.pm25&FORMAT=netcdf-ioapi&TIME=2011-07-01T00:00:00Z/2011-07-02T23:59:59Z&BBOX=-74,40,-73,41&COMPRESS=1' | gzip -d > junk ; echo $? ; ~/bin/Linux.x86_64/ncdump -h junk
+
+sleep 2 ; echo ; echo TEST discover.east.pm25.pm25 netcdf-ioapi ; echo
+curl --silent --retry 0 'https://maple.hesc.epa.gov/rsig/rsigserver?SERVICE=wcs&VERSION=1.0.0&REQUEST=GetCoverage&COVERAGE=cmaq.discover.east.pm25.pm25&FORMAT=netcdf-ioapi&TIME=2011-07-01T00:00:00Z/2011-07-02T23:59:59Z&BBOX=-74,40,-73,41&COMPRESS=1' | gzip -d > junk ; echo $? ; ~/bin/Linux.x86_64/ncdump -h junk
+
+sleep 2 ; echo ; echo TEST listos.lis.metdot3d.wind netcdf-ioapi ; echo
+curl --silent --retry 0 'https://maple.hesc.epa.gov/rsig/rsigserver?SERVICE=wcs&VERSION=1.0.0&REQUEST=GetCoverage&COVERAGE=cmaq.listos.lis.metdot3d.wind&FORMAT=netcdf-ioapi&TIME=2018-07-01T00:00:00Z/2018-07-02T23:59:59Z&BBOX=-74,40,-73,41&COMPRESS=1' | gzip -d > junk ; echo $? ; ~/bin/Linux.x86_64/ncdump -h junk
+
+sleep 2 ; echo ; echo TEST oaqps.conus.integrated.o3 netcdf-ioapi ; echo
+curl --silent --retry 0 'https://maple.hesc.epa.gov/rsig/rsigserver?SERVICE=wcs&VERSION=1.0.0&REQUEST=GetCoverage&COVERAGE=cmaq.oaqps.conus.integrated.o3&FORMAT=netcdf-ioapi&TIME=2022-07-01T00:00:00Z/2022-07-02T23:59:59Z&BBOX=-74,40,-73,41&KEY=OAQPSST&COMPRESS=1' | gzip -d > junk ; echo $? ; ~/bin/Linux.x86_64/ncdump -h junk
+
+sleep 2 ; echo ; echo TEST wdt.conus.ddep.dd_oxn_tot netcdf-ioapi ; echo
+curl --silent --retry 0 'https://maple.hesc.epa.gov/rsig/rsigserver?SERVICE=wcs&VERSION=1.0.0&REQUEST=GetCoverage&COVERAGE=cmaq.wdt.conus.ddep.dd_oxn_tot&FORMAT=netcdf-ioapi&TIME=2012-07-01T00:00:00Z/2012-07-02T23:59:59Z&BBOX=-74,40,-73,41&COMPRESS=1' | gzip -d > junk ; echo $? ; ~/bin/Linux.x86_64/ncdump -h junk
+
+
+/bin/rm -f junk
+echo ; echo DONE CMAQ ; echo

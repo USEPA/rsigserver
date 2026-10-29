@@ -1,0 +1,193 @@
+#!/bin/csh -f
+
+###############################################################################
+# PURPOSE: update_location_info - Update data/location_info file.
+# NOTES:   data/locations_info file is sorted list of tab-delimited columns:
+#          locationid longitude latitude yyyymmdd_first yyyymmdd_last variable1(units1) variable2(units2)... description
+#          And will be read by opensqserver to filter based on BBOX and TIME
+#          and create a list file for input to OpenAQSubset.
+#          Uses key for account plessel.todd@epa.gov, PW: 4rsigasnatretigo
+#          Contact: dev@openaq.org
+#          https://docs.openaq.org
+# HISTORY: 2026-01-26 plessel.todd@epa.gov
+###############################################################################
+
+# Tunable variables:
+
+set CURL = '/usr/bin/curl -k --silent --retry 0'
+set key = '640a5398d3e750ee45c97bd176db4f3b4625d674f89e69af45f9be64c98d71ce'
+set locations_url = 'https://api.openaq.org/v3/locations?bbox=-180,-90,180,90&limit=1000'
+@ maximum_pages_to_attempt = 200
+@ minimum_valid_file_byte_size = 100
+set directory = /data/OpenAQ
+set temp_directory = /data/tmp
+set data_directory = $directory/data
+set location_info_file = $data_directory/location_info
+set location_info_file_temp = $location_info_file.temp
+set temp_awk_program = $temp_directory/extract_openaq_location_info.awk.$$
+
+###############################################################################
+
+# Get paged location files:
+
+touch $data_directory/locations_000.json
+rm $data_directory/locations_*.json
+
+echo "Retrieving paged location files from openaq webservice..."
+date -u
+
+@ page = 1
+while ( $page <= $maximum_pages_to_attempt )
+  set page0 = `printf "%03d" $page`
+  set output_file = $data_directory/locations_$page0.json
+  $CURL --header "X-API-Key: $key" "$locations_url&page=$page" > $output_file
+  @ bytes = 0
+
+  if ( $status == 0 ) then
+    ls -l $output_file
+    @ bytes = `ls  -l $output_file | awk ' { print $5 }'`
+  endif
+
+  if ( $bytes < $minimum_valid_file_byte_size ) then
+    echo "Removing invalid file $output_file"
+    rm $output_file
+    break
+  endif
+
+  @ page = $page + 1
+end
+
+date -u
+
+# Create temp AWK program to extract locationid yyyymmdd_first yyyymmdd_last
+# from the set of paged locationid json files:
+
+cat <<EOF> $temp_awk_program
+
+BEGIN {
+  id = 0;
+  sensor_type = "";
+  locationid = 0;
+  longitude = 0;
+  latitude = 0;
+  first_yyyymmdd = 0;
+  last_yyyymmdd = 0;
+  description = "";
+  name = "";
+  units = "";
+  variables = "";
+
+  id_tag1 = "\"results\":[{\"id\":";
+  id_tag1_length = length( id_tag1 );
+  id_tag2 = "{\"id\":";
+  latitude_tag = "\"coordinates\":{\"latitude\":";
+  latitude_tag_length = length( latitude_tag );
+  longitude_tag = "\"longitude\":";
+  longitude_tag_length = length( longitude_tag );
+  id_tag2_length = length( id_tag2 );
+  first_yyyymmdd_tag = "\"datetimeFirst\":{\"utc\":\"2";
+  last_yyyymmdd_tag = "\"datetimeLast\":{\"utc\":\"2";
+  first_yyyymmdd_null_tag = "\"datetimeFirst\":null";
+  last_yyyymmdd_null_tag = "\"datetimeLast\":null";
+  name_tag = "\"name\":\"";
+  name_tag_length = length( name_tag );
+  instruments_tag = "\"instruments\":";
+  units_tag = "\"units\":\"";
+  units_tag_length = length( units_tag );
+}
+
+{
+  if ( index( \$0, id_tag1 ) == 1 ) {
+    id = substr( \$0, id_tag1_length + 1 )
+  } else if ( index( \$0, id_tag2 ) == 1 ) {
+    id = substr( \$0, id_tag2_length + 1 )
+  } else if ( index( \$0, "\"timezone\":" ) == 1 ) {
+    locationid = id;
+    description = name
+  } else if ( index( \$0, name_tag ) == 1 ) {
+    name = substr( \$0, name_tag_length + 1 );
+    name = substr( name, 1, length( name ) - 1 )
+  } else if ( index( \$0, instruments_tag ) == 1 ) {
+    getline;
+    sensor_type = substr( \$0, 9 );
+
+    if ( index( sensor_type, "AirGradient" ) != 0 ) {
+      sensor_type = "AirGradient";
+    } else if ( index( sensor_type, "ABCD" ) != 0 ) {
+      sensor_type = "ABCD";
+    } else {
+      space = index( sensor_type, " " );
+
+      if ( space > 0 ) {
+        sensor_type = substr( sensor_type, 1, space - 1 );
+      } else {
+        quote = index( sensor_type, "\"" );
+        sensor_type = substr( sensor_type, 1, quote - 1 ); 
+      }
+
+      if ( index( sensor_type, "N/A" ) == 1 ) {
+        sensor_type = "";
+      }
+    }
+  } else if ( index( \$0, units_tag ) == 1 ) {
+    units = substr( \$0, units_tag_length + 1 );
+    units = substr( units, 1, length( units ) - 1 )
+    variables = variables name "(" units ") "
+  } else if ( index( \$0, latitude_tag ) == 1 ) {
+    latitude = substr( \$0, latitude_tag_length + 1 )
+  } else if ( index( \$0, longitude_tag ) == 1 ) {
+    longitude = substr( \$0, longitude_tag_length + 1 )
+  } else if ( index( \$0, first_yyyymmdd_tag ) == 1 ) {
+    first_yyyymmdd = substr( \$0, 25, 4 ) substr( \$0, 30, 2 ) substr( \$0, 33, 2 );
+  } else if ( index( \$0, first_yyyymmdd_null_tag ) == 1 ) {
+    first_yyyymmdd = 20000101;
+  } else if ( index( \$0, last_yyyymmdd_tag ) == 1 || index( \$0, last_yyyymmdd_null_tag ) == 1 ) {
+    last_yyyymmdd = 21471231;
+
+    if ( index( \$0, last_yyyymmdd_tag ) == 1 ) {
+      last_yyyymmdd = substr( \$0, 24, 4 ) substr( \$0, 29, 2 ) substr( \$0, 32, 2 );
+    }
+
+    if ( sensor_type != "" ) {
+      description = sensor_type "; " description;
+    }
+
+    printf "%d\t%f\t%f\t%d\t%d\t%s\t%s\n", locationid, longitude, latitude, first_yyyymmdd, last_yyyymmdd, variables, description;
+    id = 0;
+    locationid = 0;
+    longitude = 0;
+    latitude = 0;
+    first_yyyymmdd = 0;
+    last_yyyymmdd = 0;
+    name = "";
+    units = "";
+    variables = "";
+    description = "";
+    sensor_type = "";
+  }
+}
+
+EOF
+
+printf "locationid\tlongitude\tlatitude\tfirst_yyyymmdd\tlast_yyyymmdd\tvariables\tdescription\n" > $location_info_file_temp
+cat $data_directory/locations_*.json | tr ',' '\n' \
+| awk -f $temp_awk_program | sort -n | uniq >> $location_info_file_temp
+rm $temp_awk_program
+
+# Update the info file only if it is not smaller (because something failed):
+
+@ file_size = `ls -l $location_info_file | awk '{ print $5 }'`
+
+@ file_size_temp = `ls -l $location_info_file_temp | awk '{ print $5 }'`
+echo "Info file sizes: existing = $file_size updated = $file_size_temp"
+
+if ( $file_size_temp > 2000000 ) then
+ cp -p $location_info_file $location_info_file.bak
+ mv    $location_info_file_temp $location_info_file
+endif
+
+ls -l $location_info_file
+wc -l $location_info_file
+date -u
+echo "DONE"
+

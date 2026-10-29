@@ -174,21 +174,35 @@ set output_file = "$output_directory/purpleair_$hhmmss.json"
 # Per adrian@purpleair.com retrievals should use the header data_time_stamp seconds
 # from previous file (if it exists) for the next retrieval modified_since.
 
-echo "$output_directory/purpleair_*.json"
-set previous_file = `ls -1t $output_directory/purpleair_*.json | head -1`
-echo "previous_file = $previous_file"
+# Make sure previous_file is not zero length:
+#set previous_file = `ls -1t $output_directory/purpleair_*.json | head -1`
+set previous_file = ''
+
+foreach f ( `ls -1t $output_directory/purpleair_*.json` )
+
+  if ( -s "$f" ) then
+    set previous_file = "$f"
+    break
+  endif
+end
+
 
 if ( "$previous_file" == '' ) then
   @ seconds_previous = $seconds - 86400
   @ yyyymmdd_previous = `date -u --date=@$seconds_previous "+%Y%m%d"`
   @ yyyy_previous = $yyyymmdd_previous / 10000
   echo "$data_directory/$yyyy_previous/$yyyymmdd_previous/purpleair_*.json"
-  set previous_file = `ls -1t $data_directory/$yyyy_previous/$yyyymmdd_previous/purpleair_*.json | head -1`
-  echo "previous_file = $previous_file"
+  #set previous_file = `ls -1t $data_directory/$yyyy_previous/$yyyymmdd_previous/purpleair_*.json | head -1`
+  foreach f (`ls -1t $data_directory/$yyyy_previous/$yyyymmdd_previous/purpleair_*.json`)
+    if (-s "$f") then
+      set previous_file = "$f"
+      break
+    endif
+  end
 endif
 
 if ( "$previous_file" != '' ) then
-  @ seconds = `head $previous_file | grep '^  "data_time_stamp" : ' | awk -F: '{ print $2 }' | tr -d ','`
+  @ seconds = `head $previous_file | grep '^  "data_time_stamp" : ' | awk -F: '{ print $2 }' | head -1 | tr -d ','`
 endif
 
 set yyyymmddhhmmss = `date -u --date=@$seconds "+%Y%m%d%H%M%S"`
@@ -219,6 +233,8 @@ foreach variable ( $variables )
 end
 
 set bounds = "nwlng=$lon_min&nwlat=$lat_max&selng=$lon_max&selat=$lat_min"
+
+echo $bounds
 
 @ ok = 0
 @ tries = 3

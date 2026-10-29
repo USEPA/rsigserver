@@ -111,14 +111,16 @@ PURPOSE: readFileDimensions - Read file swath row/column dimensions.
 INPUTS:  const int file            NetCDF file ID to read.
          const char* const product   "L2" or "L3".
          const char* const variable  Variable name. "pm25_ge"
-OUTPUTS: size_t* rows              Rows in swath.
-         size_t* columns           Columns in swath.
+OUTPUTS: size_t* layers            Layers of data (or 0).
+         size_t* rows              Rows of data.
+         size_t* columns           Columns of data.
 RETURNS: int 1 if ok, else 0 and a failure message is printed to stderr.
 ******************************************************************************/
 
 int readFileDimensions( const int file,
                         const char* const product,
                         const char* const variable,
+                        size_t* const layers,
                         size_t* const rows,
                         size_t* const columns ) {
   int result = 0;
@@ -127,8 +129,8 @@ int readFileDimensions( const int file,
   assert( file > -1 );
   assert( product ); assert( *product );
   assert( strstr( product, "L2" ) || strstr( product, "L3" ) );
-  assert( rows ); assert( columns );
-  *rows = *columns = 0;
+  assert( rows ); assert( columns ); assert( layers );
+  *layers = *rows = *columns = 0;
 
   if ( strstr( product, "L2" ) ) {
     status = nc_inq_dimid( file, "mirror_step", &id );
@@ -167,6 +169,16 @@ int readFileDimensions( const int file,
     }
   }
 
+  if ( status == NC_NOERR &&
+       ( ! strcmp( product, "O3PROF_L2" ) ||
+         ! strcmp( product, "O3PROF_L3" ) ) ) {
+    status = nc_inq_dimid( file, "layer", &id );
+
+    if ( status == NC_NOERR ) {
+      status = nc_inq_dimlen( file, id, layers );
+    }
+  }
+
   result = status == NC_NOERR && *rows != 0 && *columns != 0;
 
   if ( status != NC_NOERR ) {
@@ -188,6 +200,7 @@ PURPOSE: readFileData - Read file swath data.
 INPUTS:  const int file                 NetCDF file ID to read.
          const char* const product      File product e.g., "NO2_L2" or "L3".
          const char* const variable     E.g., "vertical_column_total".
+         const size_t readLayer         1-based file layer to read or 0.
          const size_t rows              Rows of variable to read.
          const size_t columns           Columns of variable to read.
          const size_t gridSubsetIndices[2][2]  L3 grid subset 1-based indices.
@@ -208,6 +221,7 @@ NOTES:   Data is filtered by qa_value - i.e., set to MISSING_VALUE
 size_t readFileData( const int file,
                      const char* const product,
                      const char* const variable,
+                     const size_t readLayer,
                      const size_t rows,
                      const size_t columns,
                      const size_t gridSubsetIndices[2][2],
@@ -231,6 +245,65 @@ size_t readFileData( const int file,
     const char* const solarZenithAngleVariable; /* 0 or "solar_zenith_angle" */
   } Entry;
   const Entry table[] = {
+
+    /* NO2_L2_NRT: ---------------------------------------------------------- */
+
+    { "NO2_L2_NRT", "geolocation", "longitude",              "deg", -180.0, 180.0, 0, 0, 0},
+    { "NO2_L2_NRT", "geolocation", "latitude",               "deg",  -90.0,  90.0, 0, 0, 0},
+    { "NO2_L2_NRT", "geolocation", "solar_zenith_angle",     "deg",    0.0,  90.0, 0, 0, 0},
+    { "NO2_L2_NRT", "geolocation", "solar_azimuth_angle",    "deg", -180.0, 180.0, 0, 0, 0},
+    { "NO2_L2_NRT", "geolocation", "viewing_zenith_angle",   "deg",    0.0,  90.0, 0, 0, 0},
+    { "NO2_L2_NRT", "geolocation", "viewing_azimuth_angle",  "deg", -180.0, 180.0, 0, 0, 0},
+    { "NO2_L2_NRT", "geolocation", "relative_azimuth_angle", "deg", -180.0, 180.0, 0, 0, 0},
+
+    /*
+     * vertical_column_sum is a pseudo-variable to be computed as the sum of
+     * vertical_column_troposphere and vertical_column_stratosphere:
+     */
+
+    { "NO2_L2_NRT", "product", "vertical_column_sum", "molecules/cm2", 0.0, 1e30,
+      "main_data_quality_flag", "eff_cloud_fraction", "solar_zenith_angle" },
+
+    { "NO2_L2_NRT", "product", "vertical_column_total", "molecules/cm2", 0.0, 1e30,
+      "main_data_quality_flag", "eff_cloud_fraction", "solar_zenith_angle" },
+    { "NO2_L2_NRT", "product", "vertical_column_total_uncertainty", "molecules/cm2",
+      0.0, 1e30, "main_data_quality_flag", "eff_cloud_fraction", "solar_zenith_angle" },
+    { "NO2_L2_NRT", "product", "vertical_column_troposphere", "molecules/cm2",
+      0.0, 1e30, "main_data_quality_flag", "eff_cloud_fraction", "solar_zenith_angle" },
+    { "NO2_L2_NRT", "product", "vertical_column_troposphere_uncertainty",
+      "molecules/cm2", 0.0, 1e30,
+      "main_data_quality_flag", "eff_cloud_fraction", "solar_zenith_angle" },
+    { "NO2_L2_NRT", "product", "vertical_column_stratosphere", "molecules/cm2",
+      0.0, 1e30, "main_data_quality_flag", "eff_cloud_fraction", "solar_zenith_angle" },
+    { "NO2_L2_NRT", "product", "main_data_quality_flag", "-", 0.0, 2.0, 0, 0, 0},
+
+    { "NO2_L2_NRT", "support_data", "fitted_slant_column", "molecules/cm2",
+      0.0, 1e30, 0, 0, 0 },
+    { "NO2_L2_NRT", "support_data", "fitted_slant_column_uncertainty",
+      "molecules/cm2", 0.0, 1e30, 0, 0, 0 },
+    { "NO2_L2_NRT", "support_data", "snow_ice_fraction",    "-",       0.0,  1.0, 0, 0, 0 },
+    { "NO2_L2_NRT", "support_data", "terrain_height",        "m",  -1000.0, 10000.0, 0, 0, 0},
+    { "NO2_L2_NRT", "support_data", "ground_pixel_quality_flag", "-",  0.0,  1e30,   0, 0, 0},
+    { "NO2_L2_NRT", "support_data", "tropopause_pressure", "hPa",      0.0,  1030.0, 0, 0, 0},
+    { "NO2_L2_NRT", "support_data", "surface_pressure",    "hPa",      0.0,  1030.0, 0, 0, 0},
+    { "NO2_L2_NRT", "support_data", "albedo", "-", 0.0, 1.0, 0, 0, 0 },
+    { "NO2_L2_NRT", "support_data", "amf_total",           "-",  0.0, 1e30, 0, 0, 0},
+    { "NO2_L2_NRT", "support_data", "amf_diagnostic_flag", "-", -2.0, 500.0, 0, 0, 0 },
+    { "NO2_L2_NRT", "support_data", "eff_cloud_fraction", "-", 0.0, 1.0, 0, 0, 0 },
+    { "NO2_L2_NRT", "support_data", "amf_cloud_fraction", "-", 0.0, 1.0, 0, 0, 0 },
+    { "NO2_L2_NRT", "support_data", "amf_cloud_pressure", "hPa", 0.0, 1030.0, 0, 0, 0 },
+    { "NO2_L2_NRT", "support_data", "amf_troposphere", "-",       0.0, 1e30, 0, 0, 0},
+    { "NO2_L2_NRT", "support_data", "amf_stratosphere", "-",      0.0, 1e30, 0, 0, 0},
+    { "NO2_L2_NRT", "support_data", "amf_total_clear_sky", "-",  0.0, 1e30, 0, 0, 0},
+    { "NO2_L2_NRT", "support_data", "amf_troposphere_clear_sky", "-",  0.0, 1e30, 0, 0, 0},
+    { "NO2_L2_NRT", "support_data", "amf_stratosphere_clear_sky", "-",  0.0, 1e30, 0, 0, 0},
+    { "NO2_L2_NRT", "support_data", "pbl_height", "m",      0.0, 10000.0, 0, 0, 0},
+    { "NO2_L2_NRT", "support_data", "wind_speed", "m/s",      0.0, 150.0, 0, 0, 0},
+
+    { "NO2_L2_NRT", "qa_statistics", "fit_rms_residual", "-", 0.0, 0.01, 0, 0, 0 },
+    { "NO2_L2_NRT", "qa_statistics", "fit_convergence_flag", "-", -10.0, 12344.0, 0, 0, 0 },
+
+
 
     /* NO2_L2: ------------------------------------------------------------- */
 
@@ -261,6 +334,7 @@ size_t readFileData( const int file,
       "main_data_quality_flag", "eff_cloud_fraction", "solar_zenith_angle" },
     { "NO2_L2", "product", "vertical_column_stratosphere", "molecules/cm2",
       0.0, 1e30, "main_data_quality_flag", "eff_cloud_fraction", "solar_zenith_angle" },
+    { "NO2_L2", "product", "main_data_quality_flag", "-", 0.0, 2.0, 0, 0, 0},
 
     { "NO2_L2", "support_data", "fitted_slant_column", "molecules/cm2",
       0.0, 1e30, 0, 0, 0 },
@@ -280,8 +354,55 @@ size_t readFileData( const int file,
     { "NO2_L2", "support_data", "amf_troposphere", "-",       0.0, 1e30, 0, 0, 0},
     { "NO2_L2", "support_data", "amf_stratosphere", "-",      0.0, 1e30, 0, 0, 0},
 
+    /* New variables added to V04 files: */
+
+    { "NO2_L2", "support_data", "amf_total_clear_sky", "-",  0.0, 1e30, 0, 0, 0},
+    { "NO2_L2", "support_data", "amf_troposphere_clear_sky", "-",  0.0, 1e30, 0, 0, 0},
+    { "NO2_L2", "support_data", "amf_stratosphere_clear_sky", "-",  0.0, 1e30, 0, 0, 0},
+    { "NO2_L2", "support_data", "pbl_height", "m",      0.0, 10000.0, 0, 0, 0},
+    { "NO2_L2", "support_data", "wind_speed", "m/s",      0.0, 150.0, 0, 0, 0},
+
     { "NO2_L2", "qa_statistics", "fit_rms_residual", "-", 0.0, 0.01, 0, 0, 0 },
     { "NO2_L2", "qa_statistics", "fit_convergence_flag", "-", -10.0, 12344.0, 0, 0, 0 },
+
+
+
+    /* HCHO_L2_NRT: --------------------------------------------------------- */
+
+    { "HCHO_L2_NRT", "geolocation", "longitude",              "deg", -180.0,  180.0, 0,  0, 0},
+    { "HCHO_L2_NRT", "geolocation", "latitude",               "deg",  -90.0,   90.0, 0,  0, 0},
+    { "HCHO_L2_NRT", "geolocation", "solar_zenith_angle",     "deg",    0.0,   90.0, 0,  0, 0},
+    { "HCHO_L2_NRT", "geolocation", "solar_azimuth_angle",    "deg", -180.0,  180.0, 0,  0, 0},
+    { "HCHO_L2_NRT", "geolocation", "viewing_zenith_angle",   "deg",    0.0,   90.0, 0,  0, 0},
+    { "HCHO_L2_NRT", "geolocation", "viewing_azimuth_angle",  "deg", -180.0,  180.0, 0,  0, 0},
+    { "HCHO_L2_NRT", "geolocation", "relative_azimuth_angle", "deg", -180.0,  180.0, 0,  0, 0},
+
+    { "HCHO_L2_NRT", "product", "vertical_column", "molecules/cm2", 0.0, 1e30,
+      "main_data_quality_flag", "eff_cloud_fraction", "solar_zenith_angle" },
+    { "HCHO_L2_NRT", "product", "vertical_column_uncertainty", "molecules/cm2",
+      0.0, 1e30, "main_data_quality_flag", "eff_cloud_fraction", "solar_zenith_angle" },
+    { "HCHO_L2_NRT", "product", "main_data_quality_flag", "-", 0.0, 2.0, 0, 0, 0},
+
+    { "HCHO_L2_NRT", "support_data", "fitted_slant_column", "molecules/cm2",
+      0.0, 1e30, 0, 0, 0 },
+    { "HCHO_L2_NRT", "support_data", "fitted_slant_column_uncertainty",
+      "molecules/cm2", 0.0, 1e30, 0, 0, 0 },
+    { "HCHO_L2_NRT", "support_data", "snow_ice_fraction",    "-",       0.0,  1.0, 0, 0, 0 },
+    { "HCHO_L2_NRT", "support_data", "terrain_height",        "m",  -1000.0, 10000.0, 0, 0, 0},
+    { "HCHO_L2_NRT", "support_data", "ground_pixel_quality_flag", "-", 0.0, 1e30, 0, 0, 0 },
+    { "HCHO_L2_NRT", "support_data", "surface_pressure", "hPa", 0.0, 1030.0, 0, 0, 0 },
+    { "HCHO_L2_NRT", "support_data", "albedo", "-", 0.0, 1.0, 0, 0, 0 },
+    { "HCHO_L2_NRT", "support_data", "amf", "-", 0.0, 1e30, 0, 0, 0 },
+    { "HCHO_L2_NRT", "support_data", "amf_diagnostic_flag", "-", -2.0, 500.0, 0, 0, 0 },
+    { "HCHO_L2_NRT", "support_data", "eff_cloud_fraction", "-", 0.0, 1.0, 0, 0, 0 },
+    { "HCHO_L2_NRT", "support_data", "amf_cloud_fraction", "-", 0.0, 1.0, 0, 0, 0 },
+    { "HCHO_L2_NRT", "support_data", "amf_cloud_pressure", "hPa", 0.0, 1030.0, 0, 0, 0 },
+    { "HCHO_L2_NRT", "support_data", "amf_clear_sky", "-",  0.0, 1e30, 0, 0, 0},
+    { "HCHO_L2_NRT", "support_data", "pbl_height", "m",      0.0, 10000.0, 0, 0, 0},
+    { "HCHO_L2_NRT", "support_data", "wind_speed", "m/s",      0.0, 150.0, 0, 0, 0},
+
+    { "HCHO_L2_NRT", "qa_statistics", "fit_rms_residual", "-", 0.0, 0.01, 0, 0, 0 },
+    { "HCHO_L2_NRT", "qa_statistics", "fit_convergence_flag", "-", -10.0, 12344.0, 0, 0, 0 },
 
 
 
@@ -299,6 +420,7 @@ size_t readFileData( const int file,
                  "main_data_quality_flag", "eff_cloud_fraction", "solar_zenith_angle" },
     { "HCHO_L2", "product", "vertical_column_uncertainty", "molecules/cm2",
       0.0, 1e30, "main_data_quality_flag", "eff_cloud_fraction", "solar_zenith_angle" },
+    { "HCHO_L2", "product", "main_data_quality_flag", "-", 0.0, 2.0, 0, 0, 0},
 
     { "HCHO_L2", "support_data", "fitted_slant_column", "molecules/cm2",
       0.0, 1e30, 0, 0, 0 },
@@ -314,6 +436,12 @@ size_t readFileData( const int file,
     { "HCHO_L2", "support_data", "eff_cloud_fraction", "-", 0.0, 1.0, 0, 0, 0 },
     { "HCHO_L2", "support_data", "amf_cloud_fraction", "-", 0.0, 1.0, 0, 0, 0 },
     { "HCHO_L2", "support_data", "amf_cloud_pressure", "hPa", 0.0, 1030.0, 0, 0, 0 },
+
+    /* New variables added to V04 files: */
+
+    { "HCHO_L2", "support_data", "amf_clear_sky", "-",  0.0, 1e30, 0, 0, 0},
+    { "HCHO_L2", "support_data", "pbl_height", "m",     0.0, 10000.0, 0, 0, 0},
+    { "HCHO_L2", "support_data", "wind_speed", "m/s",   0.0, 150.0, 0, 0, 0},
 
     { "HCHO_L2", "qa_statistics", "fit_rms_residual", "-", 0.0, 0.01, 0, 0, 0 },
     { "HCHO_L2", "qa_statistics", "fit_convergence_flag", "-", -10.0, 12344.0, 0, 0, 0 },
@@ -360,6 +488,44 @@ size_t readFileData( const int file,
 
 
 
+    /* CLDO4_L2_NRT: -------------------------------------------------------- */
+
+    { "CLDO4_L2_NRT", "geolocation", "longitude",              "deg", -180.0, 180.0, 0, 0, 0},
+    { "CLDO4_L2_NRT", "geolocation", "latitude",               "deg",  -90.0,  90.0, 0, 0, 0},
+    { "CLDO4_L2_NRT", "geolocation", "solar_zenith_angle",     "deg",    0.0,  90.0, 0, 0, 0},
+    { "CLDO4_L2_NRT", "geolocation", "solar_azimuth_angle",    "deg", -180.0, 180.0, 0, 0, 0},
+    { "CLDO4_L2_NRT", "geolocation", "viewing_zenith_angle",   "deg",    0.0,  90.0, 0, 0, 0},
+    { "CLDO4_L2_NRT", "geolocation", "viewing_azimuth_angle",  "deg", -180.0, 180.0, 0, 0, 0},
+    { "CLDO4_L2_NRT", "geolocation", "relative_azimuth_angle", "deg", -180.0, 180.0, 0, 0, 0},
+
+    { "CLDO4_L2_NRT", "product", "CloudRadianceFraction440", "-", 0.0, 1.0, 0, 0, 0 },
+    { "CLDO4_L2_NRT", "product", "CloudRadianceFraction466", "-", 0.0, 1.0, 0, 0, 0},
+    { "CLDO4_L2_NRT", "product", "cloud_fraction", "-", 0.0, 1.0, 0, 0, 0 },
+    { "CLDO4_L2_NRT", "product", "cloud_pressure", "hPa", 0.0, 1200.0, 0, 0, 0 },
+    { "CLDO4_L2_NRT", "product", "processing_quality_flag", "-", 0.0, 32767.0, 0, 0, 0 },
+
+    { "CLDO4_L2_NRT", "qa_statistics", "fit_convergence_flag", "-", -10.0, 12344.0, 0, 0, 0},
+    { "CLDO4_L2_NRT", "qa_statistics", "fit_rms_residual", "-", 0.0, 0.01, 0, 0, 0 },
+
+    { "CLDO4_L2_NRT", "support_data", "GLER440", "-", 0.0, 1.0, 0, 0, 0 },
+    { "CLDO4_L2_NRT", "support_data", "GLER466", "-", 0.0, 1.0, 0, 0, 0 },
+    { "CLDO4_L2_NRT", "support_data", "SCD_MainDataQualityFlags", "-", 0.0, 2.0, 0, 0, 0},
+    { "CLDO4_L2_NRT", "support_data", "SceneLER440", "-", 0.0, 1.0, 0, 0, 0 },
+    { "CLDO4_L2_NRT", "support_data", "SceneLER466", "-", 0.0, 1.0, 0, 0, 0 },
+    { "CLDO4_L2_NRT", "support_data", "ScenePressure", "hPa", 0.0, 1500.0, 0, 0, 0 },
+    { "CLDO4_L2_NRT", "support_data", "surface_pressure", "hPa", 0.0, 1500.0, 0, 0, 0 },
+    { "CLDO4_L2_NRT", "support_data", "fitted_slant_column", "molecules2/cm5",
+      0.0, 1e30, "SCD_MainDataQualityFlags", 0, 0 },
+    { "CLDO4_L2", "support_data", "fitted_slant_column_uncertainty",
+      "molecules2/cm5", 0.0, 1e30, "SCD_MainDataQualityFlags", 0, 0 },
+    { "CLDO4_L2_NRT", "support_data", "ground_pixel_quality_flag", "-", 0.0, 1e30, 0, 0, 0 },
+    { "CLDO4_L2_NRT", "support_data", "snow_ice_fraction", "-", 0.0, 1.0, 0, 0, 0 },
+    { "CLDO4_L2_NRT", "support_data", "terrain_height", "m", -500.0, 10000.0, 0, 0, 0 },
+    { "CLDO4_L2_NRT", "support_data", "pbl_height", "m", 0.0, 10000.0, 0, 0, 0},
+    { "CLDO4_L2_NRT", "support_data", "scddes", "molecules2/cm5",
+       0.0, 1e30, "SCD_MainDataQualityFlags", 0, 0},
+
+
     /* CLDO4_L2: ----------------------------------------------------------- */
 
     { "CLDO4_L2", "geolocation", "longitude",              "deg", -180.0, 180.0, 0, 0, 0},
@@ -393,6 +559,87 @@ size_t readFileData( const int file,
     { "CLDO4_L2", "support_data", "ground_pixel_quality_flag", "-", 0.0, 1e30, 0, 0, 0 },
     { "CLDO4_L2", "support_data", "snow_ice_fraction", "-", 0.0, 1.0, 0, 0, 0 },
     { "CLDO4_L2", "support_data", "terrain_height", "m", -500.0, 10000.0, 0, 0, 0 },
+
+    /* New variables added to V04 files: */
+
+    { "CLDO4_L2", "support_data", "pbl_height", "m", 0.0, 10000.0, 0, 0, 0},
+    { "CLDO4_L2", "support_data", "scddes", "molecules2/cm5",
+       0.0, 1e30, "SCD_MainDataQualityFlags", 0, 0},
+
+
+
+    /* NO2_L3_NRT: ---------------------------------------------------------- */
+
+    { "NO2_L3_NRT", 0, "longitude", "deg", -180.0, 180.0, 0, 0, 0 },
+    { "NO2_L3_NRT", 0, "latitude",  "deg",  -90.0,  90.0, 0, 0, 0 },
+    { "NO2_L3_NRT", 0, "weight",   "km2",   0.0,  1e30, 0, 0, 0 },
+
+    { "NO2_L3_NRT", "geolocation", "solar_zenith_angle",     "deg",    0.0,  90.0, 0, 0, 0},
+    { "NO2_L3_NRT", "geolocation", "viewing_zenith_angle",   "deg",    0.0,  90.0, 0, 0, 0},
+    { "NO2_L3_NRT", "geolocation", "relative_azimuth_angle", "deg", -180.0, 180.0, 0, 0, 0},
+
+    /*
+     * vertical_column_sum is a pseudo-variable to be computed as the sum of
+     * vertical_column_troposphere and vertical_column_stratosphere:
+     */
+
+    { "NO2_L3_NRT", "product", "vertical_column_sum", "molecules/cm2",
+      0.0, 1e30, "main_data_quality_flag", "eff_cloud_fraction", "solar_zenith_angle" },
+
+    { "NO2_L3_NRT", "product", "vertical_column_troposphere", "molecules/cm2",
+      0.0, 1e30, "main_data_quality_flag", "eff_cloud_fraction", "solar_zenith_angle" },
+    { "NO2_L3_NRT", "product", "vertical_column_troposphere_uncertainty",
+      "molecules/cm2", 0.0, 1e30,
+      "main_data_quality_flag", "eff_cloud_fraction", "solar_zenith_angle" },
+    { "NO2_L3_NRT", "product", "vertical_column_stratosphere", "molecules/cm2",
+      0.0, 1e30, "main_data_quality_flag", "eff_cloud_fraction", "solar_zenith_angle" },
+    { "NO2_L3_NRT", "product", "vertical_column_total", "molecules/cm2",
+      0.0, 1e30, "main_data_quality_flag", "eff_cloud_fraction", "solar_zenith_angle" },
+    { "NO2_L3_NRT", "product", "vertical_column_total_uncertainty", "molecules/cm2",
+      0.0, 1e30, "main_data_quality_flag", "eff_cloud_fraction", "solar_zenith_angle" },
+    { "NO2_L3_NRT", "product", "main_data_quality_flag", "-", 0.0, 2.0, 0, 0, 0 },
+
+    { "NO2_L3_NRT", "qa_statistics", "num_vertical_column_troposphere_samples",
+      "-", 0.0, 1e10, 0, 0, 0 },
+    { "NO2_L3_NRT", "qa_statistics", "min_vertical_column_troposphere_sample",
+      "molecules/cm2", 0.0, 1e30, 0, 0, 0 },
+    { "NO2_L3_NRT", "qa_statistics", "max_vertical_column_troposphere_sample",
+      "molecules/cm2", 0.0, 1e30, 0, 0, 0 },
+    { "NO2_L3_NRT", "qa_statistics", "num_vertical_column_troposphere_uncertainty_samples",
+      "-", 0.0, 1e10, 0, 0, 0 },
+    { "NO2_L3_NRT", "qa_statistics", "min_vertical_column_troposphere_uncertainty_sample",
+      "molecules/cm2", 0.0, 1e30, 0, 0, 0 },
+    { "NO2_L3_NRT", "qa_statistics", "max_vertical_column_troposphere_uncertainty_sample",
+      "molecules/cm2", 0.0, 1e30, 0, 0, 0 },
+    { "NO2_L3_NRT", "qa_statistics", "num_vertical_column_stratosphere_samples",
+      "-", 0.0, 1e10, 0, 0, 0 },
+    { "NO2_L3_NRT", "qa_statistics", "min_vertical_column_stratosphere_sample",
+      "molecules/cm2", 0.0, 1e30, 0, 0, 0 },
+    { "NO2_L3_NRT", "qa_statistics", "max_vertical_column_stratosphere_sample",
+      "molecules/cm2", 0.0, 1e30, 0, 0, 0 },
+    { "NO2_L3_NRT", "qa_statistics", "num_vertical_column_total_samples",
+      "-", 0.0, 1e10, 0, 0, 0 },
+    { "NO2_L3_NRT", "qa_statistics", "min_vertical_column_total_sample",
+      "molecules/cm2", 0.0, 1e30, 0, 0, 0 },
+    { "NO2_L3_NRT", "qa_statistics", "max_vertical_column_total_sample",
+      "molecules/cm2", 0.0, 1e30, 0, 0, 0 },
+
+    { "NO2_L3_NRT", "support_data", "surface_pressure",    "hPa", 0.0, 1200.0, 0, 0, 0 },
+    { "NO2_L3_NRT", "support_data", "terrain_height",      "m", -500.0, 10000.0, 0, 0, 0},
+    { "NO2_L3_NRT", "support_data", "snow_ice_fraction",   "-",  0.0, 1.0, 0, 0, 0 },
+    { "NO2_L3_NRT", "support_data", "fitted_slant_column", "molecules/cm2",
+      0.0, 1e30, 0, 0, 0 },
+    { "NO2_L3_NRT", "support_data", "fitted_slant_column_uncertainty",
+                "molecules/cm2",  0.0, 1e30, 0, 0, 0 },
+    { "NO2_L3_NRT", "support_data", "albedo",              "-",  0.0, 1.0, 0, 0, 0 },
+    { "NO2_L3_NRT", "support_data", "tropopause_pressure", "hPa", 0.0, 1200.0, 0, 0, 0 },
+    { "NO2_L3_NRT", "support_data", "amf_total",           "-", 0.0, 1e30, 0, 0, 0 },
+    { "NO2_L3_NRT", "support_data", "eff_cloud_fraction",  "-", 0.0, 1.0, 0, 0, 0 },
+    { "NO2_L3_NRT", "support_data", "amf_cloud_fraction",  "-", 0.0, 1.0, 0, 0, 0 },
+    { "NO2_L3_NRT", "support_data", "amf_cloud_pressure",  "hPa", 0.0, 1200.0, 0, 0, 0 },
+    { "NO2_L3_NRT", "support_data", "amf_troposphere",     "-", 0.0, 1e30, 0, 0, 0 },
+    { "NO2_L3_NRT", "support_data", "amf_stratosphere",    "-", 0.0, 1e30, 0, 0, 0 },
+    { "NO2_L3_NRT", "support_data", "pbl_height",  "m", 0.0, 10000.0, 0, 0, 0 },
 
 
 
@@ -468,6 +715,47 @@ size_t readFileData( const int file,
     { "NO2_L3", "support_data", "amf_troposphere",     "-", 0.0, 1e30, 0, 0, 0 },
     { "NO2_L3", "support_data", "amf_stratosphere",    "-", 0.0, 1e30, 0, 0, 0 },
 
+    /* New variables added to V04 files: */
+
+    { "NO2_L3", "support_data", "pbl_height",  "m", 0.0, 10000.0, 0, 0, 0 },
+
+
+    /* HCHO_L3_NRT: --------------------------------------------------------- */
+
+    { "HCHO_L3_NRT", 0, "longitude", "deg", -180.0, 180.0, 0, 0, 0 },
+    { "HCHO_L3_NRT", 0, "latitude",  "deg",  -90.0,  90.0, 0, 0, 0 },
+    { "HCHO_L3_NRT", 0, "weight",   "km2",   0.0,  1e30, 0, 0, 0 },
+
+    { "HCHO_L3_NRT", "geolocation", "solar_zenith_angle",     "deg",    0.0,  90.0, 0, 0, 0},
+    { "HCHO_L3_NRT", "geolocation", "viewing_zenith_angle",   "deg",    0.0,  90.0, 0, 0, 0},
+    { "HCHO_L3_NRT", "geolocation", "relative_azimuth_angle", "deg", -180.0, 180.0, 0, 0, 0},
+
+    { "HCHO_L3_NRT", "product", "vertical_column", "molecules/cm2",
+      0.0, 1e30, "main_data_quality_flag", "eff_cloud_fraction", "solar_zenith_angle" },
+    { "HCHO_L3_NRT", "product", "vertical_column_uncertainty",
+      "molecules/cm2", 0.0, 1e30, "main_data_quality_flag", "eff_cloud_fraction", "solar_zenith_angle" },
+    { "HCHO_L3_NRT", "product", "main_data_quality_flag", "-", 0.0, 2.0, 0, 0, 0 },
+
+    { "HCHO_L3_NRT", "qa_statistics", "num_vertical_column_total_samples",
+      "-", 0.0, 1e10, 0, 0, 0 },
+    { "HCHO_L3_NRT", "qa_statistics", "min_vertical_column_total_sample",
+      "molecules/cm2", 0.0, 1e30, 0, 0, 0 },
+    { "HCHO_L3_NRT", "qa_statistics", "max_vertical_column_total_sample",
+      "molecules/cm2", 0.0, 1e30, 0, 0, 0 },
+
+    { "HCHO_L3_NRT", "support_data", "surface_pressure",    "hPa", 0.0, 1200.0, 0, 0, 0 },
+    { "HCHO_L3_NRT", "support_data", "terrain_height",      "m", -500.0, 10000.0, 0, 0, 0},
+    { "HCHO_L3_NRT", "support_data", "snow_ice_fraction",   "-",  0.0, 1.0, 0, 0, 0 },
+    { "HCHO_L3_NRT", "support_data", "fitted_slant_column", "molecules/cm2",
+      0.0, 1e30, 0, 0, 0 },
+    { "HCHO_L3_NRT", "support_data", "fitted_slant_column_uncertainty",
+                "molecules/cm2",  0.0, 1e30, 0, 0, 0 },
+    { "HCHO_L3_NRT", "support_data", "albedo",              "-",  0.0, 1.0, 0, 0, 0 },
+    { "HCHO_L3_NRT", "support_data", "amf",                 "-", 0.0, 1e30, 0, 0, 0 },
+    { "HCHO_L3_NRT", "support_data", "eff_cloud_fraction",  "-", 0.0, 1.0, 0, 0, 0 },
+    { "HCHO_L3_NRT", "support_data", "amf_cloud_fraction",  "-", 0.0, 1.0, 0, 0, 0 },
+    { "HCHO_L3_NRT", "support_data", "amf_cloud_pressure",  "hPa", 0.0, 1200.0, 0, 0, 0 },
+    { "HCHO_L3_NRT", "support_data", "pbl_height", "m", 0.0, 10000.0, 0, 0, 0 },
 
 
     /* HCHO_L3: ------------------------------------------------------------ */
@@ -506,6 +794,9 @@ size_t readFileData( const int file,
     { "HCHO_L3", "support_data", "amf_cloud_fraction",  "-", 0.0, 1.0, 0, 0, 0 },
     { "HCHO_L3", "support_data", "amf_cloud_pressure",  "hPa", 0.0, 1200.0, 0, 0, 0 },
 
+    /* New variables added to V04 files: */
+
+    { "HCHO_L3", "support_data", "pbl_height", "m", 0.0, 10000.0, 0, 0, 0 },
 
 
     /* O3TOT_L3: ----------------------------------------------------------- */
@@ -538,6 +829,26 @@ size_t readFileData( const int file,
     { "O3TOT_L3", "support_data", "terrain_pressure",  "hPa", 0.0, 1200.0, 0, 0, 0 },
 
 
+    /* CLDO4_L3_NRT: -------------------------------------------------------- */
+
+    { "CLDO4_L3_NRT", 0, "longitude", "deg", -180.0, 180.0, 0, 0, 0 },
+    { "CLDO4_L3_NRT", 0, "latitude",  "deg",  -90.0,  90.0, 0, 0, 0 },
+    { "CLDO4_L3_NRT", 0, "weight",   "km2",   0.0,  1e30, 0, 0, 0 },
+
+    { "CLDO4_L3_NRT", "geolocation", "solar_zenith_angle",     "deg",    0.0,  90.0, 0, 0, 0},
+    { "CLDO4_L3_NRT", "geolocation", "viewing_zenith_angle",   "deg",    0.0,  90.0, 0, 0, 0},
+    { "CLDO4_L3_NRT", "geolocation", "relative_azimuth_angle", "deg", -180.0, 180.0, 0, 0, 0},
+
+    { "CLDO4_L3_NRT", "product", "cloud_pressure", "hPa", 0.0, 1200.0, 0, 0, 0 },
+    { "CLDO4_L3_NRT", "product", "cloud_fraction", "-", 0.0, 1.0, 0, 0, 0 },
+    { "CLDO4_L3_NRT", "product", "CloudRadianceFraction440", "-", 0.0, 1.0, 0, 0, 0 },
+    { "CLDO4_L3_NRT", "product", "CloudRadianceFraction466", "-", 0.0, 1.0, 0, 0, 0 },
+
+    { "CLDO4_L3_NRT", "support_data", "surface_pressure",  "hPa", 0.0, 1200.0, 0, 0, 0 },
+    { "CLDO4_L3_NRT", "support_data", "GLER440",           "-", 0.0, 1.0, 0, 0, 0 },
+    { "CLDO4_L3_NRT", "support_data", "GLER446",           "-", 0.0, 1.0, 0, 0, 0 },
+
+
     /* CLDO4_L3: ----------------------------------------------------------- */
 
     { "CLDO4_L3", 0, "longitude", "deg", -180.0, 180.0, 0, 0, 0 },
@@ -556,6 +867,104 @@ size_t readFileData( const int file,
     { "CLDO4_L3", "support_data", "surface_pressure",  "hPa", 0.0, 1200.0, 0, 0, 0 },
     { "CLDO4_L3", "support_data", "GLER440",           "-", 0.0, 1.0, 0, 0, 0 },
     { "CLDO4_L3", "support_data", "GLER446",           "-", 0.0, 1.0, 0, 0, 0 },
+
+
+    /* O3PROF_L2: -----------------------------------------------------------*/
+
+    { "O3PROF_L2", "geolocation", "longitude",              "deg", -180.0, 180.0, 0, 0, 0},
+    { "O3PROF_L2", "geolocation", "latitude",               "deg",  -90.0,  90.0, 0, 0, 0},
+    { "O3PROF_L2", "geolocation", "solar_zenith_angle",     "deg",    0.0,  90.0, 0, 0, 0},
+    { "O3PROF_L2", "geolocation", "viewing_zenith_angle",   "deg",    0.0,  90.0, 0, 0, 0},
+    { "O3PROF_L2", "geolocation", "relative_azimuth_angle", "deg", -180.0, 180.0, 0, 0, 0},
+
+    { "O3PROF_L2", "product", "ozone_profile", "DU", 0.0, 700.0,
+      "exit_status", "eff_cloud_fraction", "solar_zenith_angle" },
+    { "O3PROF_L2", "product", "ozone_profile_precision", "DU", 0.0, 700.0,
+      "exit_status", "eff_cloud_fraction", "solar_zenith_angle" },
+    { "O3PROF_L2", "product", "ozone_profile_error", "DU", 0.0, 700.0,
+      "exit_status", "eff_cloud_fraction", "solar_zenith_angle" },
+    { "O3PROF_L2", "product", "total_ozone_column", "DU", 0.0, 700.0,
+      "exit_status", "eff_cloud_fraction", "solar_zenith_angle" },
+    { "O3PROF_L2", "product", "total_ozone_precision", "DU", 0.0, 700.0,
+      "exit_status", "eff_cloud_fraction", "solar_zenith_angle" },
+    { "O3PROF_L2", "product", "total_ozone_error", "DU", 0.0, 700.0,
+      "exit_status", "eff_cloud_fraction", "solar_zenith_angle" },
+    { "O3PROF_L2", "product", "stratosphere_ozone_column", "DU", 0.0, 700.0,
+      "exit_status", "eff_cloud_fraction", "solar_zenith_angle" },
+    { "O3PROF_L2", "product", "stratosphere_ozone_precision", "DU", 0.0, 700.0,
+      "exit_status", "eff_cloud_fraction", "solar_zenith_angle" },
+    { "O3PROF_L2", "product", "stratosphere_ozone_error", "DU", 0.0, 700.0,
+      "exit_status", "eff_cloud_fraction", "solar_zenith_angle" },
+    { "O3PROF_L2", "product", "troposphere_ozone_column", "DU", 0.0, 700.0,
+      "exit_status", "eff_cloud_fraction", "solar_zenith_angle" },
+    { "O3PROF_L2", "product", "troposphere_ozone_precision", "DU", 0.0, 700.0,
+      "exit_status", "eff_cloud_fraction", "solar_zenith_angle" },
+    { "O3PROF_L2", "product", "troposphere_ozone_error", "DU", 0.0, 700.0,
+      "exit_status", "eff_cloud_fraction", "solar_zenith_angle" },
+
+    { "O3PROF_L2", "support_data", "ground_pixel_quality_flag", "-", 0.0, 65534.0, 0, 0, 0 },
+    { "O3PROF_L2", "support_data", "aerosol_index", "-", 0.0, 200.0, 0, 0, 0},
+    { "O3PROF_L2", "support_data", "cloud_flag", "-", 0.0, 4.0, 0, 0, 0 },
+    { "O3PROF_L2", "support_data", "eff_cloud_fraction", "-", 0.0, 1.0, 0,0,0 },
+    { "O3PROF_L2", "support_data", "eff_cloud_pressure", "hPa", 0.0, 1200.0, 0, 0, 0 },
+    { "O3PROF_L2", "support_data", "glint_probability", "-", 0.0, 1.0, 0, 0, 0 },
+    { "O3PROF_L2", "support_data", "ozone_apriori_profile", "DU", 0.0, 700.0, 0, 0, 0 },
+    { "O3PROF_L2", "support_data", "ozone_apriori_profile_error", "DU", 0.0, 700.0, 0, 0, 0 },
+    { "O3PROF_L2", "support_data", "ozone_profile_altitude", "km", 0.0, 100.0, 0, 0, 0 },
+    { "O3PROF_L2", "support_data", "ozone_profile_temperature", "K", 150.0, 350.0, 0, 0, 0 },
+    { "O3PROF_L2", "support_data", "ozone_profile_pressure", "hPa", 0.0, 1200.0, 0, 0, 0 },
+    { "O3PROF_L2", "support_data", "tropopause_index", "-", 0.0, 100.0, 0, 0, 0},
+    { "O3PROF_L2", "support_data", "surface_albedo", "-", 0.0, 1.0, 0, 0, 0},
+    { "O3PROF_L2", "support_data", "num_wavelengths_in_fit", "-", 0.0, 2000.0, 0, 0, 0},
+    { "O3PROF_L2", "support_data", "ozone_information_content", "-", 0.0, 100.0, 0, 0, 0},
+    { "O3PROF_L2", "support_data", "ozone_degree_of_freedom", "-", 0.0, 100.0, 0, 0, 0},
+
+    { "O3PROF_L2", "qa_statistics", "exit_status", "-", -10.0, 110.0, 0, 0, 0},
+    { "O3PROF_L2", "qa_statistics", "num_iterations", "-", 0.0, 8.0, 0, 0, 0},
+
+
+    /* O3PROF_L3: -----------------------------------------------------------*/
+
+    { "O3PROF_L3", 0, "longitude", "deg", -180.0, 180.0, 0, 0, 0},
+    { "O3PROF_L3", 0, "latitude",  "deg",  -90.0,  90.0, 0, 0, 0},
+    { "O3PROF_L3", 0, "weight",  "/km2",  0.0,  1e6, 0, 0, 0},
+
+    { "O3PROF_L3", "geolocation", "solar_zenith_angle",  "deg", 0.0, 180.0, 0, 0, 0},
+    { "O3PROF_L3", "geolocation", "viewing_zenith_angle",  "deg", 0.0, 90.0, 0, 0, 0},
+    { "O3PROF_L3", "geolocation", "relative_azimuth_angle",  "deg", -180.0, 180.0, 0, 0, 0},
+
+    { "O3PROF_L3", "product", "ozone_profile", "DU", 0.0, 700.0,
+      0, "eff_cloud_fraction", "solar_zenith_angle" },
+    { "O3PROF_L3", "product", "ozone_profile_precision", "DU", 0.0, 700.0,
+      0, "eff_cloud_fraction", "solar_zenith_angle" },
+    { "O3PROF_L3", "product", "ozone_profile_error", "DU", 0.0, 700.0,
+      0, "eff_cloud_fraction", "solar_zenith_angle" },
+    { "O3PROF_L3", "product", "total_ozone_column", "DU", 0.0, 700.0,
+      0, "eff_cloud_fraction", "solar_zenith_angle" },
+    { "O3PROF_L3", "product", "total_ozone_precision", "DU", 0.0, 700.0,
+      0, "eff_cloud_fraction", "solar_zenith_angle" },
+    { "O3PROF_L3", "product", "total_ozone_error", "DU", 0.0, 700.0,
+      0, "eff_cloud_fraction", "solar_zenith_angle" },
+    { "O3PROF_L3", "product", "stratosphere_ozone_column", "DU", 0.0, 700.0,
+      0, "eff_cloud_fraction", "solar_zenith_angle" },
+    { "O3PROF_L3", "product", "stratosphere_ozone_precision", "DU", 0.0, 700.0,
+      0, "eff_cloud_fraction", "solar_zenith_angle" },
+    { "O3PROF_L3", "product", "stratosphere_ozone_error", "DU", 0.0, 700.0,
+      0, "eff_cloud_fraction", "solar_zenith_angle" },
+    { "O3PROF_L3", "product", "troposphere_ozone_column", "DU", 0.0, 700.0,
+      0, "eff_cloud_fraction", "solar_zenith_angle" },
+    { "O3PROF_L3", "product", "troposphere_ozone_precision", "DU", 0.0, 700.0,
+      0, "eff_cloud_fraction", "solar_zenith_angle" },
+    { "O3PROF_L3", "product", "troposphere_ozone_error", "DU", 0.0, 700.0,
+      0, "eff_cloud_fraction", "solar_zenith_angle" },
+
+    { "O3PROF_L3", "support_data", "eff_cloud_fraction", "-", 0.0, 1.0, 0,0,0 },
+    { "O3PROF_L3", "support_data", "eff_cloud_pressure", "hPa", 0.0, 1200.0, 0,0,0 },
+    { "O3PROF_L3", "support_data", "ozone_apriori_profile", "DU", 0.0, 700.0, 0,0,0 },
+    { "O3PROF_L3", "support_data", "ozone_apriori_profile_error", "DU", 0.0, 700.0, 0,0,0 },
+    { "O3PROF_L3", "support_data", "ozone_profile_altitude", "km", 0.0, 100.0, 0,0,0 },
+    { "O3PROF_L3", "support_data", "ozone_profile_pressure", "hPa", 0.0, 1200.0, 0,0,0 },
+    { "O3PROF_L3", "support_data", "tropopause_index", "-", 0.0, 100.0, 0,0,0 },
 
 
     /* AODALH_L2: -----------------------------------------------------------*/
@@ -636,6 +1045,8 @@ size_t readFileData( const int file,
   size_t result = 0;
   size_t index = 0;
 
+  DEBUG( fprintf( stderr, "readFileData( %s, %s, ... )\n", product, variable);)
+
   assert( file >= 0 );
   assert( product ), assert( *product );
   assert( strstr( product, "L2" ) || strstr( product, "L3" ) );
@@ -688,13 +1099,13 @@ size_t readFileData( const int file,
         ! strcmp( entry->units, "molecules/cm2" ) ? -1e29
         : entry->validMinimum;
       const double validMaximum = entry->validMaximum;
-      const int isL3 = strstr( product, "L3" ) != 0 &&
+      const int isL3 = strstr( product, "_L3" ) != 0 &&
                        strstr( product, "PM25_L3" ) == 0;
       const int isL3Longitude = isL3 && ! strcmp( variable, "longitude" );
       const int isL3Latitude  = isL3 && ! strcmp( variable, "latitude" );
       const int isGridSubset = isL3 && gridSubsetIndices[ 0 ][ 0 ] != 0;
-      size_t starts[ 3 ] = { 0, 0, 0 };
-      size_t counts[ 3 ] = { 1, 1, 1 };
+      size_t starts[ 4 ] = { 0, 0, 0, 0 };
+      size_t counts[ 4 ] = { 1, 1, 1, 1 };
 
       assert( ! isGridSubset ||
               columns == 1 + gridSubsetIndices[ COLUMN ][ LAST ] -
@@ -716,6 +1127,23 @@ size_t readFileData( const int file,
           starts[ 0 ] =
             isGridSubset ? gridSubsetIndices[ ROW ][ FIRST ] - 1
             : 0;
+        } else if ( ! strcmp( product, "O3PROF_L3" ) && rank == 4 ) {
+
+          /*
+           * O3PROF_L3 files have some single-timestep layered variables such as
+           * ozone_profile(time, latitude, longitude, layer)
+           * so extract specified layer:
+           */
+
+          counts[ 1 ] = rows;
+          counts[ 2 ] = columns;
+          starts[ 1 ] =
+            isGridSubset ? gridSubsetIndices[ ROW ][ FIRST ] - 1
+            : 0;
+          starts[ 2 ] =
+            isGridSubset ? gridSubsetIndices[ COLUMN ][ FIRST ] - 1
+            : 0;
+          starts[ 3 ] = readLayer - 1;
         } else {
           counts[ 0 ] = rows;
           counts[ 1 ] = columns;
@@ -734,22 +1162,36 @@ size_t readFileData( const int file,
         counts[ 1 ] = rows;
       }
 
-      /*
-       * HACK: L3_*_V03 files have some variables with useless first dimension
-       * time = 1. E.g., terrain_height(time, latitude, longitude)
-       * so shift the subset:
-       */
-
       if ( rank == 3 ) {
-        counts[ 2 ] = counts[ 1 ];
-        counts[ 1 ] = counts[ 0 ];
-        counts[ 0 ] = 1;
-        starts[ 2 ] = starts[ 1 ];
-        starts[ 1 ] = starts[ 0 ];
-        starts[ 0 ] = 0;
+
+        if ( ! strcmp( product, "O3PROF_L2" ) ) {
+
+          /*
+           * O3PROF_L2 files have some layered variables such as
+           * ozone_profile(mirror_step, xtrack, layer)
+           * so extract specified layer:
+           */
+
+          starts[ 2 ] = readLayer - 1;
+        } else {
+
+          /*
+           * HACK: L3_*_V03 files have some variables with useless first
+           * dimension
+           * time = 1. E.g., terrain_height(time, latitude, longitude)
+           * so shift the subset:
+           */
+
+          counts[ 2 ] = counts[ 1 ];
+          counts[ 1 ] = counts[ 0 ];
+          counts[ 0 ] = 1;
+          starts[ 2 ] = starts[ 1 ];
+          starts[ 1 ] = starts[ 0 ];
+          starts[ 0 ] = 0;
+        }
       }
 
-      DEBUG( fprintf(stderr, "\nReadFileData(): %s, [%g, %g] starts = [%lu %lu %lu], counts = [%lu %lu %lu]\n",
+      DEBUG( fprintf(stderr, "\nreadFileData(): %s, [%g, %g] starts = [%lu %lu %lu], counts = [%lu %lu %lu]\n",
                        entry->name, validMinimum, validMaximum,
                        starts[ 0 ], starts[ 1 ], starts[ 2 ],
                        counts[ 0 ], counts[ 1 ], counts[ 2 ] ); )
@@ -800,6 +1242,19 @@ size_t readFileData( const int file,
              * bits 6-7 = QC_NUC_CONFIDENCE
              * 00 = high, 01 = low, 10 = medium, 11 = bad/missing.
              * To extract the 2-bits, shift right then & 0x3.
+             *
+             * For O3PROF_L2: V2.0_User_guide_O3PROF.pdf, page 14,
+             * and confirmed by joonsung.park@cfa.harvard.edu on 2025-10-06,
+             * for the highest-quality data, filter-out if
+             * qcVariable “exit_status” is
+             * less than 1 or greater than 99.
+             * Note exit_status meaning: (0=not converged, 1-99 converged,
+             * 100-110 converged but with negative ozone value) or
+             * aux variable “fit_RMS” is greater than 3.0 or
+             * aux variable “avg_residual” is greater than 0.3.
+             * Since these two aux variables filter-out most of the data,
+             * only apply them when the user specifies highest quality
+             * i.e., minimumQuality is 0.
              */
 
             const unsigned char shift =
@@ -807,10 +1262,32 @@ size_t readFileData( const int file,
               : ! strcmp( variable, "dust") ? 4
               : ! strcmp( variable, "nuc") ? 6
               : 0;
+            const int isExitStatus = ! strcmp( qcVariable, "exit_status" );
+            const int qcMinimum2 = isExitStatus ? 1 : qcMinimum;
+            const int qcMaximum2 =
+              ! isExitStatus ? qcMaximum
+              : allowNegativeCounts ? 110
+              : 99;
+
             assert( scratch );
+
             result = filterDataByQC( file, qcVariable, starts, counts,
-                                     qcMinimum, qcMaximum,
+                                     qcMinimum2, qcMaximum2,
                                      shift, scratch, data );
+
+            if ( result && isExitStatus && minimumQuality == 0 ) {
+              result =
+                filterDataByAuxiliaryVariable( file, "fit_RMS",
+                                               starts, counts,
+                                               3.0, scratch, data );
+
+              if ( result ) {
+                result =
+                  filterDataByAuxiliaryVariable( file, "avg_residuals",
+                                                 starts, counts,
+                                                 0.3, scratch, data );
+              }
+            }
           }
 
           /* Read cloud fraction variable and use it to filter data: */
@@ -838,6 +1315,7 @@ size_t readFileData( const int file,
           /* Reorder L2 data from data[columns * rows] to data[rows * columns] */
 
           if ( result && ! isL3 && strcmp( product, "PM25_L3" ) ) {
+            assert( scratch );
             transpose( rows, columns, data, scratch );
           }
         }
@@ -998,6 +1476,7 @@ static size_t readAndExpandData( const int gid,
 
     while ( points-- ) {
       double value = -DBL_MAX;
+      int filtered = 0;
 
       switch ( type ) {
       case NC_DOUBLE: value =           data[   points ]; break;
@@ -1014,7 +1493,7 @@ static size_t readAndExpandData( const int gid,
       default: break;
       }
 
-      const int filtered = ! ( value >= validMinimum && value <= validMaximum );
+      filtered = ! ( value >= validMinimum && value <= validMaximum );
 
       if ( filtered ) {
         data[ points ] = MISSING_VALUE;
@@ -1155,17 +1634,39 @@ static size_t filterDataByQC( const int file,
   if ( id < 0 ) {
     fprintf( stderr, "Failed to find variable %s.\n", qcVariable );
   } else {
+    const size_t points =
+      counts[ 0 ] * counts[ 1 ] * ( rank == 3 ? counts[ 2 ] : 1 );
+    size_t point = 0;
     int status = NC_NOERR - 1;
 
     switch ( type ) {
+    case NC_INT:
+    {
+      int* qdata = (int*) scratch;
+      status = nc_get_vara_int( gid, id, starts, counts, qdata );
+
+      if ( status == NC_NOERR ) {
+
+        for ( point = 0; point < points; ++point ) {
+          const int qValue = qdata[ point ];
+          const int filtered = qValue < qcMinimum || qValue > qcMaximum;
+
+          if ( filtered ) {
+            data[ point ] = MISSING_VALUE;
+          } else if ( data[ point ] > MISSING_VALUE ) {
+            ++result;
+          }
+        }
+      }
+    }
+
+    break;
     case NC_SHORT:
     {
       short* qdata = (short*) scratch;
       status = nc_get_vara_short( gid, id, starts, counts, qdata );
 
       if ( status == NC_NOERR ) {
-        const size_t points = counts[ 0 ] * counts[ 1 ] * counts[ 2 ];
-        size_t point = 0;
 
         for ( point = 0; point < points; ++point ) {
           const short qValue = qdata[ point ];
@@ -1216,8 +1717,6 @@ static size_t filterDataByQC( const int file,
       status = nc_get_vara_ushort( gid, id, starts, counts, qdata );
 
       if ( status == NC_NOERR ) {
-        const size_t points = counts[ 0 ] * counts[ 1 ] * counts[ 2 ];
-        size_t point = 0;
 
         for ( point = 0; point < points; ++point ) {
           const unsigned short qValue = qdata[ point ];
@@ -1239,8 +1738,6 @@ static size_t filterDataByQC( const int file,
       status = nc_get_vara_uchar( gid, id, starts, counts, qdata );
 
       if ( status == NC_NOERR ) {
-        const size_t points = counts[ 0 ] * counts[ 1 ] * counts[ 2 ];
-        size_t point = 0;
 
         for ( point = 0; point < points; ++point ) {
           const unsigned char qValue = qdata[ point ];
@@ -1271,8 +1768,6 @@ static size_t filterDataByQC( const int file,
       status = nc_get_vara_schar( gid, id, starts, counts, qdata );
 
       if ( status == NC_NOERR ) {
-        const size_t points = counts[ 0 ] * counts[ 1 ] * counts[ 2 ];
-        size_t point = 0;
 
         for ( point = 0; point < points; ++point ) {
           const unsigned char qValue = (unsigned char) qdata[ point ];
@@ -1304,10 +1799,10 @@ static size_t filterDataByQC( const int file,
     }
 
     DEBUG( fprintf( stderr,
-                    "filterDataByQC %lu points of type %d "
-                    "filters [%d, %d] shift = %d "
+                    "filterDataByQC %lu points of rank %d, type %d "
+                    "qcMinimum = %d, qcMaximum = %d, shift = %d "
                     "result = %lu points.\n",
-                    counts[ 0 ] * counts[ 1 ] * counts[ 2 ], type,
+                    counts[ 0 ] * counts[ 1 ] * counts[ 2 ], rank, (int) type,
                     qcMinimum, qcMaximum, shift,
                     result ); )
   }
@@ -1326,7 +1821,7 @@ INPUTS:  const int file              File to read.
          const double maximum        Valid maximum of data and auxiliary data.
          double data[]               Values read.
 OUTPUTS: double scratch[]            Auxiliary variable to read into.
-         double data[]               Summed data values.
+         double data[]               Filtered data values.
 RETURNS: size_t number of unfiltered points.
 ******************************************************************************/
 
@@ -1358,13 +1853,34 @@ static size_t filterDataByAuxiliaryVariable( const int file,
     double* ddata = 0;
     float* fdata = 0;
     int status = NC_NOERR - 1;
+    size_t starts3[ 3 ] = { 0, 0, 0 };
+    size_t counts3[ 3 ] = { 1, 1, 1 };
+    starts3[ 0 ] = starts[ 0 ];
+    starts3[ 1 ] = starts[ 1 ];
+    starts3[ 2 ] = starts[ 2 ];
+    counts3[ 0 ] = counts[ 0 ];
+    counts3[ 1 ] = counts[ 1 ];
+    counts3[ 2 ] = counts[ 2 ];
+
+    /*
+     * The fit_RMS and avg_residual aux variables are surface-only
+     * rank = 3 but with the last dimension = 1
+     * so ensure starts3[ 2 ] is 0 and counts3[ 2 ] is 1.
+     */
+
+    if ( rank == 3 &&
+         ( ! strcmp( auxiliaryVariable, "fit_RMS" ) ||
+           ! strcmp( auxiliaryVariable, "avg_residuals" ) ) ) {
+      starts3[ 2 ] = 0;
+      counts3[ 2 ] = 1;
+    }
 
     if ( type == NC_DOUBLE ) {
       ddata = scratch;
-      status = nc_get_vara_double( gid, id, starts, counts, ddata );
+      status = nc_get_vara_double( gid, id, starts3, counts3, ddata );
     } else if ( type == NC_FLOAT ) {
       fdata = (float*) scratch;
-      status = nc_get_vara_float( gid, id, starts, counts, fdata );
+      status = nc_get_vara_float( gid, id, starts3, counts3, fdata );
     }
 
     if ( status == NC_NOERR - 1 ) {
@@ -1388,9 +1904,13 @@ static size_t filterDataByAuxiliaryVariable( const int file,
       }
 
       DEBUG( fprintf( stderr,
-                      "Filter by %s: %lu points filter range [0, %g] "
-                       "result = %lu points.\n",
-                       auxiliaryVariable, points, maximum, result ); )
+                      "filterDataByAuxiliaryVariable( %s ), rank = %d, type = %d, starts3 = [%lu %lu %lu], counts3 = [%lu %lu %lu]: %lu points filter range [0, %g] "
+                      "result = %lu points.\n",
+                      auxiliaryVariable,
+                      rank, (int) type,
+                      starts3[ 0 ], starts3[ 1 ], starts3[ 2 ],
+                      counts3[ 0 ], counts3[ 1 ], counts3[ 2 ],
+                      points, maximum, result ); )
     }
   }
 

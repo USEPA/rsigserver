@@ -659,31 +659,48 @@ static int readTextAttribute( const int file, const char* variable,
   }
 
   if ( strcmp( attribute, "units" ) == 0 ) { /* Convert problematic units: */
-    spacesToUnderscores( value );
+    DEBUG( fprintf( stderr, "file units = '%s'\n", value ); )
 
-    if ( OR3( strcmp( value, "mb" ) == 0,
-              strcmp( value, "millibars" ) == 0,
-              strcmp( value, "hPA" ) == 0 ) ) {
-      strcpy( value, "hPa" ); /* Go metric every inch of the way! */
-    } else if ( ! strcmp( variable, "Profile_Time" ) ) {
+    if ( ! strcmp( variable, "Profile_Time" ) ) {
       strcpy( value, "seconds_since_1993-01-01" );
     } else if ( ! strcmp( variable, "Profile_UTC_Time" ) ) {
       strcpy( value, "yyyymmdd.f" );
-    } else if ( strcmp( value, "NoUnits" ) == 0 ) {
-      value[ 0 ] = '-';
-      value[ 1 ] = '\0';
-    } else if ( strcmp( value, "None" ) == 0 ) {
-      value[ 0 ] = '-';
-      value[ 1 ] = '\0';
-    } else if ( strcmp( value, "none" ) == 0 ) {
-      value[ 0 ] = '-';
-      value[ 1 ] = '\0';
-    } else if ( strstr( value, "egrees" ) ) {
-      value[ 0 ] = 'd';
-      value[ 1 ] = 'e';
-      value[ 2 ] = 'g';
-      value[ 3 ] = '\0';
+    } else if ( OR2( AND2( *value == '\260', value[1] == '\0' ),
+                     AND2( *value == '\272', value[1] == '\0' ) ) ) {
+      strcpy( value, "deg" );
+    } else if ( ! strcmp( value, "\260/s" ) ) {
+      strcpy( value, "deg/s" );
+    } else if ( ! strcmp( value, "degrees C" ) ) {
+      strcpy( value, "C" );
+    } else {
+      filterUnits( value );
+
+      if ( OR3( strcmp( value, "mb" ) == 0,
+                strcmp( value, "millibars" ) == 0,
+                strcmp( value, "hPA" ) == 0 ) ) {
+        strcpy( value, "hPa" ); /* Go metric every inch of the way! */
+      } else if ( strcmp( value, "NoUnits" ) == 0 ) {
+        value[ 0 ] = '-';
+        value[ 1 ] = '\0';
+      } else if ( strcmp( value, "None" ) == 0 ) {
+        value[ 0 ] = '-';
+        value[ 1 ] = '\0';
+      } else if ( strcmp( value, "none" ) == 0 ) {
+        value[ 0 ] = '-';
+        value[ 1 ] = '\0';
+      } else if ( strstr( value, "egrees" ) ) {
+        value[ 0 ] = 'd';
+        value[ 1 ] = 'e';
+        value[ 2 ] = 'g';
+        value[ 3 ] = '\0';
+      } else if ( ! strcmp( value, "1/km/srer_per_steradian" ) ) {
+        strcpy( value, "1/km/sr" );
+      } else if ( ! strcmp( value, "count^1/2" ) ) {
+        strcpy( value, "count^0.5" );
+      }
     }
+
+    DEBUG( fprintf( stderr, "edited units = '%s'\n", value ); )
   }
 
   return result;

@@ -1,0 +1,94 @@
+#!/bin/csh -f
+
+echo ; echo TEST VIIRS ; echo
+
+if ( 0 ) then
+
+sleep 2 ; echo ; echo TEST GetCapabilities ; echo
+curl --silent --retry 0 'https://maple.hesc.epa.gov/rsig/rsigserver?SERVICE=wcs&VERSION=1.0.0&REQUEST=GetCapabilities' > junk ; head junk ; echo '...' ; grep -i viirs junk
+
+sleep 2 ; echo ; echo TEST DescribeCoverage ; echo
+curl --silent --retry 0 'https://maple.hesc.epa.gov/rsig/rsigserver?SERVICE=wcs&VERSION=1.0.0&REQUEST=DescribeCoverage' > junk ; head junk ; echo '...' ; grep -i viirs junk
+
+endif
+
+# DescribeCoverage:
+
+sleep 2 ; echo ; echo TEST DescribeCoverage viirs.jrraod.AOD550 ; echo
+curl --silent --retry 0 'https://maple.hesc.epa.gov/rsig/rsigserver?SERVICE=wcs&VERSION=1.0.0&REQUEST=DescribeCoverage&COVERAGE=viirs.jrraod.AOD550' > junk ; echo $? ; cat junk
+
+sleep 2 ; echo ; echo TEST DescribeCoverage viirs.jrraod.AngsExp1 ; echo
+curl --silent --retry 0 'https://maple.hesc.epa.gov/rsig/rsigserver?SERVICE=wcs&VERSION=1.0.0&REQUEST=DescribeCoverage&COVERAGE=viirs.jrraod.AngsExp1' > junk ; echo $? ; cat junk
+
+sleep 2 ; echo ; echo TEST DescribeCoverage viirs.jrraod.AngsExp1 ; echo
+curl --silent --retry 0 'https://maple.hesc.epa.gov/rsig/rsigserver?SERVICE=wcs&VERSION=1.0.0&REQUEST=DescribeCoverage&COVERAGE=viirs.jrraod.AngsExp2' > junk ; echo $? ; cat junk
+
+
+# GetMetadata:
+
+sleep 2 ; echo ; echo TEST GetMetadata viirs.jrraod.AOD550 ; echo
+curl --silent --retry 0 'https://maple.hesc.epa.gov/rsig/rsigserver?SERVICE=wcs&VERSION=1.0.0&REQUEST=GetMetadata&COVERAGE=viirs.jrraod.AOD550&FORMAT=xdr&TIME=2017-09-01T00:00:00Z/2017-09-02T23:59:59Z&BBOX=-77,36,-75,38&CORNERS=1' > junk ; echo $? ; cat junk
+
+sleep 2 ; echo ; echo TEST GetMetadata viirs.jrraod.AngsExp1 ; echo
+curl --silent --retry 0 'https://maple.hesc.epa.gov/rsig/rsigserver?SERVICE=wcs&VERSION=1.0.0&REQUEST=GetMetadata&COVERAGE=viirs.jrraod.AngsExp1&FORMAT=xdr&TIME=2017-09-01T00:00:00Z/2017-09-02T23:59:59Z&BBOX=-77,36,-75,38&CORNERS=1' > junk ; echo $? ; cat junk
+
+sleep 2 ; echo ; echo TEST GetMetadata viirs.jrraod.AngsExp2 ; echo
+curl --silent --retry 0 'https://maple.hesc.epa.gov/rsig/rsigserver?SERVICE=wcs&VERSION=1.0.0&REQUEST=GetMetadata&COVERAGE=viirs.jrraod.AngsExp2&FORMAT=xdr&TIME=2017-09-01T00:00:00Z/2017-09-02T23:59:59Z&BBOX=-77,36,-75,38&CORNERS=1' > junk ; echo $? ; cat junk
+
+
+# Original:
+
+sleep 2 ; echo ; echo TEST viirs.jrraod.AOD550 original ; echo
+curl --silent --retry 0 'https://maple.hesc.epa.gov/rsig/rsigserver?SERVICE=wcs&VERSION=1.0.0&REQUEST=GetCoverage&COVERAGE=viirs.jrraod.AOD550&FORMAT=original&TIME=2017-09-01T00:00:00Z/2017-09-02T23:59:59Z&BBOX=-77,36,-75,38&CORNERS=1' > junk ; echo $? ; tar -ztf junk
+
+
+# XDR:
+
+sleep 2 ; echo ; echo TEST viirs.jrraod.AOD550 xdr ; echo
+curl --silent --retry 0 'https://maple.hesc.epa.gov/rsig/rsigserver?SERVICE=wcs&VERSION=1.0.0&REQUEST=GetCoverage&COVERAGE=viirs.jrraod.AOD550&FORMAT=xdr&TIME=2017-09-01T00:00:00Z/2017-09-02T23:59:59Z&BBOX=-77,36,-75,38&CORNERS=1' > junk ; echo $? ; ~/bin/Linux.x86_64/xdrdump junk | head -30
+
+sleep 2 ; echo ; echo TEST viirs.jrraod.AngsExp1 xdr; echo
+curl --silent --retry 0 'https://maple.hesc.epa.gov/rsig/rsigserver?SERVICE=wcs&VERSION=1.0.0&REQUEST=GetCoverage&COVERAGE=viirs.jrraod.AngsExp1&FORMAT=xdr&TIME=2017-09-01T00:00:00Z/2017-09-02T23:59:59Z&BBOX=-77,36,-75,38&CORNERS=1' > junk ; echo $? ; ~/bin/Linux.x86_64/xdrdump junk | head -30
+
+sleep 2 ; echo ; echo TEST viirs.jrraod.AngsExp2 minimum_quality xdr; echo
+curl --silent --retry 0 'https://maple.hesc.epa.gov/rsig/rsigserver?SERVICE=wcs&VERSION=1.0.0&REQUEST=GetCoverage&COVERAGE=viirs.jrraod.AngsExp2&FORMAT=xdr&TIME=2017-09-01T00:00:00Z/2017-09-02T23:59:59Z&BBOX=-77,36,-75,38&CORNERS=1&MINIMUM_QUALITY=medium' > junk ; echo $? ; ~/bin/Linux.x86_64/xdrdump junk | head -30
+
+
+# ASCII:
+
+sleep 2 ; echo ; echo TEST viirs.jrraod.AOD550 ascii ; echo
+curl --silent --retry 0 'https://maple.hesc.epa.gov/rsig/rsigserver?SERVICE=wcs&VERSION=1.0.0&REQUEST=GetCoverage&COVERAGE=viirs.jrraod.AOD550&FORMAT=ascii&TIME=2017-09-01T00:00:00Z/2017-09-02T23:59:59Z&BBOX=-77,36,-75,38&CORNERS=1' > junk ; echo $? ; head -30 junk
+
+sleep 2 ; echo ; echo TEST viirs.jrraod.AngsExp1 ascii ; echo
+curl --silent --retry 0 'https://maple.hesc.epa.gov/rsig/rsigserver?SERVICE=wcs&VERSION=1.0.0&REQUEST=GetCoverage&COVERAGE=viirs.jrraod.AngsExp1&FORMAT=ascii&TIME=2017-09-01T00:00:00Z/2017-09-02T23:59:59Z&BBOX=-77,36,-75,38&CORNERS=1' > junk ; echo $? ; head -30 junk
+
+sleep 2 ; echo ; echo TEST viirs.jrraod.AngsExp2 minimum_quality ascii ; echo
+curl --silent --retry 0 'https://maple.hesc.epa.gov/rsig/rsigserver?SERVICE=wcs&VERSION=1.0.0&REQUEST=GetCoverage&COVERAGE=viirs.jrraod.AngsExp2&FORMAT=ascii&TIME=2017-09-01T00:00:00Z/2017-09-02T23:59:59Z&BBOX=-77,36,-75,38&CORNERS=1&MINIMUM_QUALITY=medium' > junk ; echo $? ; head -30 junk
+
+
+# NetCDF-COARDS:
+
+sleep 2 ; echo ; echo TEST viirs.jrraod.AOD550 netcdf-coards ; echo
+curl --silent --retry 0 'https://maple.hesc.epa.gov/rsig/rsigserver?SERVICE=wcs&VERSION=1.0.0&REQUEST=GetCoverage&COVERAGE=viirs.jrraod.AOD550&FORMAT=netcdf-coards&TIME=2017-09-01T00:00:00Z/2017-09-02T23:59:59Z&BBOX=-77,36,-75,38&CORNERS=1' > junk ; echo $? ; ~/bin/Linux.x86_64/ncdump -h junk
+
+sleep 2 ; echo ; echo TEST viirs.jrraod.AngsExp1 netcdf-coards ; echo
+curl --silent --retry 0 'https://maple.hesc.epa.gov/rsig/rsigserver?SERVICE=wcs&VERSION=1.0.0&REQUEST=GetCoverage&COVERAGE=viirs.jrraod.AngsExp1&FORMAT=netcdf-coards&TIME=2017-09-01T00:00:00Z/2017-09-02T23:59:59Z&BBOX=-77,36,-75,38&CORNERS=1' > junk ; echo $? ; ~/bin/Linux.x86_64/ncdump -h junk
+
+sleep 2 ; echo ; echo TEST viirs.jrraod.AngsExp2 minimum_quality netcdf-coards ; echo
+curl --silent --retry 0 'https://maple.hesc.epa.gov/rsig/rsigserver?SERVICE=wcs&VERSION=1.0.0&REQUEST=GetCoverage&COVERAGE=viirs.jrraod.AngsExp2&FORMAT=netcdf-coards&TIME=2017-09-01T00:00:00Z/2017-09-02T23:59:59Z&BBOX=-77,36,-75,38&CORNERS=1&MINIMUM_QUALITY=medium' > junk ; echo $? ; ~/bin/Linux.x86_64/ncdump -h junk
+
+
+# NetCDF-IOAPI:
+
+sleep 2 ; echo ; echo TEST viirs.jrraod.AOD550 netcdf-ioapi ; echo
+curl --silent --retry 0 'https://maple.hesc.epa.gov/rsig/rsigserver?SERVICE=wcs&VERSION=1.0.0&REQUEST=GetCoverage&COVERAGE=viirs.jrraod.AOD550&FORMAT=netcdf-ioapi&TIME=2017-09-01T00:00:00Z/2017-09-02T23:59:59Z&BBOX=-77,36,-75,38&CORNERS=1&REGRID=weighted&LAMBERT=33,45,-97,40&ELLIPSOID=6370000,6370000&GRID=459,299,-2556000,-1728000,12000,12000&COMPRESS=1' | gzip -d > junk ; echo $? ; ~/bin/Linux.x86_64/ncdump -h junk
+
+sleep 2 ; echo ; echo TEST viirs.jrraod.AngsExp1 netcdf-ioapi ; echo
+curl --silent --retry 0 'https://maple.hesc.epa.gov/rsig/rsigserver?SERVICE=wcs&VERSION=1.0.0&REQUEST=GetCoverage&COVERAGE=viirs.jrraod.AngsExp1&FORMAT=netcdf-ioapi&TIME=2017-09-01T00:00:00Z/2017-09-02T23:59:59Z&BBOX=-77,36,-75,38&CORNERS=1&REGRID=weighted&LAMBERT=33,45,-97,40&ELLIPSOID=6370000,6370000&GRID=459,299,-2556000,-1728000,12000,12000&COMPRESS=1' | gzip -d > junk ; echo $? ; ~/bin/Linux.x86_64/ncdump -h junk
+
+sleep 2 ; echo ; echo TEST viirs.jrraod.AngsExp2 minimum_quality netcdf-ioapi ; echo
+curl --silent --retry 0 'https://maple.hesc.epa.gov/rsig/rsigserver?SERVICE=wcs&VERSION=1.0.0&REQUEST=GetCoverage&COVERAGE=viirs.jrraod.AngsExp2&FORMAT=netcdf-ioapi&TIME=2017-09-01T00:00:00Z/2017-09-02T23:59:59Z&BBOX=-77,36,-75,38&CORNERS=1&MINIMUM_QUALITY=medium&REGRID=weighted&LAMBERT=33,45,-97,40&ELLIPSOID=6370000,6370000&GRID=459,299,-2556000,-1728000,12000,12000&COMPRESS=1' | gzip -d > junk ; echo $? ; ~/bin/Linux.x86_64/ncdump -h junk
+
+
+/bin/rm -f junk
+echo ; echo DONE VIIRS ; echo

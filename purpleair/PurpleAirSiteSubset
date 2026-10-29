@@ -1,0 +1,55 @@
+#!/bin/sh
+# PurpleAirSiteSubset - Subset program for PurpleAir outdoor site location data.
+# NOTE: Extract unique sites from the pre-aggregated binary
+# temperature_daily.xdr files that match the specified date range.
+
+# The data_directory contains YYYYMMDD/temperature_daily.xdr files:
+
+data_directory=/data/PurpleAir/data
+temp_directory=/data/tmp
+tempfile=$temp_directory/junk_purpleair_locations.$$
+bindir=/rsig/current/code/bin/Linux.x86_64
+SUBSETTER=$bindir/PointSubset
+
+if [ "$#" != 10 ]
+then
+  echo
+  echo "$0 - Subset PurpleAir locations."
+  echo "Usage: $0 -desc description \ "
+  echo "-timerange yyyymmddhhmmss1 yyyymmddhhmmss2 \ "
+  echo "-bounds lonmin latmin lonmax latmax > output.xdr"
+  echo
+  echo "Example: $0 -desc https://api.purpleair.com,PurpleAirSubset \ "
+  echo "-timerange 20240901000000 20240902235959 \ "
+  echo "-bounds -122 44 -121 45 > subset.xdr"
+  echo
+  exit 1
+fi
+
+yyyymmdd1=`echo "$4" | awk '{ printf "%d", substr( $1, 1, 8 ) }'`
+yyyymmdd2=`echo "$5" | awk '{ printf "%d", substr( $1, 1, 8 ) }'`
+
+# Write to tempfile the list of valid daily Point xdr files for PointSubset:
+
+yyyymmdd=$yyyymmdd1
+
+while [ "$yyyymmdd" -le "$yyyymmdd2" ]
+do
+  yyyy=`expr $yyyymmdd / 10000`
+  input_file=$data_directory/$yyyy/$yyyymmdd/temperature_daily.xdr
+
+  if [ -f $input_file ]
+  then
+    echo $input_file >> $tempfile
+  fi
+
+  yyyymmdd=`expr $yyyymmdd + 1`
+done
+
+# Run PointSubset to subset temperature_daily.xdr files and
+# output sensor locations in xdr format to stdout and stderr to /dev/null:
+
+$SUBSETTER -files $tempfile -tmpdir $temp_directory -sensor -1 $3 $4 $5 $6 $7 $8 $9 ${10} 2> /dev/null
+status=$?
+rm $tempfile
+exit $status

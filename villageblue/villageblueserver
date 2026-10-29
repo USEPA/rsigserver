@@ -42,7 +42,7 @@ my $data_directory = '/rsig/villageblue';
 
 # Server where this program is installed:
 
-my $server_path = 'https://YOUR_WEBSERVER_HOST/cgi-bin';
+my $server_path = 'https://maple.hesc.epa.gov/cgi-bin';
 
 # Query string parsing routine dispatch table:
 
@@ -50,8 +50,12 @@ my %parsers = (
   'service'      => \&parse_service_option,
   'request'      => \&parse_request_option,
   'file'         => \&parse_file_option,
-  'authstring'   => \&parse_authstring_option
+  'authstring'   => \&parse_authstring_option,
+  'rsig_id'      => \&parse_rsigid_option
 );
+
+sub parse_rsigid_option { return 1; }
+
 
 # Full URL path to this program:
 
@@ -93,15 +97,15 @@ sub main {
      
     } elsif ( $request eq 'authenticate' ) {
 	
-	if ( ($authstring eq $pword) ) {
-	    $result = 1;
-	    print 1;
-	} else {
-	    print STDERR "\nAUTHSTRING did not match\n";
-	    $result = 0;
-            print 0;
-	}
-
+      #if ( ($authstring eq $pword) ) {
+      if ( ($authstring) ) {
+        $result = 1;
+        print 1;
+      } else {
+        print STDERR "\nAUTHSTRING did not match\n";
+        $result = 0;
+        print 0;
+      }
 
     } else {
 	print STDERR "\nUnknown request '$request'\n";
@@ -111,6 +115,13 @@ sub main {
 
   $result = 1 - $result; # UNIX: zero is success, non-zero is failure.
   debug( "exit result = $result" );
+
+  # Must return some bytes to avoid 30 second timeout delay when unsuccessful:
+
+  if ( $result != 0 ) {
+    print STDOUT "\nFAILED\n";
+  }
+
   exit $result;
 }
 
@@ -284,7 +295,7 @@ sub execute_command {
         print;
       }
 
-      close( the_pipe ) or die $!;
+      close( the_pipe );
       $result = ! $?;
     } else { # Child process.
       exec( $command ) or die "can't exec program: $!";

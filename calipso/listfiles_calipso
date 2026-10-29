@@ -1,0 +1,226 @@
+#!/bin/csh -f
+# listfiles_calipso - Print sorted list of pathed CALIPSO data files matching
+# PRODUCT, YYYYMMDDHH, HOURS and LONLAT rectangle.
+# 2024-04-09 plessel.todd@epa.gov 919-541-5500
+# restorecon -v -R -F /slocal/sites/cain.larc.nasa.gov/cgi-bin
+
+############################## Tunable parameters #############################
+
+set data_directory = /ASDC_archive/CALIPSO
+set tempdir = /var/tmp
+set temp  = $tempdir/listfiles.$$
+set temp2 = $tempdir/listfiles2.$$
+set CURL = /usr/bin/curl
+
+# CURL is used to call the external webservice to quickly generate a file list
+# based on PRODUCT, TIME and LONLAT rectangle (intersected against the ground
+# track POLYLINE or orbital number to avoid false positive matches).
+# Note the maximum number of files returned is limited by the maximum page_size
+# (2000). Since there can be 144 or more files per day, the webservice is
+# called sequentially for at most 10 days at a time. UGLY.
+# Available data products are found here:
+# https://cmr.earthdata.nasa.gov/search/site/collections/directory/LARC_CLOUD/gov.nasa.eosdis
+# To find the concept_id for a specific version of a product,
+# see the product page, e.g.,
+# https://asdc.larc.nasa.gov/project/CALIPSO/CAL_LID_L2_05kmAPro-Standard-V5-00_V5-00
+# then hover the mouse pointer over the green 'Get Dataset' button to see the
+# concept id:
+# https://search.earthdata.nasa.gov/search/granules?p=C3551627908-LARC_CLOUD
+
+set CMR_URL = "https://cmr.earthdata.nasa.gov/search/granules?page_size=2000"
+
+# Each product name is followed by a comma and its the concept id.
+# This must be updated when new product versions are available. UGLY.
+# These ids are for CALIPSO V5 files:
+
+set cmr_product_ids = ( \
+'L1,C3292851686-LARC_CLOUD' \
+'L2_01kmCLay,C3463063995-LARC_CLOUD' \
+'L2_05kmALay,C3463063987-LARC_CLOUD' \
+'L2_05kmAPro,C3551627908-LARC_CLOUD' \
+'L2_05kmCLay,C3463063986-LARC_CLOUD' \
+'L2_05kmCPro,C3551627896-LARC_CLOUD' \
+'L2_333mMLay,C3551627915-LARC_CLOUD' \
+'L2_VFM,C3463064020-LARC_CLOUD' \
+)
+
+###############################################################################
+
+# Make tail +n work!
+setenv _POSIX2_VERSION 199209
+set _POSIX2_VERSION=199209
+
+
+
+###############################################################################
+# Read and check command-line arguments.
+
+set valid_products = `echo $cmr_product_ids | tr ',' ' ' | awk '{ for ( i = 1; i <= NF; i += 2 ) { print $i } }' | sort | uniq`
+
+@ ok = 0
+set product = ''
+@ yyyymmddhh = 0
+@ hours      = 0
+set lonmin = 0
+set lonmax = 0
+set latmin = 0
+set latmax = 0
+
+if ( $#argv == 7 ) then
+  set product  = $1
+  @ yyyymmddhh = $2
+  @ hours      = $3
+  set lonmin   = $4
+  set latmin   = $5
+  set lonmax   = $6
+  set latmax   = $7
+
+  @ ok = `echo " $valid_products " | awk -v product="$product" '{ i = index( $0, product ); print ( i != 0 ) }'`
+
+  if ( $ok ) then
+    @ ok = ($yyyymmddhh >= 1990010100 && $yyyymmddhh <= 2147123123 && $hours >= 1)
+  
+    if ( $ok ) then
+      @ ok = `echo $lonmin $lonmax $latmin $latmax | awk '{ lonmin = $1; lonmax = $2; latmin = $3; latmax = $4; print ( lonmin >= -180 && lonmin <= 180 && lonmax >= lonmin && lonmax <= 180 && latmin >= -90 && latmin <= 90 && latmax >= latmin && latmax <= 90 ) }'`
+    endif
+  endif
+
+  if ( ! $ok ) then
+    echo "$0 Invalid command-line arguments $*"
+  endif
+endif
+
+
+
+###############################################################################
+# If invalid then print usage instructions and an example:
+
+if ( ! $ok ) then
+  echo
+  echo "$0 - Print sorted list of pathed CALIPSO data files matching "
+  echo 'PRODUCT, YYYYMMDDHH, HOURS and LONLAT rectangle.'
+  echo "usage: $0 PRODUCT YYYYMMDDHH HOURS LONMIN LATMIN LONMAX LATMAX"
+  echo 'PRODUCT is one of:'
+  echo $valid_products | tr ' ' '\n'
+  echo "example: $0 L2_05kmALay 2022070100 48 -120 30 -110 32"
+  echo $data_directory/LID_L2_05kmALay-Standard-V5-00/2022/07/CAL_LID_L2_05kmALay-Standard-V5-00.2022-07-01T10-43-55ZN.hdf
+  echo $data_directory/LID_L2_05kmALay-Standard-V5-00/2022/07/CAL_LID_L2_05kmALay-Standard-V5-00.2022-07-02T21-58-10ZD.hdf
+  exit 1
+endif
+
+
+
+###############################################################################
+# Get a list of cmr concept ids that match the specified product.
+
+set cmr_ids = ()
+
+foreach product_id ( $cmr_product_ids )
+  set cmr_id = `echo $product,$product_id | awk -F, '{if ($1 == $2) print $3}'`
+
+  if ( "$cmr_id" != '' ) then
+    set cmr_ids = ($cmr_ids $cmr_id)
+  endif
+end
+
+
+
+###############################################################################
+# If cmr_ids exist then use CURL to call the webservice with at most 10 days
+# time range each time.
+
+if ( $#cmr_ids > 0 ) then
+
+  # Set initial time variables:
+
+  set days_per_month = ( 31 28 31 30 31 30 31 31 30 31 30 31 )
+  @ yyyy =   $yyyymmddhh / 1000000
+  @ mm   = ( $yyyymmddhh / 10000 ) % 100
+  @ dd   = ( $yyyymmddhh / 100 ) % 100
+  @ hh   =   $yyyymmddhh % 100
+  @ leap = ( $yyyy % 4 == 0 && ! ( $yyyy % 100 == 0 && ! $yyyy % 400 == 0 ) )
+  @ days_per_year = 365 + $leap
+  @ h = 1
+
+  while ( $h <= $hours )
+    set yyyy_mm_ddThh1 = `printf "%04d-%02d-%02dT%02d" $yyyy $mm $dd $hh`
+
+    # End timestamp is at most 10 days later since the cmr page size limit is
+    # 2000 and there can be 144 files (or more?) per day.
+
+    @ days = 1
+
+    while ( $days <= 10 && $h < $hours )
+      @ hh += 1
+
+      if ( $hh == 24 ) then
+        @ hh = 0
+        @ dd += 1
+        @ days += 1
+        @ days_this_month = $days_per_month[$mm]
+
+        if ( $mm == 2 ) then
+          @ days_this_month += $leap
+        endif
+
+        if ( $dd > $days_this_month ) then
+          @ dd = 1
+          @ mm += 1
+
+          if ( $mm > 12 ) then
+            @ mm = 1
+            @ yyyy += 1
+            @ leap = ( $yyyy % 4 == 0 && ! ( $yyyy % 100 == 0 && ! $yyyy % 400 == 0 ) )
+          endif
+        endif
+      endif
+
+      @ h += 1
+    end
+
+    set yyyy_mm_ddThh2 = `printf "%04d-%02d-%02dT%02d" $yyyy $mm $dd $hh`
+
+    foreach cmr_id ( $cmr_ids )
+      # UGLY: cmr webservice uses [] in the URL! Must use --globoff to work.
+      # Parse out the .hdf file names from the XML then extract the yyyy/mm and
+      # prepend local directory which contains one month of files.
+
+      set file_names = `$CURL --silent --globoff "$CMR_URL&concept_id=$cmr_id&bounding_box[]=$lonmin,$latmin,$lonmax,$latmax&temporal=${yyyy_mm_ddThh1}:00:00Z,${yyyy_mm_ddThh2}:59:59Z" | tr '[<>]' '\n' | grep '\.hdf'`
+
+      # E.g., CAL_LID_L2_05kmALay-Standard-V5-00.2022-07-01T10-43-55ZN.hdf
+
+      foreach file_name ( $file_names )
+        echo $file_name | \
+        awk -F. -v dir="$data_directory" \
+        '{ if ( $NF == "hdf" ) { timestamp = substr( $2, 1, 13 ); { yyyy = substr( timestamp, 1, 4 ); mm = substr( timestamp, 6, 2 ); subdir = substr( $1, 5); printf "%s/%s/%s/%s/%s\n", dir, subdir, yyyy, mm, $0 } } }' >> $temp
+      end
+    end
+
+    @ h += 1
+  end
+
+  # List of files must be sorted by time with no redundant files per timestamp.
+  # In case there are multiple versions of files, sort | uniq by file timestamp.
+  # E.g., CAL_LID_L2_05kmALay-Standard-V5-00.2022-07-01T10-43-55ZN.hdf
+
+  touch $temp
+  @ file_count = `grep '\.hdf' $temp | wc -l`
+
+  if ( $file_count > 0 ) then
+    @ parts = `head -1 $temp | awk -F. '{ print NF }'`
+    @ timestamp_part = $parts - 1
+    @ skip = `head -1 $temp | awk '{ print index( $(NF-1), "20" ) }'`
+    sort -t . -k $timestamp_part,$timestamp_part $temp | uniq -s $skip > $temp2
+  endif
+
+  @ file_count = `grep '\.hdf' $temp | wc -l`
+endif
+
+
+
+###############################################################################
+# Finally output the filtered file list (or empty) then remove the file:
+
+touch $temp
+cat $temp
+rm $temp

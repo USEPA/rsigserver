@@ -1,0 +1,5 @@
+#!/bin/csh -f
+/data/OpenAQ/update_location_info
+/data/OpenAQ/update_openaq_files
+/data/OpenAQ/check_sites
+/data/OpenAQ/update_location_info2

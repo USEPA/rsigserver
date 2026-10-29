@@ -333,12 +333,13 @@ void compareRegriddedPoint( Parameters* parameters ) {
     ZERO_OBJECT( &data );
     parameters->ok = 0;
 
-    DEBUG( fprintf( stderr, "compareRegriddedData()\n" ); )
+    DEBUG( fprintf( stderr, "In compareRegriddedPoint()\n" ); )
 
     if ( readRegriddedXDR( parameters->input, &data ) ) {
       compareFunctionNameUnits( parameters->compareFunction,
                                 parameters->convertFunction,
-                                data.variable[ 3 ], data.units[ 3 ],
+                                data.variable[ data.variables - 1 ],
+                                data.units[ data.variables - 1 ],
                                 parameters->variable,
                                 parameters->units );
 
@@ -391,52 +392,49 @@ RETURNS: Integer 1 if valid, else 0.
 
 static Integer isValidData( const Data* data ) {
   const Integer result =
-    AND22( data,
+    AND15( data,
            data->note[ 0 ],
            isValidUTCTimestamp( data->startingTimestamp ),
            data->timesteps > 0,
-           IN_RANGE( data->variables, 4, 7 ),
+           IMPLIES_ELSE( data->points > 0,
+                         IN_RANGE( data->variables, 4, 7 ),
+                         IN_RANGE( data->variables, 1, 2 ) ),
            data->variable,
            data->variable[ 0 ],
            data->variable[ data->variables - 1 ],
            data->units,
            data->units[ 0 ],
            data->units[ data->variables - 1 ],
-           OR2( ! strcmp( data->variable[ 0 ], "Timestamp" ),
-                ! strcmp( data->variable[ 0 ], "timestamp" ) ),
-           OR2( ! strcmp( data->variable[ 1 ], "Longitude" ),
-                ! strcmp( data->variable[ 1 ], "longitude" ) ),
-           OR2( ! strcmp( data->variable[ 2 ], "Latitude" ),
-                ! strcmp( data->variable[ 2 ], "latitude" ) ),
-           ! strcmp( data->units[ 0 ], "yyyymmddhhmmss" ),
-           ! strcmp( data->units[ 1 ], "deg" ),
-           ! strcmp( data->units[ 2 ], "deg" ),
-           IMPLIES( OR2( ! strcmp( data->variable[ 3 ], "Elevation" ),
-                         ! strcmp( data->variable[ 3 ], "elevation" ) ),
-                    AND2( data->variables > 4,
-                          ! strcmp( data->units[ 3 ], "m" ) ) ),
-           IMPLIES( isVectorVariable( data ),
-                    AND3( data->variables > 4,
-                          ! strcmp( data->units[ data->variables - 2], "m/s" ),
-                          ! strcmp( data->units[ data->variables - 1], "m/s"))),
+           IMPLIES( data->points > 0,
+                    AND8( OR2( ! strcmp( data->variable[ 0 ], "Timestamp" ),
+                               ! strcmp( data->variable[ 0 ], "timestamp" ) ),
+                          OR2( ! strcmp( data->variable[ 1 ], "Longitude" ),
+                               ! strcmp( data->variable[ 1 ], "longitude" ) ),
+                          OR2( ! strcmp( data->variable[ 2 ], "Latitude" ),
+                               ! strcmp( data->variable[ 2 ], "latitude" ) ),
+                          ! strcmp( data->units[ 0 ], "yyyymmddhhmmss" ),
+                          ! strcmp( data->units[ 1 ], "deg" ),
+                          ! strcmp( data->units[ 2 ], "deg" ),
+                          IMPLIES( OR2( ! strcmp( data->variable[ 3 ], "Elevation" ),
+                                        ! strcmp( data->variable[ 3 ], "elevation" ) ),
+                                   AND2( data->variables > 4,
+                                         ! strcmp( data->units[ 3 ], "m" ) ) ),
+                          IMPLIES( isVectorVariable( data ),
+                                   AND3( data->variables > 4,
+                                         ! strcmp( data->units[ data->variables - 2], "m/s" ),
+                                         ! strcmp( data->units[ data->variables - 1], "m/s"))))),
            IMPLIES_ELSE( data->points > 0,
                          data->data,
                          data->data == 0 ),
-           IMPLIES( data->notes,
+           IMPLIES( AND2( data->points > 0 , data->notes ),
                     AND2( data->notes[ 0 ], data->notes[ data->points - 1 ] ) ),
            IMPLIES( data->totalRegriddedPoints > 0,
-                    AND7( data->outputPoints,
+                    AND6( data->outputPoints,
                           data->gridLongitudes,
                           data->gridLatitudes,
-                          IMPLIES(OR2(! strcmp(data->variable[3], "Elevation"),
-                                      ! strcmp(data->variable[3], "elevation")),
-                                   data->gridElevations ),
                           data->columns,
                           data->rows,
                           data->gridData ) ) );
-
-if ( result == 0 ) abort(); /* TEMP HACK */
-
   return result;
 }
 
@@ -1866,8 +1864,13 @@ static Integer writeRegriddedIOAPI( const Data* data,
   PRE02( isValidData( data ), isValidParameters( parameters ) );
 
   Integer result = 0;
+  const Grid* const grid = parameters->grid;
+  const Integer totalGridCells =
+    grid->layers( grid ) * grid->rows( grid ) * grid->columns( grid );
   const Integer fileSizeEstimate =
-    data->totalRegriddedPoints * 5 * 4 + 10000; /* lon, lat, var, var2 + hdr */
+    data->timesteps * totalGridCells *
+    ( 4 + 1 + 2 ) * 4 + 10000;
+    /* lon,lat,elv,var,var2,tflag,hdr */
   const Integer create64BitFile = fileSizeEstimate > TWO_GB;
   Integer file =
     createNetCDFFile( parameters->netcdfFileName, create64BitFile );

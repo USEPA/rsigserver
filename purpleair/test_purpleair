@@ -1,0 +1,119 @@
+#!/bin/csh -f
+
+echo ; echo TEST PurpleAir ; echo
+
+if ( 0 ) then
+
+sleep 2 ; echo ; echo TEST GetCapabilities ; echo
+curl --silent --retry 0 'https://maple.hesc.epa.gov/rsig/rsigserver?SERVICE=wcs&VERSION=1.0.0&REQUEST=GetCapabilities' > junk ; head junk ; echo '...' ; grep -i purpleair junk
+
+sleep 2 ; echo ; echo TEST DescribeCoverage ; echo
+curl --silent --retry 0 'https://maple.hesc.epa.gov/rsig/rsigserver?SERVICE=wcs&VERSION=1.0.0&REQUEST=DescribeCoverage' > junk ; head junk ; echo '...' ; grep -i purpleair junk
+
+endif
+
+
+# DescribeCoverage:
+
+sleep 2 ; echo ; echo TEST DescribeCoverage locations ; echo
+curl --silent --retry 0 'https://maple.hesc.epa.gov/rsig/rsigserver?SERVICE=wcs&VERSION=1.0.0&REQUEST=DescribeCoverage&COVERAGE=purpleair.locations&KEY=EPA' > junk ; echo $? ; cat junk
+
+sleep 2 ; echo ; echo TEST DescribeCoverage pm25_corrected_hourly ; echo
+curl --silent --retry 0 'https://maple.hesc.epa.gov/rsig/rsigserver?SERVICE=wcs&VERSION=1.0.0&REQUEST=DescribeCoverage&COVERAGE=purpleair.pm25_corrected_hourly&KEY=EPA' > junk ; echo $? ; cat junk
+
+sleep 2 ; echo ; echo TEST DescribeCoverage pm25_corrected_daily ; echo
+curl --silent --retry 0 'https://maple.hesc.epa.gov/rsig/rsigserver?SERVICE=wcs&VERSION=1.0.0&REQUEST=DescribeCoverage&COVERAGE=purpleair.pm25_corrected_daily&KEY=EPA' > junk ; echo $? ; cat junk
+
+sleep 2 ; echo ; echo TEST DescribeCoverage humidity_hourly ; echo
+curl --silent --retry 0 'https://maple.hesc.epa.gov/rsig/rsigserver?SERVICE=wcs&VERSION=1.0.0&REQUEST=DescribeCoverage&COVERAGE=purpleair.humidity_hourly&KEY=EPA' > junk ; echo $? ; cat junk
+
+sleep 2 ; echo ; echo TEST DescribeCoverage humidity_daily ; echo
+curl --silent --retry 0 'https://maple.hesc.epa.gov/rsig/rsigserver?SERVICE=wcs&VERSION=1.0.0&REQUEST=DescribeCoverage&COVERAGE=purpleair.humidity_daily&KEY=EPA' > junk ; echo $? ; cat junk
+
+sleep 2 ; echo ; echo TEST DescribeCoverage temperature_hourly ; echo
+curl --silent --retry 0 'https://maple.hesc.epa.gov/rsig/rsigserver?SERVICE=wcs&VERSION=1.0.0&REQUEST=DescribeCoverage&COVERAGE=purpleair.temperature_hourly&KEY=EPA' > junk ; echo $? ; cat junk
+
+sleep 2 ; echo ; echo TEST DescribeCoverage temperature_daily ; echo
+curl --silent --retry 0 'https://maple.hesc.epa.gov/rsig/rsigserver?SERVICE=wcs&VERSION=1.0.0&REQUEST=DescribeCoverage&COVERAGE=purpleair.temperature_daily&KEY=EPA' > junk ; echo $? ; cat junk
+
+sleep 2 ; echo ; echo TEST DescribeCoverage pm25_corrected ; echo
+curl --silent --retry 0 'https://maple.hesc.epa.gov/rsig/rsigserver?SERVICE=wcs&VERSION=1.0.0&REQUEST=DescribeCoverage&COVERAGE=purpleair.pm25_corrected&KEY=EPA' > junk ; echo $? ; cat junk
+
+sleep 2 ; echo ; echo TEST DescribeCoverage pm25 ; echo
+curl --silent --retry 0 'https://maple.hesc.epa.gov/rsig/rsigserver?SERVICE=wcs&VERSION=1.0.0&REQUEST=DescribeCoverage&COVERAGE=purpleair.pm25&KEY=EPA' > junk ; echo $? ; cat junk
+
+
+# GetMetadata:
+
+sleep 2 ; echo ; echo TEST GetMetadata locations ; echo
+curl --silent --retry 0 'https://maple.hesc.epa.gov/rsig/rsigserver?SERVICE=wcs&VERSION=1.0.0&REQUEST=GetMetadata&COVERAGE=purpleair.locations&FORMAT=xdr&TIME=2025-06-01T00:00:00Z/2025-06-02T23:59:59Z&BBOX=-126,24,-60,50&KEY=EPA' > junk ; echo $? ; cat junk
+
+sleep 2 ; echo ; echo TEST GetMetadata pm25_corrected_hourly ; echo
+curl --silent --retry 0 'https://maple.hesc.epa.gov/rsig/rsigserver?SERVICE=wcs&VERSION=1.0.0&REQUEST=GetMetadata&COVERAGE=purpleair.pm25_corrected_hourly&FORMAT=ascii&TIME=2025-06-01T00:00:00Z/2025-06-02T23:59:59Z&BBOX=-126,24,-60,50&KEY=EPA' > junk ; echo $? ; cat junk
+
+sleep 2 ; echo ; echo TEST GetMetadata pm25 ; echo
+curl --silent --retry 0 'https://maple.hesc.epa.gov/rsig/rsigserver?SERVICE=wcs&VERSION=1.0.0&REQUEST=GetMetadata&COVERAGE=purpleair.pm25&FORMAT=xdr&TIME=2025-06-01T00:00:00Z/2025-06-02T23:59:59Z&BBOX=-126,24,-60,50&OUT_IN_FLAG=0&MAXIMUM_DIFFERENCE=5&MAXIMUM_RATIO=0.7&DEFAULT_HUMIDITY=50&AGGREGATE=hourly&MINIMUM_AGGREGATION_COUNT_PERCENTAGE=75&KEY=EPA' > junk ; echo $? ; cat junk
+
+
+# Original:
+
+sleep 2 ; echo ; echo TEST locations original ; echo
+curl --silent --retry 0 'https://maple.hesc.epa.gov/rsig/rsigserver?SERVICE=wcs&VERSION=1.0.0&REQUEST=GetCoverage&COVERAGE=purpleair.locations&FORMAT=original&TIME=2025-06-01T00:00:00Z/2025-06-02T23:59:59Z&BBOX=-126,24,-60,50&KEY=EPA' > junk ; echo $? ; tar -ztf junk
+
+sleep 2 ; echo ; echo TEST pm25_corrected_hourly original ; echo
+curl --silent --retry 0 'https://maple.hesc.epa.gov/rsig/rsigserver?SERVICE=wcs&VERSION=1.0.0&REQUEST=GetCoverage&COVERAGE=purpleair.pm25_corrected_hourly&FORMAT=original&TIME=2025-06-01T00:00:00Z/2025-06-02T23:59:59Z&BBOX=-126,24,-60,50&KEY=EPA' > junk ; echo $? ; tar -ztf junk
+
+sleep 2 ; echo ; echo TEST pm25_corrected_hourly pm25 ; echo
+curl --silent --retry 0 'https://maple.hesc.epa.gov/rsig/rsigserver?SERVICE=wcs&VERSION=1.0.0&REQUEST=GetCoverage&COVERAGE=purpleair.pm25&FORMAT=original&TIME=2025-06-01T00:00:00Z/2025-06-02T23:59:59Z&BBOX=-126,24,-60,50&OUT_IN_FLAG=0&MAXIMUM_DIFFERENCE=5&MAXIMUM_RATIO=0.7&DEFAULT_HUMIDITY=50&AGGREGATE=hourly&MINIMUM_AGGREGATION_COUNT_PERCENTAGE=75&KEY=EPA' > junk ; echo $? ; tar -ztf junk
+
+
+# XDR:
+
+sleep 2 ; echo ; echo TEST locations xdr ; echo
+curl --silent --retry 0 'https://maple.hesc.epa.gov/rsig/rsigserver?SERVICE=wcs&VERSION=1.0.0&REQUEST=GetCoverage&COVERAGE=purpleair.locations&FORMAT=xdr&TIME=2025-06-01T00:00:00Z/2025-06-02T23:59:59Z&BBOX=-126,24,-60,50&KEY=EPA' > junk ; echo $? ; ~/bin/Linux.x86_64/xdrdump junk | head -30
+
+sleep 2 ; echo ; echo TEST pm25_corrected_hourly xdr ; echo
+curl --silent --retry 0 'https://maple.hesc.epa.gov/rsig/rsigserver?SERVICE=wcs&VERSION=1.0.0&REQUEST=GetCoverage&COVERAGE=purpleair.pm25_corrected_hourly&FORMAT=xdr&TIME=2025-06-01T00:00:00Z/2025-06-02T23:59:59Z&BBOX=-126,24,-60,50&KEY=EPA' > junk ; echo $? ; ~/bin/Linux.x86_64/xdrdump junk | head -30
+
+sleep 2 ; echo ; echo TEST pm25_corrected xdr ; echo
+curl --silent --retry 0 'https://maple.hesc.epa.gov/rsig/rsigserver?SERVICE=wcs&VERSION=1.0.0&REQUEST=GetCoverage&COVERAGE=purpleair.pm25_corrected&FORMAT=xdr&TIME=2025-06-01T00:00:00Z/2025-06-02T23:59:59Z&BBOX=-126,24,-60,50&OUT_IN_FLAG=0&MAXIMUM_DIFFERENCE=5&MAXIMUM_RATIO=0.7&DEFAULT_HUMIDITY=50&AGGREGATE=hourly&MINIMUM_AGGREGATION_COUNT_PERCENTAGE=75&KEY=EPA' > junk ; echo $? ; ~/bin/Linux.x86_64/xdrdump junk | head -30
+
+
+# ASCII:
+
+sleep 2 ; echo ; echo TEST locations ascii ; echo
+curl --silent --retry 0 'https://maple.hesc.epa.gov/rsig/rsigserver?SERVICE=wcs&VERSION=1.0.0&REQUEST=GetCoverage&COVERAGE=purpleair.locations&FORMAT=ascii&TIME=2025-06-01T00:00:00Z/2025-06-02T23:59:59Z&BBOX=-126,24,-60,50&KEY=EPA' > junk ; echo $? ; head -30 junk
+
+sleep 2 ; echo ; echo TEST pm25_corrected_hourly ascii ; echo
+curl --silent --retry 0 'https://maple.hesc.epa.gov/rsig/rsigserver?SERVICE=wcs&VERSION=1.0.0&REQUEST=GetCoverage&COVERAGE=purpleair.pm25_corrected_hourly&FORMAT=ascii&TIME=2025-06-01T00:00:00Z/2025-06-02T23:59:59Z&BBOX=-126,24,-60,50&KEY=EPA' > junk ; echo $? ; head -30 junk
+
+sleep 2 ; echo ; echo TEST pm25_corrected ascii ; echo
+curl --silent --retry 0 'https://maple.hesc.epa.gov/rsig/rsigserver?SERVICE=wcs&VERSION=1.0.0&REQUEST=GetCoverage&COVERAGE=purpleair.pm25_corrected&FORMAT=ascii&TIME=2025-06-01T00:00:00Z/2025-06-02T23:59:59Z&BBOX=-126,24,-60,50&OUT_IN_FLAG=0&MAXIMUM_DIFFERENCE=5&MAXIMUM_RATIO=0.7&DEFAULT_HUMIDITY=50&AGGREGATE=hourly&MINIMUM_AGGREGATION_COUNT_PERCENTAGE=75&KEY=EPA' > junk ; echo $? ; head -30 junk
+
+
+# NetCDF-COARDS:
+
+sleep 2 ; echo ; echo TEST locations netcdf-coards ; echo
+curl --silent --retry 0 'https://maple.hesc.epa.gov/rsig/rsigserver?SERVICE=wcs&VERSION=1.0.0&REQUEST=GetCoverage&COVERAGE=purpleair.locations&FORMAT=netcdf-coards&TIME=2025-06-01T00:00:00Z/2025-06-02T23:59:59Z&BBOX=-126,24,-60,50&KEY=EPA' > junk ; echo $? ; ~/bin/Linux.x86_64/ncdump -h junk
+
+sleep 2 ; echo ; echo TEST pm25_corrected_hourly netcdf-coards ; echo
+curl --silent --retry 0 'https://maple.hesc.epa.gov/rsig/rsigserver?SERVICE=wcs&VERSION=1.0.0&REQUEST=GetCoverage&COVERAGE=purpleair.pm25_corrected_hourly&FORMAT=netcdf-coards&TIME=2025-06-01T00:00:00Z/2025-06-02T23:59:59Z&BBOX=-126,24,-60,50&KEY=EPA' > junk ; echo $? ; ~/bin/Linux.x86_64/ncdump -h junk
+
+sleep 2 ; echo ; echo TEST pm25_corrected netcdf-coards ; echo
+curl --silent --retry 0 'https://maple.hesc.epa.gov/rsig/rsigserver?SERVICE=wcs&VERSION=1.0.0&REQUEST=GetCoverage&COVERAGE=purpleair.pm25_corrected&FORMAT=netcdf-coards&TIME=2025-06-01T00:00:00Z/2025-06-02T23:59:59Z&BBOX=-126,24,-60,50&OUT_IN_FLAG=0&MAXIMUM_DIFFERENCE=5&MAXIMUM_RATIO=0.7&DEFAULT_HUMIDITY=50&AGGREGATE=hourly&MINIMUM_AGGREGATION_COUNT_PERCENTAGE=75&KEY=EPA' > junk ; echo $? ; ~/bin/Linux.x86_64/ncdump -h junk
+
+
+# NetCDF-IOAPI:
+
+sleep 2 ; echo ; echo TEST locations netcdf-ioapi ; echo
+curl --silent --retry 0 'https://maple.hesc.epa.gov/rsig/rsigserver?SERVICE=wcs&VERSION=1.0.0&REQUEST=GetCoverage&COVERAGE=purpleair.locations&FORMAT=netcdf-ioapi&TIME=2025-06-01T00:00:00Z/2025-06-02T23:59:59Z&BBOX=-126,24,-60,50&REGRID=weighted&LAMBERT=33,45,-97,40&ELLIPSOID=6370000,6370000&GRID=459,299,-2556000,-1728000,12000,12000&COMPRESS=1&KEY=EPA' | gzip -d > junk ; echo $? ; ~/bin/Linux.x86_64/ncdump -h junk
+
+sleep 2 ; echo ; echo TEST pm25_corrected_hourly netcdf-ioapi ; echo
+curl --silent --retry 0 'https://maple.hesc.epa.gov/rsig/rsigserver?SERVICE=wcs&VERSION=1.0.0&REQUEST=GetCoverage&COVERAGE=purpleair.pm25_corrected_hourly&FORMAT=netcdf-ioapi&TIME=2025-06-01T00:00:00Z/2025-06-02T23:59:59Z&BBOX=-126,24,-60,50&REGRID=weighted&LAMBERT=33,45,-97,40&ELLIPSOID=6370000,6370000&GRID=459,299,-2556000,-1728000,12000,12000&COMPRESS=1&KEY=EPA' | gzip -d > junk ; echo $? ; ~/bin/Linux.x86_64/ncdump -h junk
+
+sleep 2 ; echo ; echo TEST pm25_corrected netcdf-ioapi ; echo
+curl --silent --retry 0 'https://maple.hesc.epa.gov/rsig/rsigserver?SERVICE=wcs&VERSION=1.0.0&REQUEST=GetCoverage&COVERAGE=purpleair.pm25_corrected&FORMAT=netcdf-ioapi&TIME=2025-06-01T00:00:00Z/2025-06-02T23:59:59Z&BBOX=-126,24,-60,50&OUT_IN_FLAG=0&MAXIMUM_DIFFERENCE=5&MAXIMUM_RATIO=0.7&DEFAULT_HUMIDITY=50&AGGREGATE=hourly&MINIMUM_AGGREGATION_COUNT_PERCENTAGE=75&REGRID=weighted&LAMBERT=33,45,-97,40&ELLIPSOID=6370000,6370000&GRID=459,299,-2556000,-1728000,12000,12000&COMPRESS=1&KEY=EPA' | gzip -d > junk ; echo $? ; ~/bin/Linux.x86_64/ncdump -h junk
+
+
+/bin/rm -f junk
+echo ; echo DONE PurpleAir ; echo

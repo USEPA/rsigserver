@@ -1,0 +1,15 @@
+#!/bin/sh
+
+clear
+
+echo
+echo "Compiling OpenAQSubset"
+gcc -m64 -Wall -D_FILE_OFFSET_BITS=64 -D_LARGEFILE_SOURCE -DNDEBUG -O -I. -o OpenAQSubset OpenAQSubset.c Utilities.c -L. -lz -lm -lc
+strip OpenAQSubset
+ls -l OpenAQSubset
+file  OpenAQSubset
+ldd   OpenAQSubset
+
+ls -Fsalt | head
+echo Done
+

@@ -1,0 +1,55 @@
+																
+	Table of Contents															
+	for															
+	eGRID2023_Data_rev2.xlsx															
+	"eGRID2023 Unit, Generator, Plant, State, Balancing Authority Area, eGRID Subregion, NERC Region, U.S., Grid Gross Loss (%), and Demographic Data Files"															
+	"June 12, 2025"															
+	Produced with				eGRID R production model 1.0.2.											
+	Sheet	Name		Description												
+	1			Unit year 2023 data												
+	2			Generator year 2023 data												
+	3			Plant year 2023 data												
+	4			State year 2023 data												
+	5			Balancing authority area year 2023 data												
+	6			eGRID subregion year 2023 data												
+	7			NERC region year 2023 data												
+	8			U.S. year 2023 data												
+	9			Grid Gross Loss (%) year 2023 data												
+	10			Surrounding demographic data for eGRID2023 plants												
+																
+																
+	Feedback															
+	Customer Satisfaction Survey															
+	Contact EPA															
+																
+	Color Coding Legend															
+	Category							Color	Link to sheet and category							
+	"1) Annual Values (generation, emissions, and heat input)"															
+	"2) Unadjusted Annual Values (emissions, and heat input)"															
+	"3) Adjustment Values (emissions, heat input, heat rate)"															
+	4) Output Emission Rates (emissions per MWh)															
+	5) Input Emission rates (emissions per MMBtu)															
+	6) Combustion Output Rates (emissions per MWh)															
+	7) Generation by Fuel Type (MWh)															
+	8) Renewable and Non-Renewable Generation (MWh)															
+	9) Combustion and Non-Combustion Generation (MWh)															
+	10) Resource Mix (percentages)															
+	11) Renewable and Non-Renewable Resource Mix (percentages)															
+	12) Combustion and Non-Combustion Resource Mix (percentages)															
+	13) Output Emission Rates by Fuel Type (emissions by fuel type per MWh)															
+	14) Input Emission Rates by Fuel Type (emissions by fuel type per MWh)															
+	15) Nonbaseload Output Emission Rates (emissions per MWh)															
+	16) Nonbaseload Generation by Fuel Type (MWh)															
+	17) Nonbaseload Resource Mix (percentages)															
+																
+	Notes															
+	Values in parentheses are negative numbers.															
+	Dashes (-) are zeroes.															
+																
+	Conversion Factors															
+	1 megawatt-hour (MWh)		"1,000 kilowatt-hour (kWh)"													
+	1 short ton		"2,000 pounds (lb)"													
+	1.10231 short ton		1 metric ton													
+	2.2046 lb		1 kilogram (kg)													
+	0.9478 MMBtu		1 Gigajoule (GJ)													
+	0.27778 MWh		1 GJ													

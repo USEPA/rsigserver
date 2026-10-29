@@ -301,37 +301,48 @@ void compareRegriddedSwath( Parameters* parameters ) {
   PRE03( isValidParameters( parameters ),
          parameters->ok, parameters->input->ok( parameters->input ) );
 
-  if ( ! AND3( ! parameters->regrid,
-               OR2( parameters->compareFunction, parameters->convertFunction ),
-               parameters->data ) ) {
-    failureMessage( "Invalid input for comparing." );
-    parameters->ok = 0;
-  } else {
-    Data data;
-    ZERO_OBJECT( &data );
-    parameters->ok = 0;
+  Data data;
+  ZERO_OBJECT( &data );
+  parameters->ok = 0;
 
-    if ( readRegriddedXDR( parameters->input, &data ) ) {
+  DEBUG( fprintf( stderr,
+                  "parameters->regrid = %lld, "
+                  "parameters->compareFunction = %p, "
+                  "parameters->convertFunction = %p, "
+                  "parameters->data = %p\n",
+                  parameters->regrid,
+                  parameters->compareFunction,
+                  parameters->convertFunction,
+                  parameters->data ); )
+
+  if ( readRegriddedXDR( parameters->input, &data ) ) {
+
+    if ( ! IS_ZERO2( parameters->compareFunction,
+                     parameters->convertFunction ) ) {
       compareFunctionNameUnits( parameters->compareFunction,
                                 parameters->convertFunction,
-                                data.variable[ 0 ], data.units[ 0 ], 
-                                parameters->variable, 
+                                data.variable[ 0 ], data.units[ 0 ],
+                                parameters->variable,
                                 parameters->units );
-
-      if ( compareRegriddedXDR( parameters, &data ) ) {
-        Writer writer = dispatcher( parameters->format, 1 );
-        CHECK( writer );
-
-        if ( data.totalRegriddedPoints == 0 ) {
-          failureMessage( "No points projected onto the grid." );
-        } else {
-          parameters->ok = writer( &data, parameters );
-        }
-      }
+      parameters->ok = compareRegriddedXDR( parameters, &data );
+    } else {
+      parameters->ok = 1;
     }
 
-    deallocateData( &data );
+    if ( parameters->ok ) {
+      Writer writer = dispatcher( parameters->format, 1 );
+      CHECK( writer );
+
+      if ( data.totalRegriddedPoints == 0 ) {
+        failureMessage( "No points projected onto the grid." );
+        parameters->ok = 0;
+      } else {
+        parameters->ok = writer( &data, parameters );
+      }
+    }
   }
+
+  deallocateData( &data );
 
   POST0( isValidParameters( parameters ) );
 }
@@ -409,6 +420,7 @@ static Integer isValidData( const Data* data ) {
                          data->gridLongitudes,
                          data->gridLatitudes,
                          data->gridData ) ) );
+
 
   return result;
 }
@@ -538,6 +550,7 @@ static Integer readXDRData( Stream* input, Data* data ) {
                isValidTimestamp( data->timestamps[ data->scans - 1 ] ) ) ) {
 
       input->read64BitIntegers( input, data->points, data->scans );
+
 
       /* Sum rows x columns per scan: */
 
@@ -1605,25 +1618,60 @@ static Integer writeRegriddedASCII( Data* data, const Parameters* parameters ) {
 
         /* Write data rows: */
 
+        DEBUG( fprintf( stderr,
+                      "hasCorners = %lld, data->totalRegriddedPoints = %lld\n",
+                       hasCorners, data->totalRegriddedPoints ); )
+        DEBUG( fprintf( stderr, "data->gridData[ %f .. %f ]\n",
+                        gridData[ 0 ],
+                        gridData[ data->totalRegriddedPoints - 1 ] ); )
+        DEBUG( fprintf( stderr, "data->counts[ %lld .. %lld ]\n",
+                        counts[ 0 ], counts[ data->totalRegriddedPoints - 1]);)
+
         do {
           const Integer points = data->outputPoints[ timestep ];
+
+          DEBUG( fprintf( stderr, "points = %lld\n", points ); )
 
           if ( points > 0 ) {
             Integer point = 0;
             toUTCTimestamp( yyyydddhh00, timestamp );
 
+            /*
+             * If hasCorners is 0 then
+             *   data->gridData[], etc. will already contain values for all
+             *   timesteps - i.e., data->totalRegriddedPoints values,
+             *   except that data->counts will be 0.
+             * If hasCorners is 1 then call readRegriddedXDRDataFromTempFile to
+             *   Read data for the current timestep into:
+             *   data->gridLongitudes[ 0 .. points - 1 ]
+             *   data->gridLatitudes[ 0 .. points - 1 ]
+             *   data->columns[ 0 .. points - 1 ]
+             *   data->rows[ 0 .. points - 1 ]
+             *   data->counts[ 0 .. points - 1 ]
+             *   data->gridData[ 0 .. points - 1 ]
+             */
+
             if ( hasCorners ) {
               ok = readRegriddedXDRDataFromTempFile( tempFile, timestep, data );
             }
 
+            DEBUG( fprintf( stderr, "ok = %lld\n", ok ); )
+            DEBUG( fprintf( stderr, "longitudes[ %f .. %f ]\n",
+                            longitudes[ 0 ], longitudes[ points - 1 ] ); )
+            DEBUG( fprintf( stderr, "counts[ %lld .. %lld ]\n",
+                            counts[ 0 ], counts[ points - 1 ] ); )
+            DEBUG( fprintf( stderr, "gridData[ %f .. %f ]\n",
+                            gridData[ 0 ], gridData[ points - 1 ] ); )
+
             if ( ok ) {
+
               for ( point = 0; point < points; ++point ) {
                 const Real longitude = longitudes[ point ];
                 const Real latitude  = latitudes[ point ];
                 const Integer column = columns[ point ];
                 const Integer row    = rows[ point ];
-                const Integer count  = counts[ point ];
                 const Real value     = gridData[ point ];
+                const Integer count  = hasCorners ? counts[ point ] : 1;
 
                 if ( count > 0 ) {
                   output->writeString( output, dataFormat,
@@ -1636,6 +1684,15 @@ static Integer writeRegriddedASCII( Data* data, const Parameters* parameters ) {
                   }
                 }
               }
+            }
+
+            if ( ! hasCorners ) {
+              longitudes += points;
+              latitudes  += points;
+              columns    += points;
+              rows       += points;
+              counts     += points;
+              gridData   += points;
             }
           }
 
@@ -2080,6 +2137,7 @@ static Integer writeRegriddedIOAPIData( Integer file,
 
         if ( result ) {
           Integer* const iExpandedGridData = (Integer*) expandedGridData;
+          Name count = "COUNT";
           copyIntDataToGrid( points,
                              data->rows    + offset2,
                              data->columns + offset2,
@@ -2087,7 +2145,7 @@ static Integer writeRegriddedIOAPIData( Integer file,
                              1, rows, columns, iExpandedGridData );
 
           result =
-            writeM3IOData( file, "COUNT", timestep, 1, rows, columns,
+            writeM3IOData( file, count, timestep, 1, rows, columns,
                            iExpandedGridData );
 
           if ( result ) {

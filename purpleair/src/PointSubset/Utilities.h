@@ -44,7 +44,14 @@ typedef struct {
 
 /*================================ FUNCTIONS ================================*/
 
-extern int parseOptions( int argc, char* argv[], int count, Option options[] );
+extern int parseOptions( const int argc, char* argv[], const int count,
+                         Option options[] );
+
+extern int parseOption( const int argc, char* argv[],
+                        int* const arg, Option* const option );
+
+extern int parseOptionValue( const char* argument, const int valueIndex,
+                             Option* const option );
 
 extern int isLeapYear( const int yyyy );
 
@@ -66,6 +73,8 @@ extern int readFile( const char* name, size_t* length, size_t* lines,
 extern size_t controlMToSpace( char* string );
 
 extern int indexOfWord( const char* word, const char* words );
+
+extern void filterNotes( char* notes, size_t length );
 
 #ifdef __cplusplus
 }

@@ -56,7 +56,7 @@ my $wcs_command =
 
 my $bindir     = '/rsig/current/code/bin/Linux.x86_64';
 my $xdrconvert = "$bindir/XDRConvert";
-my $compressor = "$bindir/gzip -c -1";
+my $compressor = "/usr/bin/gzip -c -1";
 
 # To convert satellite AOD to PM25 requires regridding onto the 12km or 4km
 # GEOSCHEM (CMAQ-format) grid that matches the data files

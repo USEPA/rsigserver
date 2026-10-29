@@ -1618,8 +1618,13 @@ static Integer writeRegriddedIOAPI( Profile* profile,
   PRE02( isValidProfile( profile ), isValidParameters( parameters ) );
 
   Integer result = 0;
+  const Grid* const grid = parameters->grid;
+  const Integer totalGridCells =
+    grid->layers( grid ) * grid->rows( grid ) * grid->columns( grid );
   const Integer fileSizeEstimate =
-    profile->totalRegriddedPoints * 4 * 4 + 10000; /* lon,lat,elv,var, hdr */
+    profile->timesteps * totalGridCells *
+    ( 4 + 1 + 2 ) * 4 + 10000;
+    /* lon,lat,elv,var,var2,tflag,hdr */
   const Integer create64BitFile = fileSizeEstimate > TWO_GB;
   Integer file =
     createNetCDFFile( parameters->netcdfFileName, create64BitFile );

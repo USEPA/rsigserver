@@ -165,7 +165,7 @@ extern char* readFile( const char* name, size_t* length );
 
 extern void controlMToSpace( char* string );
 
-extern void spacesToUnderscores( char* string );
+extern void filterUnits( char* string );
 
 extern size_t linesInString( const char* string );
 

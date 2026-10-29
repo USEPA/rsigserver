@@ -102,21 +102,21 @@ static Integer parseMaximumSolarZenithAngle( Integer argc, char* argv[],
 static Integer parseAllowNegativeCounts( Integer argc, char* argv[],
                                          Arguments* arguments );
 
-static Integer parseFileTimestamp( const char* fileName );
-
 static void readData( Data* data );
 
-static SwathInfo* readSwathData( Data* data,
-                                 const int file,
-                                 const char* const product,
-                                 const Integer timestamp );
+static void readSwathData( Data* data,
+                           const int file,
+                           const char* const product );
 
-static int clampInvalidCoordinates( const size_t points,
-                                    double longitudes[],
-                                    double latitudes[] );
+static void appendSwaths( const Integer points,
+                          const double timestamps[],
+                          Data* const data );
 
-static size_t pointsInSubset( const Bounds domain,
+static size_t pointsInSubset( const Integer yyyydddhh00,
+                              const Integer hours,
+                              const Bounds domain,
                               const size_t points,
+                              double timestamps[],
                               const double longitudes[],
                               const double latitudes[],
                               double values[],
@@ -131,6 +131,7 @@ static size_t pointsInSubset( const Bounds domain,
 
 static void compactSubsetData( const size_t subsetPoints,
                                const size_t points,
+                               double timestamps[],
                                double longitudes[],
                                double latitudes[],
                                double values[],
@@ -164,6 +165,7 @@ static void clampLongitudes( const double longitude,
 
 static void writeSubsetData( Data* const data,
                              const size_t points,
+                             const Integer swathIndex,
                              double longitudes[],
                              double latitudes[],
                              double values[],
@@ -310,16 +312,14 @@ static Integer isValidData( const Data* data ) {
     const Integer swathCount = swaths->count( swaths );
     Integer index = 0;
 
-    do {
+    for ( index = 0; index < swathCount; ++index ) {
       const SwathInfo* const swathInfo = swaths->item( swaths, index );
 
       if ( ! isValidSwathInfo( swathInfo ) ) {
         result = 0;
         index = swathCount;
       }
-
-      ++index;
-    } while ( index < swathCount );
+    }
   }
 
   POST0( IS_BOOL( result ) );
@@ -699,46 +699,6 @@ static Integer parseAllowNegativeCounts( Integer argc, char* argv[],
 
 
 /******************************************************************************
-PURPOSE: parseFileTimestamp - Parse timestamp from file name.
-INPUTS:  const char* const fileName  Name of data file to parse.
-RETURNS: Integer yyyydddhh00  Timestamp of file.
-******************************************************************************/
-
-static Integer parseFileTimestamp( const char* fileName ) {
-  PRE02( fileName, *fileName );
-  Integer result = 0;
-  const char* const slash = strrchr( fileName, '/' );
-  const char* const tag =
-    strstr( fileName, "OMI-Aura_L2-OMNO2_" ) ? "OMI-Aura_L2-OMNO2_"
-    : strstr( fileName, "OMI-Aura_L2-OMTO3_" ) ? "OMI-Aura_L2-OMTO3_"
-    : strstr( fileName, "OMI-Aura_L2-OMCLDRR_" ) ? "OMI-Aura_L2-OMCLDRR_"
-    : "";
-  const char* part = strstr( slash ? slash + 1 : fileName, tag );
-
-  if ( part ) {
-    int yyyy = 0;
-    int mm = 0;
-    int dd = 0;
-    int hh = 0;
-    int parsed = 0;
-    part += strlen( tag );
-    parsed = sscanf( part, "%04dm%02d%02dt%02d\n", &yyyy, &mm, &dd, &hh );
-
-    if ( parsed == 4 ) {
-      const Integer yyyymmdd = yyyy * 10000 + mm * 100 + dd;
-      const Integer yyyyddd = convertYearMonthDay( yyyymmdd );
-      result = yyyyddd * 100 + hh;
-      result *= 100; /* Append 00 minutes. */
-    }
-  }
-
-  POST0( OR2( result == 0, isValidTimestamp( result ) ) );
-  return result;
-}
-
-
-
-/******************************************************************************
 PURPOSE: readData - Read each OMI file for selected time range and subset
          their swaths to the specified domain.
 INPUTS:  Data* data  Data to update.
@@ -751,9 +711,6 @@ static void readData( Data* data ) {
          isValidArguments( &data->arguments ) );
 
   const Arguments* const arguments = &data->arguments;
-  const Integer firstTimestamp = arguments->firstTimestamp;
-  const Integer lastTimestamp =
-    offsetTimestamp( firstTimestamp, arguments->timesteps );
   FILE* listFile = fopen( arguments->listFile, "r" );
 
   if ( listFile ) {
@@ -766,41 +723,29 @@ static void readData( Data* data ) {
       while ( fgets( fileName, sizeof fileName / sizeof *fileName, listFile )) {
         char* const newline = strchr( fileName, '\n' );
         int file = 0;
-        Integer fileTimestamp = 0;
 
         if ( newline ) {
           *newline = '\0';
         }
 
-        fileTimestamp = parseFileTimestamp( fileName );
-        DEBUG( fprintf( stderr, "%s %lld\n", fileName, fileTimestamp ); )
+        file = openFile( fileName );
 
-        if ( IN_RANGE( fileTimestamp, firstTimestamp, lastTimestamp ) ) {
-          file = openFile( fileName );
+        if ( file != -1 ) {
 
-          if ( file != -1 ) {
+          /*
+           * Read, filter and subset swath data and
+           * write subset data to temporary file in tmpdir
+           * then store timestamp and number of subset points in swaths list.
+           */
 
-            /*
-             * Read, filter and subset swath data and
-             * write subset data to temporary file in tmpdir
-             * then store timestamp and number of subset points in swaths list.
-             */
-
-            const char* const product =
-              strstr( fileName, "OMI-Aura_L2-OMNO2_" ) ? "OMNO2"
-              : strstr( fileName, "OMI-Aura_L2-OMTO3_" ) ? "OMTO3"
-              : strstr( fileName, "OMI-Aura_L2-OMCLDRR_" ) ? "OMCLDRR"
-              : "";
-            SwathInfo* swathInfo =
-              readSwathData( data, file, product, fileTimestamp );
-            data->ok = 1;
-
-            if ( swathInfo ) {
-              data->swaths->insert( data->swaths, swathInfo, LAST_ITEM );
-            }
-
-            closeFile( file ), file = -1;
-          }
+          const char* const product =
+            strstr( fileName, "OMI-Aura_L2-OMNO2_" ) ? "OMNO2"
+            : strstr( fileName, "OMI-Aura_L2-OMTO3_" ) ? "OMTO3"
+            : strstr( fileName, "OMI-Aura_L2-OMCLDRR_" ) ? "OMCLDRR"
+            : "";
+          readSwathData( data, file, product );
+          data->ok = 1; /* Continue subsetting files if failures occur. */
+          closeFile( file ), file = -1;
         }
       }
     }
@@ -820,26 +765,22 @@ static void readData( Data* data ) {
 
 /******************************************************************************
 PURPOSE: readSwathData - Read a data file, write subset data to a temporary
-         file and return timestamp and number of subset points.
+         file and append SwathInfo.
 INPUTS:  Data*  data                data->arguments.
          const int file             File to read.
          const char* const product  Name of file type: OMNO2, OMCLDRR, etc.
-         const Integer  timestamp   File timestamp (yyyydddhhmm.
-OUTPUTS: Data* data   data->ok, data->units.
-RETURNS: SwathInfo*  Initialized swath info from file, else 0 if unsuccessful.
+OUTPUTS: Data* data   data->ok, data->units, data->swaths.
 ******************************************************************************/
 
-static SwathInfo* readSwathData( Data* data,
-                                 const int file,
-                                 const char* const product,
-                                 const Integer timestamp ) {
+static void readSwathData( Data* data,
+                           const int file,
+                           const char* const product ) {
 
-  PRE08( data, data->ok, data->swaths,
+  PRE07( data, data->ok, data->swaths,
          isValidArguments( &data->arguments ),
-         file > -1, product, *product, isValidTimestamp( timestamp ) );
+         file > -1, product, *product);
 
   const Arguments* const arguments = &data->arguments;
-  SwathInfo* result = 0;
   size_t rows = 0;
   size_t columns = 0;
   data->ok = readDimensions( file, product, &rows, &columns );
@@ -849,10 +790,11 @@ static SwathInfo* readSwathData( Data* data,
                   file, product, rows, columns ); )
 
   if ( data->ok ) {
+    const int corners = arguments->corners;
     const size_t variables =
-      3 + arguments->corners * 8; /* lon,lat,var + corners. */
+      5 + corners * 8; /* time, lon, lat, values, temp + corners. */
     const size_t points = rows * columns;
-    const size_t size = ( variables + 1 ) * points;
+    const size_t size = variables * points;
     const int changedDimensions =
       OR2( rows != data->rows, columns != data->columns );
 
@@ -871,8 +813,8 @@ static SwathInfo* readSwathData( Data* data,
     }
 
     if ( data->buffer ) {
-      const int corners = arguments->corners;
-      double* const longitudes = data->buffer;
+      double* const timestamps = data->buffer;
+      double* const longitudes = timestamps + points;
       double* const latitudes  = longitudes + points;
       double* const values     = latitudes  + points;
       double* const temp       = values     + points;
@@ -885,93 +827,108 @@ static SwathInfo* readSwathData( Data* data,
       double* const latitudesNW  = corners ? latitudesSE  + points : 0;
       double* const latitudesNE  = corners ? latitudesNW  + points : 0;
       Name unused = "";
-      size_t subsetPoints =
-        readDataset( file, rows, columns, product, "Longitude", 1.0, 90.0, 0,
-                     unused, longitudes, temp );
+      size_t subsetPoints = 0;
 
-      DEBUG( fprintf( stderr, "Longitude subsetPoints = %lu\n", subsetPoints);)
+      /* Read data variable first since it is most likely to be filtered-out: */
+      subsetPoints =
+        readDataset( file, rows, columns, product,
+                     arguments->variableName,
+                     arguments->maximumCloudFraction,
+                     arguments->maximumSolarZenithAngle,
+                     arguments->allowNegativeCounts,
+                     data->units,
+                     values, temp );
+
+      DEBUG( fprintf( stderr,
+                      "%s(%s) [%g .. %g], (%g, %g, %d) "
+                      "subsetPoints = %lu\n",
+                      arguments->variableName,
+                      data->units,
+                      values[ 0 ], values[ points - 1 ],
+                      arguments->maximumCloudFraction,
+                      arguments->maximumSolarZenithAngle,
+                      arguments->allowNegativeCounts,
+                      subsetPoints ); )
 
       if ( subsetPoints ) {
-        subsetPoints =
-          readDataset( file, rows, columns, product, "Latitude", 1.0, 90.0, 0,
-                       unused, latitudes, temp );
 
-        DEBUG(fprintf( stderr, "Latitude subsetPoints = %lu\n", subsetPoints);)
+        /* Read coordinates and filter them and data if invalid: */
+
+        subsetPoints =
+          readDataset( file, rows, columns, product, "Longitude", 1.0, 90.0, 0,
+                       unused, longitudes, temp );
+
+        DEBUG( fprintf(stderr, "Longitude [%f .. %f] subsetPoints = %lu\n",
+                       longitudes[ 0 ], longitudes[ points - 1], subsetPoints);)
 
         if ( subsetPoints ) {
-          subsetPoints = clampInvalidCoordinates(points, longitudes, latitudes);
+          subsetPoints =
+            readDataset( file, rows, columns, product, "Latitude", 1.0, 90.0, 0,
+                         unused, latitudes, temp );
+
+          DEBUG(fprintf(stderr, "Latitude [%f .. %f] subsetPoints = %lu\n",
+                        latitudes[ 0 ] , latitudes[ points - 1], subsetPoints);)
 
           if ( subsetPoints ) {
             subsetPoints =
-              readDataset( file, rows, columns, product,
-                           arguments->variableName,
-                           arguments->maximumCloudFraction,
-                           arguments->maximumSolarZenithAngle,
-                           arguments->allowNegativeCounts,
-                           data->units,
-                           values, temp );
+              readDataset( file, rows, columns, product, "Time", 1.0, 90.0, 0,
+                           unused, timestamps, temp );
 
-            DEBUG( fprintf( stderr, "%s (%g, %g, %d) subsetPoints = %lu\n",
-                            arguments->variableName,
-                            arguments->maximumCloudFraction,
-                            arguments->maximumSolarZenithAngle,
-                            arguments->allowNegativeCounts,
-                            subsetPoints ); )
+            DEBUG( fprintf(stderr, "Timestamps [%f .. %f] subsetPoints = %lu\n",
+                           timestamps[ 0 ], timestamps[ points - 1],
+                           subsetPoints ); )
 
             if ( subsetPoints ) {
 
               if ( corners ) {
+                DEBUG(fprintf( stderr, "  computing corners...\n" ); )
                 computeCorners( rows, columns,
                                 longitudes,   latitudes,
                                 longitudesSW, longitudesSE,
                                 longitudesNW, longitudesNE,
                                 latitudesSW,  latitudesSE,
                                 latitudesNW,  latitudesNE );
+                DEBUG(fprintf( stderr, "  done.\n" ); )
               }
 
+              DEBUG(fprintf( stderr, "  computing pointsInSubset...\n" ); )
               subsetPoints =
-                pointsInSubset( (const double (*)[2]) arguments->domain,
-                                points, longitudes, latitudes, values,
+                pointsInSubset( arguments->firstTimestamp,
+                                arguments->timesteps,
+                                (const double (*)[2]) arguments->domain,
+                                points,
+                                timestamps, longitudes, latitudes, values,
                                 longitudesSW, longitudesSE,
                                 longitudesNW, longitudesNE,
                                 latitudesSW,  latitudesSE,
                                 latitudesNW,  latitudesNE );
-
-              DEBUG(fprintf( stderr, "  subsetPoints = %lu\n", subsetPoints );)
+              DEBUG(fprintf( stderr, "  subsetPoints = %lu\n", subsetPoints);)
 
               if ( subsetPoints ) {
+                const Integer swathIndex = data->swaths->count( data->swaths);
 
                 if ( subsetPoints < points ) {
+                  DEBUG( fprintf( stderr, "  compacting...\n" ); )
                   compactSubsetData( subsetPoints, points,
-                                     longitudes, latitudes, values,
+                                     timestamps, longitudes, latitudes, values,
                                      longitudesSW, longitudesSE,
                                      longitudesNW, longitudesNE,
                                      latitudesSW,  latitudesSE,
                                      latitudesNW,  latitudesNE );
+                  DEBUG(fprintf( stderr, "  done.\n" ); )
                 }
 
-                writeSubsetData( data, subsetPoints,
-                                 longitudes, latitudes, values,
-                                 longitudesSW, longitudesSE,
-                                 longitudesNW, longitudesNE,
-                                 latitudesSW,  latitudesSE,
-                                 latitudesNW,  latitudesNE );
+                appendSwaths( subsetPoints, timestamps, data );
 
                 if ( data->ok ) {
-                  result = NEW_ZERO( SwathInfo, 1 );
-                  data->ok = result != 0;
-                  DEBUG(fprintf(stderr, "  swathInfo      = %p\n", result);)
-
-                  if ( result ) {
-                    result->timestamp = timestamp;
-                    result->points    = subsetPoints;
-
-                    DEBUG( fprintf( stderr,
-                                    "  timestamp = %lld, points = %lld, "
-                                    "units = '%s'\n",
-                                    result->timestamp, result->points,
-                                    data->units ); )
-                  }
+                  DEBUG(fprintf( stderr, "  writing...\n" ); )
+                  writeSubsetData( data, subsetPoints, swathIndex,
+                                   longitudes, latitudes, values,
+                                   longitudesSW, longitudesSE,
+                                   longitudesNW, longitudesNE,
+                                   latitudesSW,  latitudesSE,
+                                   latitudesNW,  latitudesNE );
+                  DEBUG(fprintf( stderr, "  done.\n" ); )
                 }
               }
             }
@@ -981,91 +938,97 @@ static SwathInfo* readSwathData( Data* data,
     }
   }
 
-  if ( AND2( ! data->ok, result ) ) {
-    deallocateSwathInfo( result );
-    FREE( result );
-  }
-
-  DEBUG( fprintf( stderr, "data->ok = %lld, result = %p\n", data->ok, result );)
-  POST0( IMPLIES( result, AND2( isValidSwathInfo( result ), data->ok ) ) );
-  return result;
+  DEBUG( fprintf( stderr, "readSwathData() returning with data->ok = %lld\n",
+                  data->ok ); )
 }
 
 
 
 /******************************************************************************
-PURPOSE: clampInvalidCoordinates - Clamp invalid longitude-latitude points.
-INPUTS:  const size_t points          Points of data.
-         double longitudes[ points ]  Longitudes to check.
-         double latitudes[  points ]  Latitudes to check.
-INPUTS:  double longitudes[ points ]  Clamped Longitudes.
-         double latitudes[  points ]  Clamped Latitudes.
-RETURNS: int 1 if at least one valid point was found.
+PURPOSE: appendSwaths - Append one or more swaths to swath list.
+INPUTS:  const Integer points         Size of timestamps array.
+         double timestamps[ points ]  Timestamps to check.
+OUTPUTS: data->swaths  Appended swath info.
 ******************************************************************************/
 
-static int clampInvalidCoordinates(  const size_t points,
-                                     double longitudes[],
-                                     double latitudes[] ) {
+static void appendSwaths( const Integer points,
+                          const double timestamps[],
+                          Data* const data ) {
 
-  int result = 0;
+  PRE03( points > 0, timestamps, isValidData( data ) );
 
-  assert( points );
-  assert( longitudes ); assert( latitudes );
+  Integer point = 0;
+  Integer subsetPoints = 0;
+  Integer previousYYYYDDDHH = 0;
+  SwathInfo* swathInfo = 0;
+  VoidList* const swathList = data->swaths;
 
-  {
-    size_t point = 0;
-    size_t validPoint = 0; /* Index of first valid point: */
+  for ( point = 0; AND2( data->ok, point < points ); ++point ) {
+    const double yyyydddhhmmf = timestamps[ point ];
 
-    for ( point = 0; point < points; ++point ) {
-      const double longitude = longitudes[ point ];
+    if ( yyyydddhhmmf > 0.0 ) {
+      const Integer yyyydddhhmm = yyyydddhhmmf;
+      const Integer yyyydddhh = yyyydddhhmm / 100;
 
-      if ( IN_RANGE( longitude, -180.0, 180.0 ) ) {
-        const double latitude = latitudes[ point ];
+      if ( yyyydddhh == previousYYYYDDDHH ) {
+        ++subsetPoints;
+      } else if ( previousYYYYDDDHH == 0 ) {
+        CHECK( swathInfo == 0 );
+        swathInfo = NEW_ZERO( SwathInfo, 1 );
+        data->ok = swathInfo != 0;
 
-        if ( IN_RANGE( latitude, -90.0, 90.0 ) ) {
-          result = 1;
-          validPoint = point;
-          point = points; /* Stop looping. */
+        if ( data->ok ) {
+          swathInfo->timestamp = yyyydddhhmm;
+          previousYYYYDDDHH = yyyydddhh;
+          subsetPoints = 1;
         }
-      }
-    }
+      } else {
+        swathInfo->points = subsetPoints;
+        CHECK( isValidSwathInfo( swathInfo ) );
+        swathList->insert( swathList, swathInfo, LAST_ITEM );
+        data->ok = swathList->ok( swathList );
 
-    if ( result ) {
-      const double longitude = longitudes[ validPoint ];
-      const double latitude  = latitudes[  validPoint ];
+        DEBUG( fprintf( stderr,
+                        "  timestamp = %lld, points = %lld, units = '%s'\n",
+                        swathInfo->timestamp, swathInfo->points,
+                        data->units ); )
 
-      /* Clamp all previous points to this first valid point: */
 
-      for ( point = 0; point < validPoint; ++point ) {
-        longitudes[ point ] = longitude;
-        latitudes[  point ] = latitude;
-      }
-
-      /* Clamp all remaining points to the previous valid point: */
-
-      for ( ; point < points; ++point ) {
-
-        if ( IN_RANGE( longitudes[ point ], -180.0, 180.0 ) &&
-             IN_RANGE( latitudes[  point ],  -90.0,  90.0 ) ) {
-          validPoint = point;
-        } else {
-          longitudes[ point ] = longitudes[ validPoint ];
-          latitudes[  point ] = latitudes[  validPoint ];
+        if ( ! data->ok ) {
+          FREE( swathInfo );
         }
+
+        previousYYYYDDDHH = 0;
+        subsetPoints = 0;
+        swathInfo = 0;
+        --point;
       }
     }
   }
 
-  return result;
+  if ( swathInfo ) {
+    swathInfo->points = subsetPoints;
+    swathList->insert( swathList, swathInfo, LAST_ITEM );
+    data->ok = swathList->ok( swathList );
+
+    DEBUG( fprintf( stderr,
+                    "  timestamp = %lld, points = %lld, units = '%s'\n",
+                    swathInfo->timestamp, swathInfo->points,
+                    data->units ); )
+  }
 }
 
 
 
 /******************************************************************************
-PURPOSE: pointsInSubset - Compute number of points in subset based on domain
-         and assign MISSING_VALUE to data values that are outside the subset.
-INPUTS:  const Bounds domain                  Domain to subset data to.
+PURPOSE: pointsInSubset - Compute number of points in subset based on subset
+         time range and domain and assign MISSING_VALUE to data values that
+         are outside the subset.
+INPUTS:  const Integer yyyydddhh00            Beginning subset timestamp.
+         const Integer hours                  Number of subset hours.
+         const Bounds domain                  Domain to subset data to.
          const size_t points                  Points of data.
+         double timestamps[         points ]  Timestamps to check.
          const double longitudes[   points ]  Longitudes to check.
          const double latitudes[    points ]  Latitudes to check.
          const double longitudesSW[ points ]  0 or corners to check.
@@ -1076,12 +1039,16 @@ INPUTS:  const Bounds domain                  Domain to subset data to.
          const double latitudesSE[  points ]  0 or corners to check.
          const double latitudesNW[  points ]  0 or corners to check.
          const double latitudesNE[  points ]  0 or corners to check.
-OUTPUTS: double values[ points ]              Values filtered by subset.
+OUTPUTS: double timestamps[ points ]          Values filtered by subset.
+         double values[ points ]              Values filtered by subset.
 RETURNS: size_t number of points in subset.
 ******************************************************************************/
 
-static size_t pointsInSubset( const Bounds domain,
+static size_t pointsInSubset( const Integer yyyydddhh00,
+                              const Integer hours,
+                              const Bounds domain,
                               const size_t points,
+                              double timestamps[],
                               const double longitudes[],
                               const double latitudes[],
                               double values[],
@@ -1094,7 +1061,9 @@ static size_t pointsInSubset( const Bounds domain,
                               const double latitudesNW[],
                               const double latitudesNE[] ) {
 
-  PRE06( isValidBounds( domain ), points, longitudes, latitudes, values,
+  PRE09( isValidTimestamp( yyyydddhh00 ), hours > 0,
+         isValidBounds( domain ),
+         points, timestamps, longitudes, latitudes, values,
          IMPLIES_ELSE( longitudesSW,
                        NON_ZERO7( longitudesSE, longitudesNW, longitudesNE,
                                   latitudesSW, latitudesSE,
@@ -1104,6 +1073,8 @@ static size_t pointsInSubset( const Bounds domain,
                                  latitudesNW, latitudesNE ) ) );
 
   size_t result = 0;
+  const Integer yyyydddhh1 = yyyydddhh00 / 100;
+  const Integer yyyydddhh2 = offsetTimestamp( yyyydddhh00, hours - 1 ) / 100;
   const double longitudeMinimum = domain[ LONGITUDE ][ MINIMUM ];
   const double longitudeMaximum = domain[ LONGITUDE ][ MAXIMUM ];
   const double latitudeMinimum  = domain[ LATITUDE  ][ MINIMUM ];
@@ -1111,15 +1082,19 @@ static size_t pointsInSubset( const Bounds domain,
   size_t point = 0;
 
   for ( point = 0; point < points; ++point ) {
-    const double value     = values[     point ];
+    const double timestamp = timestamps[ point ];
+    const Integer yyyydddhhmm = timestamp;
+    const Integer yyyydddhh = yyyydddhhmm / 100;
     const double longitude = longitudes[ point ];
     const double latitude  = latitudes[  point ];
+    const double value     = values[     point ];
     int valid =
-      AND3( value > MISSING_VALUE,
+      AND4( IN_RANGE( yyyydddhh, yyyydddhh1, yyyydddhh2 ),
+            value > MISSING_VALUE,
             IN_RANGE( longitude, longitudeMinimum, longitudeMaximum ),
             IN_RANGE( latitude,  latitudeMinimum,  latitudeMaximum ) );
 
-    if ( AND2( valid, longitudesSW ) ) { /* Check for degenerate cells: */
+    if ( AND2( valid, longitudesSW ) ) { /* Check for invalid cells: */
       const double longitudeSW = longitudesSW[ point ];
       const double longitudeSE = longitudesSE[ point ];
       const double longitudeNW = longitudesNW[ point ];
@@ -1129,32 +1104,43 @@ static size_t pointsInSubset( const Bounds domain,
       const double latitudeNW  = latitudesNW[  point ];
       const double latitudeNE  = latitudesNE[  point ];
 
+#if 0
       valid =
-        AND20( longitudeSW != longitude,
-               longitudeSW != longitudeSE,
-               longitudeSW != longitudeNW,
-               longitudeSW != longitudeNE,
-               longitudeSE != longitude,
-               longitudeSE != longitudeNW,
-               longitudeSE != longitudeNE,
-               longitudeNW != longitude,
-               longitudeNW != longitudeNE,
-               longitudeNE != longitude,
-               latitudeSW != latitude,
-               latitudeSW != latitudeSE,
-               latitudeSW != latitudeNW,
-               latitudeSW != latitudeNE,
-               latitudeSE != latitude,
-               latitudeSE != latitudeNW,
-               latitudeSE != latitudeNE,
-               latitudeNW != latitude,
-               latitudeNW != latitudeNE,
-               latitudeNE != latitude );
+        AND2( OR2( IN_RANGE( longitude, longitudeSW, longitudeNE ),
+                   IN_RANGE( longitude, longitudeNW, longitudeSE ) ),
+              OR2( IN_RANGE( latitude, latitudeSW, latitudeNE ),
+                   IN_RANGE( latitude, latitudeNW, latitudeSE ) ) );
+#endif
+
+      if ( valid ) {
+        valid =
+          AND20( longitudeSW != longitude,
+                 longitudeSW != longitudeSE,
+                 longitudeSW != longitudeNW,
+                 longitudeSW != longitudeNE,
+                 longitudeSE != longitude,
+                 longitudeSE != longitudeNW,
+                 longitudeSE != longitudeNE,
+                 longitudeNW != longitude,
+                 longitudeNW != longitudeNE,
+                 longitudeNE != longitude,
+                 latitudeSW != latitude,
+                 latitudeSW != latitudeSE,
+                 latitudeSW != latitudeNW,
+                 latitudeSW != latitudeNE,
+                 latitudeSE != latitude,
+                 latitudeSE != latitudeNW,
+                 latitudeSE != latitudeNE,
+                 latitudeNW != latitude,
+                 latitudeNW != latitudeNE,
+                 latitudeNE != latitude );
+      }
     }
 
     if ( valid ) {
       ++result;
     } else {
+      timestamps[ point ] = MISSING_VALUE;
       values[ point ] = MISSING_VALUE;
     }
   }
@@ -1170,6 +1156,7 @@ PURPOSE: compactSubsetData - Copy valid data points to the first subsetPoints
          elements of the arrays.
 INPUTS:  const size_t subsetPoints      Number of valid points.
          const size_t points            Number of total points.
+         double timestamps[   points ]  Longitudes to compact.
          double longitudes[   points ]  Longitudes to compact.
          double latitudes[    points ]  Latitudes to compact.
          double values[       points ]  Values to compact.
@@ -1196,6 +1183,7 @@ OUTPUTS: double longitudes[   subsetPoints ]  Longitudes after compacting.
 
 static void compactSubsetData( const size_t subsetPoints,
                                const size_t points,
+                               double timestamps[],
                                double longitudes[],
                                double latitudes[],
                                double values[],
@@ -1208,8 +1196,8 @@ static void compactSubsetData( const size_t subsetPoints,
                                double latitudesNW[],
                                double latitudesNE[] ) {
 
-  PRE06( subsetPoints, points > subsetPoints,
-         longitudes, latitudes, values,
+  PRE07( subsetPoints, subsetPoints < points,
+         timestamps, longitudes, latitudes, values,
          IMPLIES_ELSE( longitudesSW,
                        NON_ZERO7( longitudesSE, longitudesNW, longitudesNE,
                                   latitudesSW, latitudesSE,
@@ -1229,6 +1217,7 @@ static void compactSubsetData( const size_t subsetPoints,
     if ( valid ) {
 
       if ( output < input ) { /* Copy valid values to front of arrays: */
+        timestamps[ output ] = timestamps[ input ];
         longitudes[ output ] = longitudes[ input ];
         latitudes[  output ] = latitudes[  input ];
         values[     output ] = value;
@@ -1250,7 +1239,9 @@ static void compactSubsetData( const size_t subsetPoints,
   }
 
   CHECK( output == subsetPoints );
-  POST014( isValidLongitude( longitudes[ 0 ] ),
+  POST016( isValidTimestamp( timestamps[ 0 ] ),
+           isValidTimestamp( timestamps[ subsetPoints - 1 ] ),
+           isValidLongitude( longitudes[ 0 ] ),
            isValidLongitude( longitudes[ subsetPoints - 1 ] ),
            isValidLatitude( latitudes[ 0 ] ),
            isValidLatitude( latitudes[ subsetPoints - 1 ] ),
@@ -1949,8 +1940,9 @@ static void clampLongitudes( const double longitude,
 
 /******************************************************************************
 PURPOSE: writeSubsetData - Write subset of data to temp file.
-INPUTS:  Data* const data                     Data description.
-         const size_t points                  Points in subset domain.
+INPUTS:  Data* const data               Data description.
+         const size_t points            Points in subset domain.
+         const Integer swathIndex       Index of first swath to write.
          double longitudes[   points ]  Longitudes to write.
          double latitudes[    points ]  Latitudes to write.
          double values[       points ]  Values to write.
@@ -1967,6 +1959,7 @@ OUTPUTS: Data* data  data->ok, ruined arrays.
 
 static void writeSubsetData( Data* const data,
                              const size_t points,
+                             const Integer swathIndex,
                              double longitudes[],
                              double latitudes[],
                              double values[],
@@ -1979,14 +1972,17 @@ static void writeSubsetData( Data* const data,
                              double latitudesNW[],
                              double latitudesNE[] ) {
 
-  PRE07( data, data->ok, points, longitudes, latitudes, values,
-        IMPLIES_ELSE( longitudesSW,
-                      NON_ZERO7( longitudesSE, longitudesNW, longitudesNE,
-                                 latitudesSW, latitudesSE,
-                                 latitudesNW, latitudesNE ),
-                      IS_ZERO7( longitudesSE, longitudesNW, longitudesNE,
-                                latitudesSW, latitudesSE,
-                                latitudesNW, latitudesNE ) ) );
+  PRE011( data, data->ok, points,
+          data->swaths, data->swaths->invariant( data->swaths ),
+          swathIndex >= 0, swathIndex < data->swaths->count( data->swaths ),
+          longitudes, latitudes, values,
+          IMPLIES_ELSE( longitudesSW,
+                        NON_ZERO7( longitudesSE, longitudesNW, longitudesNE,
+                                   latitudesSW, latitudesSE,
+                                   latitudesNW, latitudesNE ),
+                        IS_ZERO7( longitudesSE, longitudesNW, longitudesNE,
+                                  latitudesSW, latitudesSE,
+                                  latitudesNW, latitudesNE ) ) );
 
   /* Open temp file for writing if it does not yet exist: */
 
@@ -2006,6 +2002,10 @@ static void writeSubsetData( Data* const data,
   }
 
   if ( data->ok ) {
+    const Integer swathCount = data->swaths->count( data->swaths );
+    Integer index = swathIndex;
+    Integer swathPoints = 0;
+    Integer offset = 0;
     rotate8ByteArrayIfLittleEndian( longitudes, points );
     rotate8ByteArrayIfLittleEndian( latitudes, points );
     rotate8ByteArrayIfLittleEndian( values, points );
@@ -2021,58 +2021,68 @@ static void writeSubsetData( Data* const data,
       rotate8ByteArrayIfLittleEndian( latitudesNE, points );
     }
 
-    data->ok =
-      fwrite(longitudes, sizeof *longitudes, points, data->tempFile) == points;
+    for ( ; index < swathCount; ++index, offset += swathPoints ) {
+      const SwathInfo* const swathInfo =
+        data->swaths->item( data->swaths, index );
+      swathPoints = swathInfo->points;
 
-    if ( data->ok ) {
       data->ok =
-        fwrite(latitudes, sizeof *latitudes, points, data->tempFile) == points;
+        fwrite( longitudes + offset, sizeof *longitudes,
+                swathPoints, data->tempFile ) == swathPoints;
 
       if ( data->ok ) {
         data->ok =
-          fwrite( values, sizeof *values, points, data->tempFile ) == points;
+          fwrite( latitudes + offset, sizeof *latitudes,
+                  swathPoints, data->tempFile ) == swathPoints;
 
         if ( data->ok ) {
+          data->ok =
+            fwrite( values + offset, sizeof *values,
+                    swathPoints, data->tempFile ) == swathPoints;
 
-          if ( longitudesSW ) {
-            data->ok =
-              fwrite( longitudesSW, sizeof *longitudesSW, points,
-                      data->tempFile ) == points;
+          if ( data->ok ) {
 
-            if ( data->ok ) {
+            if ( longitudesSW ) {
               data->ok =
-                fwrite( longitudesSE, sizeof *longitudesSE, points,
-                        data->tempFile ) == points;
+                fwrite( longitudesSW + offset, sizeof *longitudesSW,
+                        swathPoints, data->tempFile ) == swathPoints;
 
               if ( data->ok ) {
                 data->ok =
-                  fwrite( longitudesNW, sizeof *longitudesNW, points,
-                          data->tempFile ) == points;
+                  fwrite( longitudesSE + offset, sizeof *longitudesSE,
+                          swathPoints, data->tempFile ) == swathPoints;
 
                 if ( data->ok ) {
                   data->ok =
-                    fwrite( longitudesNE, sizeof *longitudesNE, points,
-                            data->tempFile ) == points;
+                    fwrite( longitudesNW + offset, sizeof *longitudesNW,
+                            swathPoints, data->tempFile ) == swathPoints;
 
                   if ( data->ok ) {
                     data->ok =
-                      fwrite( latitudesSW, sizeof *latitudesSW, points,
-                              data->tempFile ) == points;
+                      fwrite( longitudesNE + offset, sizeof *longitudesNE,
+                              swathPoints, data->tempFile ) == swathPoints;
 
                     if ( data->ok ) {
                       data->ok =
-                        fwrite( latitudesSE, sizeof *latitudesSE, points,
-                                data->tempFile ) == points;
+                        fwrite( latitudesSW + offset, sizeof *latitudesSW,
+                                swathPoints, data->tempFile ) == swathPoints;
 
                       if ( data->ok ) {
                         data->ok =
-                          fwrite( latitudesNW, sizeof *latitudesNW, points,
-                                  data->tempFile ) == points;
+                          fwrite( latitudesSE + offset, sizeof *latitudesSE,
+                                  swathPoints, data->tempFile ) == swathPoints;
 
                         if ( data->ok ) {
                           data->ok =
-                            fwrite( latitudesNE, sizeof *latitudesNE, points,
-                                    data->tempFile ) == points;
+                            fwrite( latitudesNW + offset, sizeof *latitudesNW,
+                                    swathPoints, data->tempFile) == swathPoints;
+
+                          if ( data->ok ) {
+                            data->ok =
+                              fwrite( latitudesNE + offset, sizeof *latitudesNE,
+                                      swathPoints, data->tempFile )
+                              == swathPoints;
+                          }
                         }
                       }
                     }
@@ -2245,8 +2255,8 @@ static void streamTempFile( Data* const data ) {
   PRE04( isValidData( data ), data->ok, data->tempFileName[ 0 ],
          data->tempFile == 0 ); /* tempFile closed after writing to it. */
 
-  const size_t bytes = 256 * 1024 * 1024;
-  void* buffer = NEW( char*, bytes );
+  const size_t bytes = 1024 * 1024;
+  void* buffer = NEW( char, bytes );
   data->ok = buffer != 0;
 
   if ( buffer ) {

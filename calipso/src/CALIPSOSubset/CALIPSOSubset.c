@@ -195,8 +195,8 @@ static void writeSubsetData( Data* const data,
                              double longitudes[],
                              double latitudes[],
                              double elevations[],
-                             double thicknesses[],
-                             double values[] );
+                             double values[],
+                             double thicknesses[] );
 
 static void streamData( Data* const data );
 

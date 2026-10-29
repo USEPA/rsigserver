@@ -12,13 +12,13 @@ NOTES:   This program calls system( "/usr/bin/sort ..." ).
          Usage:
          PurpleAirSubset \
            -files <listfile> \
-           -tmpdir <temp_directory> \
-           -desc "description text" \
+           [-tmpdir <temp_directory>] (default .)\
+           [-desc "description text"] (default URL) \
            -timerange <yyyymmddhhmmss> <yyyymmddhhmmss> \
            -variable <name> \
-           -bounds <minimum_longitude> <minimum_latitude> \
-                   <maximum_longitude> <maximum_latitude> \
-           -format ascii | xdr \
+           [-bounds <minimum_longitude> <minimum_latitude> \
+                   <maximum_longitude> <maximum_latitude>] \
+           [-format ascii | xdr] (default xdr) \
            [-sensor sensor_id] \
            [-out_in_flag 0|1] (0 = outside, 1 = inside, default is either)
            [-default_humidity 0-100] (value for missing/invalid humidity,
@@ -717,14 +717,8 @@ static void printUsage( const char* const name );
 
 static int parseArguments( int argc, char* argv[], Arguments* const arguments);
 
-static int checkAggregate( const int aggregate,
-                           const char* const fileName,
-                           int* yyyymmddhh );
-
 static long long computeMinimumCount( const Data* const data,
                                       const long long timestamp );
-
-static long long dataFileTimestamp( const char* const fileName );
 
 static void parseColumnIndices( Data* data );
 
@@ -757,6 +751,22 @@ static int parseColumnValues( char* line,
                               Note note );
 
 static void aggregateData( Data* data );
+
+static int parseSortedLine( char* line,
+                            int* id,
+                            long long* timestamp,
+                            double* longitude,
+                            double* latitude,
+                            double* elevation,
+                            double* measure,
+                            Note note );
+
+static long long computeAggregationTimestamp( const int aggregate,
+                                              const long long timestamp );
+
+static int sameOutputTimestamp( const int aggregate,
+                                const long long outputTimestamp,
+                                const long long timestamp );
 
 static void reformatData( Data* data );
 
@@ -1060,13 +1070,13 @@ static void printUsage( const char* name ) {
   fprintf( stderr, "\nUsage:\n\n" );
   fprintf( stderr, "%s \\\n", name );
   fprintf( stderr, "  -files <listfile> \\\n" );
-  fprintf( stderr, "  -tmpdir <temp_directory> \\\n" );
-  fprintf( stderr, "  -desc \"description text\" \\\n" );
+  fprintf( stderr, "  [-tmpdir <temp_directory>] (default .) \\\n" );
+  fprintf( stderr, "  [-desc \"description text\"] (default URL) \\\n" );
   fprintf( stderr, "  -timerange <yyyymmddhhmmss> <yyyymmddhhmmss> \\\n" );
   fprintf( stderr, "  -variable <name> \\\n" );
   fprintf( stderr, " [-bounds <minimum_longitude> <minimum_latitude>]" );
   fprintf( stderr, " <maximum_longitude> <maximum_latitude> \\\n" );
-  fprintf( stderr, "  -format ascii | xdr \\\n" );
+  fprintf( stderr, " [-format ascii | xdr] (default xdr) \\\n" );
   fprintf( stderr, " [-sensor sensor_id] (subset to specific sensor id) \\\n" );
   fprintf( stderr, " [-out_in_flag 0|1] (0 = outside, 1 = inside, default = either) \\\n" );
   fprintf( stderr, " [-maximum_difference 0-100 ug/m3] (default = 5) \\\n" );
@@ -1128,7 +1138,7 @@ RETURNS: int 1 if successful, else 0.
 ******************************************************************************/
 
 static int parseArguments(int argc, char* argv[], Arguments* const arguments) {
-  int result = argc >= 14;
+  int result = argc >= 8;
   static const int zero_one[ 2 ] = { 0, 1 };
   static const int one_int_max[ 2 ] = { 1, INT_MAX };
   static const double zero_100[ 2 ] = { 0.0, 100.0 };
@@ -1253,7 +1263,6 @@ OUTPUTS: Data* data  data->points, ok, tempFiles[] = 0 closed.
 static void readData( Data* const data ) {
   const Arguments* const arguments = &( data->arguments );
   const int aggregate = arguments->aggregate;
-  int yyyymmddhh = 0;
   size_t length = 0;
   char* listFileContent = 0;
   data->ok = readFile( arguments->listFile, &length, &listFileContent );
@@ -1271,29 +1280,7 @@ static void readData( Data* const data ) {
           inputFileName;
           inputFileName = strtok_r( 0, "\n", &end ) ) {
 
-      const int aggregateNow = aggregate != AGGREGATE_NONE &&
-        checkAggregate( aggregate, inputFileName, &yyyymmddhh );
-
       data->ok = 1; /* Reset to ok to carry on after encountering a bad file.*/
-
-      if ( aggregateNow ) {
-
-        /*
-         * Before aggregating, we must sort temp file 1 into temp file 2
-         * because aggregating reads the sorted temp 2 file.
-         * After sorting, temp file 1 is emptied in preparation for subsequent
-         * appends by extractSubset().
-         */
-
-        sortTempData( data );
-
-        if ( data->ok ) {
-
-          /* Aggregate sorted temp file 2 appending onto temp aggregate file:*/
-
-          aggregateData( data );
-        }
-      }
 
       if ( data->ok ) {
         data->ok =
@@ -1356,129 +1343,6 @@ static void readData( Data* const data ) {
 
 
 /******************************************************************************
-PURPOSE: checkAggregate - Check if we need to aggregate now.
-INPUTS:  const int aggregate         AGGREGATE_HOURLY, AGGREGATE_DAILY...
-         const char* const fileName  Pathed name of PurpleAir file.
-         int* yyyymmddhh             Timestamp to compare or 0 to initialize.
-OUTPUT:  int* yyyymmddhh             Updated to file timestamp if result == 1.
-RETURNS: int 1 if time to aggregate now, else 0.
-NOTES:   Data file names are of the form:
-           .../YYYYMMDD/purpleair_hhmmss.json
-         For example,
-           /data/PurpleAir/data/2020/20201202/purpleair_181802.json
-******************************************************************************/
-
-static int checkAggregate( const int aggregate,
-                           const char* const fileName,
-                           int* yyyymmddhh ) {
-  int result = 0;
-  assert( aggregate == AGGREGATE_NONE   ||
-          aggregate == AGGREGATE_ALL    ||
-          aggregate == AGGREGATE_HOURLY ||
-          aggregate == AGGREGATE_DAILY  ||
-          aggregate == AGGREGATE_MONTHLY );
-  assert( fileName ); assert( *fileName );
-  assert( yyyymmddhh );
-  assert( *yyyymmddhh == 0 || isValidYYYYMMDDHH( *yyyymmddhh ) );
-
-  /* Set/check yyyymmddhh for aggregation: */
-
-  if ( aggregate != AGGREGATE_NONE &&
-       aggregate != AGGREGATE_ALL ) {
-    const long long fileYYYYMMDDHHMMSS = dataFileTimestamp( fileName );
-
-    if ( fileYYYYMMDDHHMMSS ) {
-      const int fileYYYYMMDDHH = fileYYYYMMDDHHMMSS / 10000;
-      assert( isValidYYYYMMDDHH( fileYYYYMMDDHH ) );
-
-      if ( *yyyymmddhh == 0 ) { /* Initialize: */
-        *yyyymmddhh = fileYYYYMMDDHH;
-      } else if ( aggregate == AGGREGATE_HOURLY ) {
-
-        if ( fileYYYYMMDDHH > *yyyymmddhh ) {
-          *yyyymmddhh = fileYYYYMMDDHH;
-          result = 1;
-        }
-      } else if ( aggregate == AGGREGATE_DAILY ) {
-        const int fileYYYYMMDD = fileYYYYMMDDHH / 100;
-        const int yyyymmdd     = *yyyymmddhh    / 100;
-
-        if ( fileYYYYMMDD > yyyymmdd ) {
-          *yyyymmddhh = fileYYYYMMDDHH;
-          result = 1;
-        }
-      } else if ( aggregate == AGGREGATE_MONTHLY ) {
-        const int fileYYYYMM = fileYYYYMMDDHH / 10000;
-        const int yyyymm     = *yyyymmddhh    / 10000;
-
-        if ( fileYYYYMM > yyyymm ) {
-          *yyyymmddhh = fileYYYYMMDDHH;
-          result = 1;
-        }
-      }
-
-      assert( isValidYYYYMMDDHH( *yyyymmddhh ) );
-      assert( result == 0 || ( result == 1 && *yyyymmddhh == fileYYYYMMDDHH ) );
-    }
-  }
-
-  assert( result == 0 || result == 1 );
-  return result;
-}
-
-
-
-/******************************************************************************
-PURPOSE: dataFileTimestamp - Timestamp of pathed data file.
-INPUTS:  const char* const fileName   Name of PurpleAir file.
-RETURNS: long long yyyymmddhh of file or 0 if failed and message on stderr.
-NOTES:   Data file names are of the form:
-           .../YYYYMMDD/purpleair_hhmmss.json
-         For example,
-          /data/PurpleAir/data/2020/20201202/purpleair_181802.json
-         which yields 20201202181802.
-******************************************************************************/
-
-static long long dataFileTimestamp( const char* const fileName ) {
-  long long result = 0;
-  const char* lastUnderscore = strrchr( fileName, '_' );
-
-  if ( lastUnderscore ) {
-    const int hhmmss = atoi( lastUnderscore + 1 );
-    const char* slash = strrchr( fileName, '/' );
-
-    if ( slash ) {
-
-      while ( slash > fileName && result == 0 ) {
-        --slash;
-
-        if ( *slash == '/' ) {
-          result = atoi( slash + 1 );
-        }
-      }
-
-      if ( result == 0 ) {
-        result = atoi( fileName );
-      }
-
-      if ( result ) {
-        result *= 1000000;
-        result += hhmmss;
-      }
-    }
-  }
-
-  if ( ! isValidYYYYMMDDHHMMSS( result ) ) {
-    fprintf( stderr, "\nInvalid file name timestamp '%s'.\n", fileName );
-    result = 0;
-  }
-
-  return result;
-}
-
-
-
-/******************************************************************************
 PURPOSE: parseColumnIndices - Parse data column indices from input string.
 INPUTS:  Data* data  data->arguments->variable  Name of output variable.
                      data->inputBuffer Content of input data file.
@@ -1509,6 +1373,7 @@ static void parseColumnIndices( Data* data ) {
     char* const endSection = strchr( beginSection += strlen( tag ), ']' );
 
     if ( endSection ) {
+      const size_t count = sizeof columnInfo / sizeof columnInfo[ 0 ];
       const char* const variable = data->arguments.variable;
       const char* const delimiters = ", \"\n";
       char* word = 0;
@@ -1519,11 +1384,9 @@ static void parseColumnIndices( Data* data ) {
       for ( word = strtok_r( beginSection, delimiters, &end );
             word;
             word = strtok_r( 0, delimiters, &end ), ++wordIndex ) {
-        const size_t count = sizeof columnInfo / sizeof columnInfo[ 0 ];
 
         for ( index = 0; index < count; ++index ) {
           const char* const field = columnInfo[ index ].field;
-
 
           if ( ! strcmp( word, field ) ) {
             const char* const name = columnInfo[ index ].name;
@@ -1673,55 +1536,56 @@ static void extractSubset( Data* data ) {
       memset( data->outputBuffer, 0, data->bufferSize );
 
       for ( ; nextLine( &line, &endLine ); line = endLine + 1 ) {
-        int inSubset = 0;
-        assert( strchr( line, '[' ) == 0 );
-        assert( strchr( line, ']' ) == 0 );
-        assert( strchr( line, '"' ) == 0 );
-        assert( strchr( line, ',' ) != 0 );
 
-        inSubset =
-          parseColumnValues( line,
-                             seconds1, seconds2, west, east, south, north,
-                             out_in_flag, sensor,
-                             isChannelDependent,
-                             isChannelA, isChannelB, isPM25Corrected,
-                             isTemperature,
-                             maximumDifference,
-                             maximumRatio,
-                             defaultHumidity,
-                             data->units,
-                             data->validMinimum,
-                             data->validMaximum,
-                             columnIndices,
-                             columnValues, data->note );
+        if ( strchr( line, '[' ) == 0 &&
+             strchr( line, ']' ) == 0 &&
+             strchr( line, '"' ) == 0 &&
+             strchr( line, ',' ) != 0 ) {
 
-        /* Append subset data to string buffer for speed: */
+          int inSubset =
+            parseColumnValues( line,
+                               seconds1, seconds2, west, east, south, north,
+                               out_in_flag, sensor,
+                               isChannelDependent,
+                               isChannelA, isChannelB, isPM25Corrected,
+                               isTemperature,
+                               maximumDifference,
+                               maximumRatio,
+                               defaultHumidity,
+                               data->units,
+                               data->validMinimum,
+                               data->validMaximum,
+                               columnIndices,
+                               columnValues, data->note );
 
-        if ( inSubset ) {
-          const int id            = columnValues[ ID_INDEX ];
-          const long long seconds = columnValues[ TIMESTAMP_INDEX ];
-          const double longitude = columnValues[ LONGITUDE_INDEX ];
-          const double latitude  = columnValues[ LATITUDE_INDEX ];
-          const double elevation = columnValues[ ELEVATION_INDEX ];
-          const double measure   = columnValues[ VARIABLE_INDEX ];
-          const char* const description = data->note;
-          enum { OUTPUT_LINE_LENGTH = 255 };
-          char outputLine[ OUTPUT_LINE_LENGTH + 1 ] = "";
-          const size_t length =
-            snprintf( outputLine, sizeof outputLine / sizeof *outputLine,
-                      "%d,%lld,%f,%f,%f,0,%f,%s\n",
-                      id, seconds, longitude, latitude, elevation,
-                      measure, description );
+          /* Append subset data to string buffer for speed: */
 
-          /* If line is not truncated and line fits in outputBuffer, append: */
+          if ( inSubset ) {
+            const int id            = columnValues[ ID_INDEX ];
+            const long long seconds = columnValues[ TIMESTAMP_INDEX ];
+            const double longitude = columnValues[ LONGITUDE_INDEX ];
+            const double latitude  = columnValues[ LATITUDE_INDEX ];
+            const double elevation = columnValues[ ELEVATION_INDEX ];
+            const double measure   = columnValues[ VARIABLE_INDEX ];
+            const char* const description = data->note;
+            enum { OUTPUT_LINE_LENGTH = 255 };
+            char outputLine[ OUTPUT_LINE_LENGTH + 1 ] = "";
+            const size_t length =
+              snprintf( outputLine, sizeof outputLine / sizeof *outputLine,
+                        "%d,%lld,%f,%f,%f,0,%f,%s\n",
+                        id, seconds, longitude, latitude, elevation,
+                        measure, description );
 
-          if ( length < sizeof outputLine / sizeof *outputLine &&
-               output + length < outputEnd ) {
-            strcpy( output, outputLine );
-            output += length;
+            /* If line is not truncated and line fits in outputBuffer, append: */
 
-            if ( data->arguments.aggregate == AGGREGATE_NONE ) {
-              data->points += 1; /* Update number of output points. */
+            if ( length < sizeof outputLine / sizeof *outputLine &&
+                 output + length < outputEnd ) {
+              strcpy( output, outputLine );
+              output += length;
+
+              if ( data->arguments.aggregate == AGGREGATE_NONE ) {
+                data->points += 1; /* Update number of output points. */
+              }
             }
           }
         }
@@ -1924,13 +1788,13 @@ static int parseColumnValues( char* line,
           *pm25CF1BValue = pm25CF1B;
         } else if ( ! USE_SIGMOID && isPM25Corrected &&
                     column == pm25ATMAColumn ) {
-           inSubset =
+          inSubset =
             parseDouble( value, MINIMUM_VALID_PM, MAXIMUM_VALID_PM,
                          &pm25ATMA );
           *pm25ATMAValue = pm25ATMA;
         } else if ( ! USE_SIGMOID && isPM25Corrected &&
                     column == pm25ATMBColumn ) {
-           inSubset =
+          inSubset =
             parseDouble( value, MINIMUM_VALID_PM, MAXIMUM_VALID_PM,
                          &pm25ATMB );
           *pm25ATMBValue = pm25ATMB;
@@ -1952,7 +1816,9 @@ static int parseColumnValues( char* line,
           *humidityValue = humidity;
         }
 
-        if ( isChannelDependent ) { /* Check channelState, channelFlags: */
+        if ( inSubset && isChannelDependent ) {
+
+          /* Check channelState, channelFlags: */
 
           if ( applyChannelState && column == channelStateColumn ) {
             const char v = *value;
@@ -2024,12 +1890,12 @@ static int parseColumnValues( char* line,
         if ( isPM25Corrected ) {
 #if USE_SIGMOID
           const double pm25Corrected =
-              pm25_corrected_sigmoid( pm25CF1A, pm25CF1B, humidity,
-                                      maximumDifference, maximumRatio );
+            pm25_corrected_sigmoid( pm25CF1A, pm25CF1B, humidity,
+                                    maximumDifference, maximumRatio );
 #else
           const double pm25Corrected =
-              pm25_corrected_piecewise( pm25ATMA, pm25ATMB, humidity,
-                                        maximumDifference, maximumRatio );
+            pm25_corrected_piecewise( pm25ATMA, pm25ATMB, humidity,
+                                      maximumDifference, maximumRatio );
 #endif
           *variableValue = measure = pm25Corrected;
           inSubset = pm25Corrected != MISSING_VALUE;
@@ -2081,7 +1947,7 @@ static void aggregateData( Data* data ) {
     FILE* const output = data->tempFiles[ TEMP_AGGREGATED_FILE ];
     enum { LINE_LENGTH = 255 };
     char line[ LINE_LENGTH + 1 ] = "";
-    int id           = -1;
+    int id = 0;
     long long timestamp = 0;
     double longitude = 0.0;
     double latitude  = 0.0;
@@ -2089,7 +1955,15 @@ static void aggregateData( Data* data ) {
     double measure   = 0.0;
     double sum = 0.0;
     long long count = 0;
+    int outputId = 0;
+    long long outputTimestamp = 0;
+    double outputLongitude = 0.0;
+    double outputLatitude  = 0.0;
+    double outputElevation = 0.0;
+    Note outputNote = "";
     long long minimumCount = 0;
+    const Arguments* const arguments = &( data->arguments );
+    const int aggregate = arguments->aggregate;
 
     DEBUG( fprintf( stderr, "start aggregateData() data->points = %lu\n",
                     data->points ); )
@@ -2097,82 +1971,66 @@ static void aggregateData( Data* data ) {
     memset( line, 0, sizeof line );
     memset( data->note, 0, sizeof data->note );
 
-    /* Read each line and parse column values comparing id: */
+    /* Read each line: */
 
-    while ( data->ok &&
-            fgets( line, sizeof line, input ) != 0 ) {
-      const int thisId = atoi( line ); /* atoi() is faster than sscanf(). */
+    while ( data->ok && fgets( line, sizeof line, input ) != 0 ) {
+      data->ok =
+        parseSortedLine( line, &id, &timestamp, &longitude, &latitude,
+                         &elevation, &measure, data->note );
 
-      if ( thisId == id ) { /* Handle most frequent case first: aggregate sum*/
-
-        /* Parse measure which appears after penultimate comma: */
-
-        char* comma = strrchr( line, ',' );
-        int commaCount = comma != 0;
-
-        while ( comma > line && commaCount < 2 ) {
-          --comma;
-
-          if ( *comma == ',' ) {
-            ++commaCount;
-          }
-        }
-
-        data->ok = commaCount == 2 && comma > line;
-
-        if ( data->ok ) {
-          measure = atof( comma + 1 );
-          sum += measure; /* Aggregate. */
-          ++count;
-        }
-      } else { /* thisId != id */
-
-        if ( id != -1 && count > 0 && count >= minimumCount ) {
-
-          /* Output mean: */
-
-          const double mean = sum / count;
-          data->ok =
-            fprintf( output, "%d,%lld,%lf,%lf,%lf,%d,%lf,%s\n",
-                     id, timestamp, longitude, latitude, elevation,
-                     (int) count, mean,
-                     data->note ) > 8;
-          data->points += data->ok;
-        }
-
-        /* Re-initialize: */
-
-        data->ok =
-          sscanf( line, "%d,%lld,%lf,%lf,%lf,%lld,%lf",
-                  &id, &timestamp,
-                  &longitude, &latitude, &elevation, &count, &measure ) == 7;
-        sum = measure;
-        count = 1;
+      if ( data->ok ) {
 
         if ( minimumCount == 0 ) {
           minimumCount = computeMinimumCount( data, timestamp );
-          DEBUG( fprintf( stderr, "  minimumCount = %lld\n", minimumCount ); )
         }
 
-        /* Parse description (appearing after last comma) into data->note: */
+        if ( outputId == 0 ) { /* Initialize: */
+          outputId = id;
+          outputTimestamp =
+            computeAggregationTimestamp( aggregate, timestamp );
+          outputLongitude = longitude;
+          outputLatitude  = latitude;
+          outputElevation = elevation;
+          memset( outputNote, 0, sizeof outputNote );
+          strncpy( outputNote, data->note,
+                   sizeof outputNote / sizeof *outputNote - 1 );
+          sum = measure;
+          count = 1;
+        } else if ( outputId != id ||
+                   ! sameOutputTimestamp( aggregate, outputTimestamp,
+                                          timestamp ) ) {
 
-        {
-          char* comma = strrchr( line, ',' );
-          data->ok = comma != 0;
-
-          if ( data->ok ) {
-            char* newline = 0;
-            strncpy( data->note, comma + 1,
-                     sizeof data->note / sizeof data->note[ 0 ] - 1 );
-            newline = strchr( data->note, '\n' );
-
-            if ( newline ) {
-              *newline = '\0';
-            }
+          if ( count >= minimumCount ) { /* Output aggregate: */
+            const double mean = sum / count;
+            data->ok =
+              fprintf( output, "%d,%lld,%lf,%lf,%lf,%d,%lf,%s\n",
+                       outputId, outputTimestamp,
+                       outputLongitude, outputLatitude, outputElevation,
+                       (int) count, mean,
+                       outputNote ) > 8;
+            data->points += data->ok;
           }
+
+          if ( data->ok ) { /* Re-initialize: */
+            outputId = id;
+            outputTimestamp =
+              computeAggregationTimestamp( aggregate, timestamp );
+            outputLongitude = longitude;
+            outputLatitude  = latitude;
+            outputElevation = elevation;
+            memset( outputNote, 0, sizeof outputNote );
+            strncpy( outputNote, data->note,
+                     sizeof outputNote / sizeof *outputNote - 1 );
+            sum = measure;
+            count = 1;
+          }
+
+        } else { /* Same id and same output timestamp: */
+          sum += measure;
+          ++count;
         }
-      }
-    }
+      } /* If parsed input line. */
+    } /* End loop on reading lines. */
 
     DEBUG( fprintf( stderr, "  count = %lld\n", count ); )
 
@@ -2182,16 +2040,143 @@ static void aggregateData( Data* data ) {
       const double mean = sum / count;
       data->ok =
         fprintf( output, "%d,%lld,%lf,%lf,%lf,%d,%lf,%s\n",
-                 id, timestamp, longitude, latitude, elevation,
+                 outputId, outputTimestamp,
+                 outputLongitude, outputLatitude, outputElevation,
                  (int) count, mean,
-                 data->note ) > 7;
-      data->points += data->ok; /* Update number of output points. */
+                 outputNote ) > 8;
+      data->points += data->ok;
     }
   }
 
   DEBUG( fprintf( stderr,
                   "end aggregateData() data->points = %lu, data->ok = %d\n",
                   data->points, data->ok ); )
+}
+
+
+
+/******************************************************************************
+PURPOSE: parseSortedLine - Parse id-timestamp sorted input line.
+INPUTS:  char* line            Line to parse.
+OUTPUTS: int* id               Site id.
+         long long* timestamp  Seconds since 1970.
+         double* longitude     Site logitude.
+         double* latitude      Site latitude.
+         double* elevation     Site elevation.
+         double* measure       Site measure.
+         Note note             Site description.
+RETURNS: int 1 if successful, else 0.
+******************************************************************************/
+
+static int parseSortedLine( char* line,
+                            int* id,
+                            long long* timestamp,
+                            double* longitude,
+                            double* latitude,
+                            double* elevation,
+                            double* measure,
+                            Note note ) {
+
+  assert( line ); assert( id ); assert( timestamp );
+  assert( longitude ); assert( latitude ); assert( elevation );
+  assert( measure ); assert( note );
+  int result = 0;
+
+  {
+    long long unused = 0;
+     result =
+       sscanf( line, "%d,%lld,%lf,%lf,%lf,%lld,%lf",
+              id, timestamp,
+              longitude, latitude, elevation, &unused, measure ) == 7 &&
+       *id > 0 && *timestamp > 0 &&
+       IN_RANGE( *longitude, -180.0, 180.0 ) &&
+       IN_RANGE( *latitude, -90.0, 90.0 ) &&
+       IN_RANGE( *elevation, -500.0, 10000.0 );
+
+    if ( result ) {
+
+      /* Parse description (appearing after last comma) into note: */
+
+      char* comma = strrchr( line, ',' );
+      result = comma != 0;
+
+      if ( result ) {
+        char* newline = 0;
+        memset( note, 0, sizeof (Note) );
+        strncpy( note, comma + 1, sizeof (Note) / sizeof (char) - 1 );
+        newline = strchr( note, '\n' );
+
+        if ( newline ) {
+          *newline = '\0';
+        }
+      }
+    }
+  }
+
+  return result;
+}
+
+
+
+/******************************************************************************
+PURPOSE: computeAggregationTimestamp - Compute the output aggregation
+         seconds timestamp.
+INPUTS:  const int aggregate        Aggregation timestep hourly or daily.
+         const long long timestamp  Data timestamp (seconds since 1970).
+RETURNS: long long seconds since 1970 to output for aggregation.
+******************************************************************************/
+
+static long long computeAggregationTimestamp( const int aggregate,
+                                              const long long timestamp ) {
+
+  long long result = 0;
+  assert( aggregate != AGGREGATE_NONE );
+  assert( timestamp > 0 );
+  assert( timestamp > 0 );
+
+  {
+    const long long yyyymmddhhmmss = secondsToYYYYMMDDHHMMSS( timestamp );
+
+    if ( aggregate == AGGREGATE_HOURLY ) {
+      const long long yyyymmddhh0000 = ( yyyymmddhhmmss / 10000LL ) * 10000LL;
+      result = secondsSince1970( yyyymmddhh0000 );
+    } else if ( aggregate == AGGREGATE_DAILY ) {
+      const long long yyyymmdd000000 =
+        ( yyyymmddhhmmss / 1000000LL ) * 1000000LL;
+      result = secondsSince1970( yyyymmdd000000 );
+    } else if ( aggregate == AGGREGATE_MONTHLY ) {
+      const long long yyyymm01000000 =
+        ( yyyymmddhhmmss / 100000000LL ) * 100000000LL + 1000000L;
+      result = secondsSince1970( yyyymm01000000 );
+    } else if ( aggregate == AGGREGATE_ALL ) {
+      const long long yyyymm01000000 =
+        ( yyyymmddhhmmss / 100000000LL ) * 100000000LL + 1000000L;
+      result = secondsSince1970( yyyymm01000000 );
+    }
+  }
+
+  return result;
+}
+
+
+
+/******************************************************************************
+PURPOSE: sameOutputTimestamp - Check if timestamp seconds matches the
+        output timestamp for the given aggregation.
+INPUTS:  const int aggregate        Aggregation timestep hourly or daily.
+         const long long outputTimestamp  Aggregation output timestamp
+                                          (seconds since 1970).
+         const long long timestamp  Data timestamp (seconds since 1970).
+RETURNS: int 1 if matched, else 0.
+******************************************************************************/
+
+static int sameOutputTimestamp( const int aggregate,
+                                const long long outputTimestamp,
+                                const long long timestamp ) {
+  const long long thisAggregationTimestamp =
+      computeAggregationTimestamp( aggregate, timestamp );
+  const int result = thisAggregationTimestamp == outputTimestamp;
+  return result;
 }
 
 

@@ -34,6 +34,13 @@ STATUS:  unreviewed tested
 
 /*=========================== FORWARD DECLARATIONS ==========================*/
 
+static size_t readTimestamps( const int file,
+                              const int group,
+                              const int id,
+                              const size_t starts[],
+                              const size_t counts[],
+                              double data[] );
+
 static size_t filterByQC( const int group,
                           const char* const qcVariable,
                           const size_t starts[],
@@ -292,6 +299,8 @@ int readFileData( const int file,
 
     { "PRODUCT", "latitude",  "deg", 1.0,  -90.0,  90.0, 0, 0, 0 },
 
+    { "PRODUCT", "delta_time",  "s", 1.0, 0.0, 1e10, 0,0,0},
+
     { "PRODUCT/SUPPORT_DATA/GEOLOCATIONS", "solar_zenith_angle",
       "deg", 1.0,    0.0, 180.0, 0, 0, 0 },
 
@@ -482,80 +491,88 @@ int readFileData( const int file,
       if ( status == NC_NOERR ) {
         const size_t points = rows * columns;
         float* fdata = (float*) data;
+        const int isTime = ! strcmp( variable, "delta_time" );
         size_t starts[ 3 ] = { 0, 0, 0 };
         size_t counts[ 3 ] = { 1, 0, 0 };
         counts[ 1 ] = rows;
         counts[ 2 ] = columns;
-        status = nc_get_vara_float( gid, id, starts, counts, fdata );
 
-        if ( status == NC_NOERR ) {
-          const char* const qcVariable = qcMinimum == 0 ? 0 : entry->qcVariable;
-          validValues = points;
-          DEBUG( fprintf( stderr, "points = %lu\n", points ); )
+        if ( isTime ) {
+          validValues = readTimestamps( file, gid, id,starts, counts, data );
+        } else {
+          status = nc_get_vara_float( gid, id, starts, counts, fdata );
 
-          if ( qcVariable ) {
-            unsigned char* const qcData = (unsigned char*) ( fdata + points );
-            validValues =
-              filterByQC( gid2, qcVariable, starts, counts, points,
-                          qcMinimum, fdata, qcData );
-            DEBUG( fprintf( stderr, "After filterByQC(%s), validValues = %lu\n",
-                            qcVariable, validValues ); )
-          }
+          if ( status == NC_NOERR ) {
+            const char* const qcVariable =
+              qcMinimum == 0 ? 0 : entry->qcVariable;
+            validValues = points;
+            DEBUG( fprintf( stderr, "points = %lu\n", points ); )
 
-          if ( validValues ) {
-            const char* const groundPixelVariable =
-              groundPixelMinimum == -1 ? 0 : "ground_pixel";
-
-            if ( groundPixelVariable ) {
-              int groundPixelGroupId = -1;
-              status = nc_inq_ncid( file, "PRODUCT", &groundPixelGroupId );
-
-              if ( status == NC_NOERR ) {
-                int* const groundPixelData = (int*) ( fdata + points );
-                validValues =
-                  filterByGroundPixelRange( groundPixelGroupId,
-                                            groundPixelVariable,
-                                            starts, counts, points,
-                                            groundPixelMinimum,
-                                            groundPixelMaximum,
-                                            fdata, groundPixelData );
-                DEBUG( fprintf( stderr,
-                                "After filterByGroundPixelRange(%s), "
-                                "validValues = %lu\n",
-                                groundPixelVariable, validValues ); )
-              }
+            if ( qcVariable ) {
+              unsigned char* const qcData = (unsigned char*) ( fdata + points);
+              validValues =
+                filterByQC( gid2, qcVariable, starts, counts, points,
+                            qcMinimum, fdata, qcData );
+              DEBUG( fprintf( stderr,
+                              "After filterByQC(%s), validValues = %lu\n",
+                              qcVariable, validValues ); )
             }
 
-            if ( status == NC_NOERR && validValues ) {
-              const char* const filterVariable =
-                maximumCloudFraction == 1.0 ? 0 : entry->filterVariable;
+            if ( validValues ) {
+              const char* const groundPixelVariable =
+                groundPixelMinimum == -1 ? 0 : "ground_pixel";
 
-              if ( filterVariable ) {
-                float* const filterData = fdata + points;
-                validValues =
-                  filterByCloudFraction( gid2, filterVariable, starts, counts,
-                                         points, maximumCloudFraction, fdata,
-                                         filterData );
-                DEBUG( fprintf( stderr, "After filterByCloudFraction(%s), "
-                                "validValues = %lu\n",
-                                filterVariable, validValues ); )
+              if ( groundPixelVariable ) {
+                int groundPixelGroupId = -1;
+                status = nc_inq_ncid( file, "PRODUCT", &groundPixelGroupId );
+
+                if ( status == NC_NOERR ) {
+                  int* const groundPixelData = (int*) ( fdata + points );
+                  validValues =
+                    filterByGroundPixelRange( groundPixelGroupId,
+                                              groundPixelVariable,
+                                              starts, counts, points,
+                                              groundPixelMinimum,
+                                              groundPixelMaximum,
+                                              fdata, groundPixelData );
+                  DEBUG( fprintf( stderr,
+                                  "After filterByGroundPixelRange(%s), "
+                                  "validValues = %lu\n",
+                                  groundPixelVariable, validValues ); )
+                }
               }
 
-              if ( validValues ) {
-                const double scale = entry->scale;
-                const double validMinimum =
-                  allowNegativeCounts &&
-                  ! strcmp( entry->units, "molecules/cm2" ) ? -1e29
-                  : entry->validMinimum;
-                const double validMaximum = entry->validMaximum;
-                validValues =
-                  expandAndFilterData( points, units, scale,
-                                       validMinimum, validMaximum, data );
-                DEBUG( fprintf( stderr,
-                                "After expandAndFilterData(%s, %f, [%e, %e]), "
-                                "validValues = %lu\n",
-                                units, scale, validMinimum, validMaximum,
-                                validValues ); )
+              if ( status == NC_NOERR && validValues ) {
+                const char* const filterVariable =
+                  maximumCloudFraction == 1.0 ? 0 : entry->filterVariable;
+
+                if ( filterVariable ) {
+                  float* const filterData = fdata + points;
+                  validValues =
+                    filterByCloudFraction( gid2, filterVariable, starts, counts,
+                                           points, maximumCloudFraction, fdata,
+                                           filterData );
+                  DEBUG( fprintf( stderr, "After filterByCloudFraction(%s), "
+                                  "validValues = %lu\n",
+                                  filterVariable, validValues ); )
+                }
+
+                if ( validValues ) {
+                  const double scale = entry->scale;
+                  const double validMinimum =
+                    allowNegativeCounts &&
+                    ! strcmp( entry->units, "molecules/cm2" ) ? -1e29
+                    : entry->validMinimum;
+                  const double validMaximum = entry->validMaximum;
+                  validValues =
+                    expandAndFilterData( points, units, scale,
+                                         validMinimum, validMaximum, data );
+                  DEBUG( fprintf( stderr,
+                                  "After expandAndFilterData(%s, %f, [%e, %e]),"
+                                  " validValues = %lu, [%f, ..., %f]\n",
+                                  units, scale, validMinimum, validMaximum,
+                                  validValues, data[ 0 ], data[ points - 1 ]);)
+                }
               }
             }
           }
@@ -572,6 +589,85 @@ int readFileData( const int file,
 
   result = validValues > 0;
   DEBUG( fprintf( stderr, "result = %d\n", result ); )
+  return result;
+}
+
+
+
+/******************************************************************************
+PURPOSE: readTimestamps - Read timestamps and convert to seconds from 1970.
+INPUTS:  const int file                NetCDF file  ID of timestamp variable.
+         const int group               NetCDF file group ID of qcVariable.
+         const size_t starts[ 3 ]      Start dimension indices of variable.
+         const size_t counts[ 3 ]      Dimensions of variable.
+OUTPUTS: double data[ points ]         Swath timestamp data.
+RETURNS: size_t number of non-missing points,
+         else 0 and a failure message is printed to stderr.
+NOTES:   Convert timestamps from milliseconds from base to seconds from
+         1970 and copy/expand to double:
+******************************************************************************/
+
+static size_t readTimestamps( const int file,
+                              const int group,
+                              const int id,
+                              const size_t starts[],
+                              const size_t counts[],
+                              double data[] ) {
+
+  size_t result = 0;
+  long long seconds0 = 0;
+  int status = -1;
+
+  assert( file >= 0 ); assert( group >= 0 ); assert( id >= 0 );
+  assert( starts );
+  assert( starts[ 0 ] == 0 );
+  assert( starts[ 1 ] == 0 );
+  assert( starts[ 2 ] == 0 );
+  assert( counts );
+  assert( counts[ 0 ] == 1 ); /* time */
+  assert( counts[ 1 ] > 0 ); /* rows. */
+  assert( counts[ 2 ] > 0 ); /* columns. */
+  assert( data );
+
+  status =
+    nc_get_att_longlong( file, NC_GLOBAL, "time_reference_seconds_since_1970",
+                         &seconds0 );
+
+  if ( status == NC_NOERR ) {
+    int* idata = (int*) data;
+    status = nc_get_vara_int( group, id, starts, counts, idata );
+
+    if ( status == NC_NOERR ) {
+      const size_t rows = counts[ 1 ];
+      const size_t columns = counts[ 2 ];
+      const size_t points = rows * columns;
+      double* output = data + points;
+      int row = rows;
+
+      while ( row-- ) {
+        const int timestampMS = idata[ row ];
+        double convertedValue = MISSING_VALUE;
+        int column = columns;
+
+        if ( timestampMS >= 0 ) {
+          convertedValue = timestampMS / 1000 + seconds0;
+          result += columns;
+        }
+
+        while ( column-- ) {
+          *--output = convertedValue;
+        }
+      }
+    }
+  }
+
+  if ( status != NC_NOERR ) {
+    const char* const message = nc_strerror( status );
+    fprintf( stderr, "Failed to read valid delta_time because: %s\n",
+             message );
+    result = 0;
+  }
+
   return result;
 }
 
@@ -817,35 +913,33 @@ static size_t expandAndFilterData( const size_t points,
                                    double data[] ) {
 
   size_t result = 0;
+  size_t index = points;
+  float* const fdata = (float*) data;
 
   assert( points ); assert( units ); assert( *units );
   assert( scale > 0.0 );
   assert( validMinimum <= validMaximum );
   assert( data );
 
-  {
-    float* const fdata = (float*) data;
-    size_t index = points;
+  /* Loop backward to avoid overwrite when expanding 4 bytes to 8 bytes: */
 
-    /* Loop backward to avoid overwrite when expanding 4 bytes to 8 bytes: */
+  while ( index-- ) {
+    const double value = fdata[ index ];
 
-    while ( index-- ) {
-      const double value = fdata[ index ];
+    if ( value != MISSING_VALUE ) {
+      const double convertedValue = value * scale;
 
-      if ( value != MISSING_VALUE ) {
-        const double convertedValue = value * scale;
-
-        if ( IN_RANGE( convertedValue, validMinimum, validMaximum ) ) {
-          data[ index ] = convertedValue;
-          ++result;
-        } else {
-          data[ index ] = MISSING_VALUE;
-        }
+      if ( IN_RANGE( convertedValue, validMinimum, validMaximum ) ) {
+        data[ index ] = convertedValue;
+        ++result;
       } else {
-        data[ index ] = MISSING_VALUE; /* Store 64-bit missing value. */
+        data[ index ] = MISSING_VALUE;
       }
+    } else {
+      data[ index ] = MISSING_VALUE; /* Store 64-bit missing value. */
     }
   }
+
 
   return result;
 }

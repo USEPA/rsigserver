@@ -1,4 +1,4 @@
-#!/usr/bin/perl -wT
+/usr/bin/bin/perl -wT
 
 ##############################################################################
 # PURPOSE: canaryserver - Serve USGS CANARY requests.
@@ -177,6 +177,13 @@ sub main {
   
   $result = 1 - $result; # UNIX: zero is success, non-zero is failure.
   debug( "exit result = $result" );
+
+  # Must return some bytes to avoid 30 second timeout delay when unsuccessful:
+
+  if ( $result != 0 ) {
+    print STDOUT "\nFAILED\n";
+  }
+
   exit $result;
 }
 
@@ -715,7 +722,7 @@ sub execute_command {
         print;
       }
 
-      close( the_pipe ) or die $!;
+      close( the_pipe );
       $result = ! $?;
     } else { # Child process.
       exec( $command ) or die "can't exec program: $!";

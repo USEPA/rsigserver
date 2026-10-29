@@ -2,20 +2,21 @@
 # Run this script with the command:
 # C:\MinGW/msys/1.0/bin/sh ./makeit.mingw64
 
-PATH=/c/Users/tplessel/mingw64/bin:/c/MinGW/msys/1.0/bin:/c/MinGW/bin:/c/WINDOWS/System32:/c/WINDOWS
+MY_HOME="/c/Users/tplessel"
+PATH="$MY_HOME/mingw-w64/x86_64-8.1.0-posix-seh-rt_v6-rev0/mingw64/bin:$MY_HOME/MinGW/msys/1.0/bin:$MY_HOME/MinGW/bin:/c/WINDOWS/System32:/c/WINDOWS"
 cls
-echo "PATH = $PATH"
-
-# Verify MinGW versions of the following commands are used:
-
-which gcc
+echo "Using PATH:"
+echo $PATH
+echo
+echo "Using gcc:"
+where gcc
 gcc -m64 -v
 
 # In this directory run following commands:
 
 #gcc -m64 -static -g -DDEBUGGING -I. -c *.c
 gcc -m64 -static -O -DNO_ASSERTIONS -DNDEBUG -I. -c *.c
-gcc -m64 -static -o CMAQSubset *.o -Llib/Win64 libnetcdf.a libhdf5_hl.a libhdf5.a -lz
+gcc -m64 -static -o CMAQSubset *.o -Llib/Win64 -lnetcdf -lhdf5_hl -lhdf5 -lz
 
 rm *.o
 

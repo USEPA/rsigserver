@@ -78,7 +78,7 @@ static const Entry translators[] = {
   { "REGRIDDED-CALIPSO 2.0\n",  compareRegriddedCALIPSO  },
   { "REGRIDDED-Aircraft 3.0\n", compareRegriddedAircraft },
   { "REGRIDDED-Profile 2.0\n",  compareRegriddedProfile  },
-  { "REGRIDDED-Grid 1.0\n",     compareRegriddedGrid  },
+  { "REGRIDDED-Grid 1.0\n",     compareRegriddedGrid     },
 
 /* STEP 2. Add new translator entry above this line. */
 

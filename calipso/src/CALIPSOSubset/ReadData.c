@@ -115,19 +115,19 @@ int typeOfCALIPSOFile( const char* const fileName ) {
   if ( strstr( fileName, "CAL_LID_L1" ) ) {
     result = CALIPSO_L1;
   } else if ( strstr( fileName, "CAL_LID_L2_05kmAPro" ) ) {
-      result = CALIPSO_L2_05KMAPRO;
+    result = CALIPSO_L2_05KMAPRO;
   } else if ( strstr( fileName, "CAL_LID_L2_05kmCPro" ) ) {
-      result = CALIPSO_L2_05KMCPRO;
+    result = CALIPSO_L2_05KMCPRO;
   } else if ( strstr( fileName, "CAL_LID_L2_05kmALay" ) ) {
-      result = CALIPSO_L2_05KMALAY;
+    result = CALIPSO_L2_05KMALAY;
   } else if ( strstr( fileName, "CAL_LID_L2_05kmCLay" ) ) {
-      result = CALIPSO_L2_05KMCLAY;
+    result = CALIPSO_L2_05KMCLAY;
   } else if ( strstr( fileName, "CAL_LID_L2_01kmCLay" ) ) {
-      result = CALIPSO_L2_01KMCLAY;
-  } else if ( strstr( fileName, "CAL_LID_L2_333mCLay" ) ) {
-      result = CALIPSO_L2_333MCLAY;
+    result = CALIPSO_L2_01KMCLAY;
+  } else if ( strstr( fileName, "CAL_LID_L2_333mMLay" ) ) {
+    result = CALIPSO_L2_333MMLAY;
   } else if ( strstr( fileName, "CAL_LID_L2_VFM" ) ) {
-      result = CALIPSO_L2_VFM;
+    result = CALIPSO_L2_VFM;
   }
 
   return result;

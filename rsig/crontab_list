@@ -1,0 +1,33 @@
+#00,02,04,06,08,10,12,14,16,18,20,22,24,26,28,30,32,34,36,38,40,42,44,46,48,50,52,54,56,58 * * * * /data/PurpleAir/get_purpleair_files > /dev/null 2>&1
+* * * * * /data/PurpleAir/get_purpleair_file 1 data >> /data/PurpleAir/log 2>&1
+10 0 * * * /data/PurpleAir/make_hourly_files >> /data/PurpleAir/log 2>&1
+0 1 * * * /data/PurpleAir/make_daily_files >> /data/PurpleAir/log 2>&1
+0,15,30,45 * * * * /data/METAR/get_metar_files > /dev/null 2>&1
+0 1 * * * /data/Pandora/get_pandora_files > /dev/null 2>&1
+0 5 * * * /data/Pandora/make_pandora_sites > /dev/null 2>&1
+0 0 * * * /data/openaq/update_location_info > /dev/null 2>&1
+10 0 * * * /data/openaq/update_openaq_files > /dev/null 2>&1
+0 23 * * * /data/VIIRS_NOAA/get_viirs_files > /dev/null 2>&1
+#0 20,23 * * * /data/TROPOMI/get_tropomi_files_aws2 NO2 > /dev/null 2>&1
+#30 20,23 * * * /data/TROPOMI/get_tropomi_files_aws2 HCHO > /dev/null 2>&1
+#45 20,23 * * * /data/TROPOMI/get_tropomi_files_aws2 CO > /dev/null 2>&1
+#55 20,23 * * * /data/TROPOMI/get_tropomi_files_aws2 CH4 > /dev/null 2>&1
+0 23 * * * /data/GOESBB/get_goesbb_files > /dev/null 2>&1
+0 23 * * * /data/GOESAOD/get_goesaod_files > /dev/null 2>&1
+0 2 * * * /data/NESDIS/get_nesdis_pm25sat_files > /dev/null 2>&1
+#0 3 * * * /data/Ceilometer3/ucn_download.bash > /dev/null 2>&1
+30 3 * * * /data/GASP/get_gasp_files > /dev/null 2>&1
+0 4 * * * /data/HMS/get_hms_files > /dev/null 2>&1
+0 5 * * * /data/NEUBrew/get_neubrew_files > /dev/null 2>&1
+0 * * * * /data/check_server_status > /dev/null 2>&1
+##
+0 8 * * * /rsig/retigo/esdr/scripts/auth_refresh
+#15 * * * * /rsig/WMS/scripts/createLastestPurpleairAqiImages >& /rsig/WMS/data/output/purpleair_pm25aqi_latest.log
+10 23 * * * /data/TROPOMI/verify_recent 2
+55 23 * * * /data/TROPOMI/verify_recent 15
+0  2  * * * /data/TROPOMI/verify_recent 30
+20 * * * * /data/TROPOMI/get_tropomi_files_aws2 NO2  >& /data/TROPOMI/log_aws2_no2.txt
+30 * * * * /data/TROPOMI/get_tropomi_files_aws2 CO   >& /data/TROPOMI/log_aws2_co.txt
+40 * * * * /data/TROPOMI/get_tropomi_files_aws2 HCHO >& /data/TROPOMI/log_aws2_hcho.txt
+50 * * * * /data/TROPOMI/get_tropomi_files_aws2 CH4  >& /data/TROPOMI/log_aws2_ch4.txt
+0 23 * * * /data/Ceilometer3/ucn_download.bash >& /data/Ceilometer3/ucn_download.log

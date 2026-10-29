@@ -28,13 +28,26 @@ STATUS: unreviewed tested
  * little-endian (LSB: least significant byte first)?
  */
 
-#if defined(__alpha) || \
-    defined(__i386__) || defined(__i486__) || \
-    defined(__i586__) || defined(__i686__) || \
-    defined(__ia64__) || defined(__x86_64__)
-#define IS_LITTLE_ENDIAN 1
-#else
-#define IS_LITTLE_ENDIAN 0
+#ifndef IS_LITTLE_ENDIAN
+#define IS_LITTLE_ENDIAN \
+  ( \
+    ( defined(__BYTE_ORDER__) && \
+      defined(__ORDER_LITTLE_ENDIAN__) && \
+      __BYTE_ORDER__ == __ORDER_LITTLE_ENDIAN__ ) || \
+    defined(__x86_64__) || \
+    defined(__i386__)   || \
+    defined(__i486__)   || \
+    defined(__i586__)   || \
+    defined(__i686__)   || \
+    defined(__alpha)    || \
+    defined(__ia64__)   || \
+    defined(__ARMEL__)  || \
+    defined(__MIPSEL)   || \
+    defined(_WIN32)     || \
+    defined(_WIN64)     || \
+    defined(_M_IX86)    || \
+    defined(_M_AMD64)      \
+  )
 #endif
 
 #define IN_RANGE(x,low,high) ((low)<=(x)&&(x)<=(high))
@@ -363,15 +376,16 @@ int indexOfWord( const char* word, const char* words ) {
 
 /******************************************************************************
 PURPOSE: parseOptions - Parse command-line options.
-INPUTS:  int argc                Number of command-line arguments.
-         char argv[]             Command-line argument strings.
-         int count               Number of options.
+INPUTS:  const int argc           Number of command-line arguments.
+         char argv[]              Command-line argument strings.
+         const int count          Number of options.
          Option options[ count ]  Option: name, required, type, count, range.
 OUTPUTS: Option options[ count ]  Option: parsed, values.
 RETURNS: int 1 if successful, else 0.
 ******************************************************************************/
 
-int parseOptions( int argc, char* argv[], int count, Option options[] ) {
+int parseOptions( const int argc, char* argv[], const int count,
+                  Option options[] ) {
   int result = 1;
   int arg = 1;
   int option = 0;
@@ -383,177 +397,21 @@ int parseOptions( int argc, char* argv[], int count, Option options[] ) {
   }
 
   while ( result && arg < argc ) {
-    const char* const thisArg = argv[ arg ];
+    const char* const argument = argv[ arg ];
 
     for ( option = 0; result && option < count; ++option ) {
       Option* const thisOption = options + option;
       const char* name = thisOption->name;
 
-      if ( ! strcmp( thisArg, name ) ) {
-        const int valueCount = thisOption->count;
-
-        if ( thisOption->parsed ) {
-          fprintf( stderr, "%s: Redundant command-line option %s.\n",
-                   argv[ 0 ], thisArg );
-          result = 0;
-        } else if ( arg + valueCount >= argc ) {
-          fprintf( stderr,
-                   "%s: Not enough values for command-line option %s.\n",
-                   argv[ 0 ], thisArg );
-          result = 0;
-        } else {
-          void* values = thisOption->values;
-          thisOption->parsed = 1;
-          ++arg; /* Skip argument. */
-
-          if ( values && count > 0 ) {
-            const int type = thisOption->type;
-            int index = 0;
-
-            for ( index = 0;
-                  result && arg < argc && index < valueCount;
-                  ++index, ++arg ) {
-              char* const thisArgv = argv[ arg ];
-
-              switch ( type ) {
-              case FILE_TYPE:
-                {
-                  char** svalues = values;
-                  char** svalue = svalues + index;
-                  *svalue = thisArgv;
-                  result = fileSize( *svalue ) > 0;
-                }
-                break;
-              case DIRECTORY_TYPE:
-                {
-                  char** svalues = values;
-                  char** svalue = svalues + index;
-                  *svalue = thisArgv;
-                  result = isDirectory( *svalue );
-                }
-                break;
-              case STRING_TYPE:
-                {
-                  char** svalues = values;
-                  char** svalue = svalues + index;
-                  *svalue = thisArgv;
-                  result = isprint( *svalue[ 0 ] );
-                }
-                break;
-              case ENUM_TYPE:
-                {
-                  int* ivalues = values;
-                  int* ivalue = ivalues + index;
-                  result =
-                    thisArgv && isalnum(*thisArgv ) && ! strchr(thisArgv, ' ');
-
-                  if ( result ) {
-                    *ivalue = indexOfWord( thisArgv, thisOption->valids );
-                    result = *ivalue >= 0;
-                  }
-                }
-                break;
-              case INT_TYPE:
-                {
-                  int* ivalues = values;
-                  int* ivalue = ivalues + index;
-                  const int* range = thisOption->range;
-                  char* end = 0;
-                  *ivalue = strtol( thisArgv, &end, 10 );
-                  result = end != thisArgv;
-
-                  if ( range ) {
-                    const int minimum = range[ 0 ];
-                    const int maximum = range[ 1 ];
-                    result = *ivalue >= minimum && *ivalue <= maximum;
-                  }
-                }
-                break;
-              case INTEGER64_TYPE:
-                {
-                  long long* ivalues = values;
-                  long long* ivalue = ivalues + index;
-                  const long long* range = thisOption->range;
-                  char* end = 0;
-                  *ivalue = strtoll( thisArgv, &end, 10 );
-                  result = end != thisArgv;
-
-                  if ( range ) {
-                    const long long minimum = range[ 0 ];
-                    const long long maximum = range[ 1 ];
-                    result = *ivalue >= minimum && *ivalue <= maximum;
-                  }
-                }
-                break;
-              case REAL64_TYPE:
-                {
-                  double* rvalues = values;
-                  double* rvalue = rvalues + index;
-                  const double* range = thisOption->range;
-                  char* end = 0;
-                  *rvalue = strtod( thisArgv, &end );
-                  result = end != thisArgv;
-
-                  if ( range ) {
-                    const double minimum = range[ 0 ];
-                    const double maximum = range[ 1 ];
-                    result = *rvalue >= minimum && *rvalue <= maximum;
-                  }
-                }
-                break;
-              case YYYYMMDDHHMMSS_TYPE:
-                {
-                  long long* ivalues = values;
-                  long long* ivalue = ivalues + index;
-                  char* end = 0;
-                  *ivalue = strtoll( thisArgv, &end, 10 );
-                  result = end != thisArgv;
-
-                  if ( result ) {
-                    result = isValidYYYYMMDDHHMMSS( *ivalue );
-                  }
-                }
-                break;
-              case BOUNDS_TYPE:
-                {
-                  double* rvalues = values;
-                  double* rvalue = rvalues + index;
-                  char* end = 0;
-                  *rvalue = strtod( thisArgv, &end );
-                  result = end != thisArgv;
-                }
-                break;
-              default:
-                break;
-              }
-            } /* End loop on parsed values stored. */
-
-            if ( result ) { /* Perform additional type-specific checks: */
-
-              if ( type == YYYYMMDDHHMMSS_TYPE && valueCount == 2 ) {
-                long long* ivalues = values;
-                const long long yyyymmddhhmmss1 = ivalues[ 0 ];
-                const long long yyyymmddhhmmss2 = ivalues[ 1 ];
-                result = yyyymmddhhmmss1 <= yyyymmddhhmmss2;
-              } else if ( type == BOUNDS_TYPE && valueCount == 4 ) {
-                double* rvalues = values;
-                const double latitudeMinimum  = rvalues[ 1 ];
-                const double longitudeMaximum = rvalues[ 2 ];
-                rvalues[ 1 ] = longitudeMaximum; /* Reorder to 2d array. */
-                rvalues[ 2 ] = latitudeMinimum;
-                result = isValidBounds( (const double (*)[2]) rvalues );
-              }
-            }
-          }
-        }
-
+      if ( ! strcmp( argument, name ) ) {
+        result = parseOption( argc, argv, &arg, thisOption );
         option = count; /* Found so stop looping. */
-      } /* Matched. */
-    } /* End loop on options. */
+      }
+    }
 
     if ( option == count ) { /* Not found. */
       fprintf( stderr, "%s: Invalid command-line option %s.\n",
-               argv[ 0 ], thisArg );
+               argv[ 0 ], argument );
       result = 0;
     }
   } /* End loop on argv[]. */
@@ -574,4 +432,247 @@ int parseOptions( int argc, char* argv[], int count, Option options[] ) {
 }
 
 
+
+/******************************************************************************
+PURPOSE: parseOption - Parse a command-line option.
+INPUTS:  const int argc        Number of command-line arguments.
+         char argv[]           Command-line argument strings.
+         int* const arg        Number of argument being parsed.
+         Option* const option  Option: name, required, type, count, range.
+OUTPUTS: int* const arg        Increased number of argument being parsed.
+         Option* const option  Option: values.
+RETURNS: int 1 if successful, else 0.
+******************************************************************************/
+
+int parseOption( const int argc, char* argv[],
+                 int* const arg, Option* const option ) {
+  int result = 0;
+  assert( argc > 0 ); assert( argv ); assert( argv[ 0 ] );
+  assert( argv[ argc - 1 ] );
+  assert( arg ), assert( *arg > 0 ); assert( *arg < argc );
+  assert( option ); assert( option->count >= 0 );
+
+  {
+    const char* argument = argv[ *arg ];
+    const int valueCount = option->count;
+
+    if ( option->parsed ) {
+      fprintf( stderr, "%s: Redundant command-line option %s.\n",
+               argv[ 0 ], argument );
+    } else if ( *arg + valueCount >= argc ) {
+      fprintf( stderr,
+               "%s: Require %d values for command-line option %s.\n",
+               argv[ 0 ], valueCount, argument );
+    } else {
+      void* const values = option->values;
+      option->parsed = 1;
+      ++*arg; /* Skip argument. */
+
+      if ( values && valueCount > 0 ) {
+        const int type = option->type;
+        int valueIndex = 0;
+
+        for ( valueIndex = 0, result = 1;
+              result && *arg < argc && valueIndex < valueCount;
+              ++valueIndex, ++*arg ) {
+          argument = argv[ *arg ];
+          result = parseOptionValue( argument, valueIndex, option );
+        }
+
+        if ( result ) { /* Perform additional type-specific checks: */
+
+          if ( type == YYYYMMDDHHMMSS_TYPE && valueCount == 2 ) {
+            long long* const ivalues = values;
+            const long long yyyymmddhhmmss1 = ivalues[ 0 ];
+            const long long yyyymmddhhmmss2 = ivalues[ 1 ];
+            result = yyyymmddhhmmss1 <= yyyymmddhhmmss2;
+          } else if ( type == BOUNDS_TYPE ) {
+            result = 0;
+
+            if ( valueCount >= 4 ) {
+              double* rvalues = values;
+              const double latitudeMinimum  = rvalues[ 1 ];
+              const double longitudeMaximum = rvalues[ 2 ];
+              rvalues[ 1 ] = longitudeMaximum; /* Reorder to 2d array. */
+              rvalues[ 2 ] = latitudeMinimum;
+              result = isValidBounds( (const double (*)[2]) rvalues );
+            }
+          }
+        }
+      }
+    }
+  }
+
+  return result;
+}
+
+
+
+/******************************************************************************
+PURPOSE: parseOptionValue - Parse a command-line option value.
+INPUTS:  const char* const argument  Command-line argument string.
+         const int valueIndex        0-based index of option value being parsed.
+         Option* const option  Option: type, values, range.
+OUTPUTS: Option* const option  Option: values[ valueIndex ].
+RETURNS: int 1 if successful, else 0.
+******************************************************************************/
+
+int parseOptionValue( const char* const argument, const int valueIndex,
+                      Option* const option ) {
+  int result = 0;
+  assert( argument ); assert( argument[ 0 ] );
+  assert( valueIndex >= 0 );
+  assert( option ); assert( option->values ); assert( option->type >= 0 );
+
+  {
+    void* const values = option->values;
+
+    switch ( option->type ) {
+    case FILE_TYPE:
+      {
+        const char** svalues = values;
+        const char** svalue = svalues + valueIndex;
+        *svalue = argument;
+        result = fileSize( *svalue ) > 0;
+      }
+      break;
+    case DIRECTORY_TYPE:
+      {
+        const char** svalues = values;
+        const char** svalue = svalues + valueIndex;
+        *svalue = argument;
+        result = isDirectory( *svalue );
+      }
+      break;
+    case STRING_TYPE:
+      {
+        const char** svalues = values;
+        const char** svalue = svalues + valueIndex;
+        *svalue = argument;
+        result = isprint( *svalue[ 0 ] );
+      }
+      break;
+    case ENUM_TYPE:
+      {
+        int* const ivalues = values;
+        int* const ivalue = ivalues + valueIndex;
+        result = isalpha( *argument ) && ! strchr( argument, ' ' );
+
+        if ( result ) {
+          *ivalue = indexOfWord( argument, option->valids );
+          result = *ivalue >= 0;
+        }
+      }
+      break;
+    case INT_TYPE:
+      {
+        int* const ivalues = values;
+        int* const ivalue = ivalues + valueIndex;
+        const int* const range = option->range;
+        char* end = 0;
+        *ivalue = strtol( argument, &end, 10 );
+        result = end != argument;
+
+        if ( range ) {
+          const int minimum = range[ 0 ];
+          const int maximum = range[ 1 ];
+          result = *ivalue >= minimum && *ivalue <= maximum;
+        }
+      }
+      break;
+    case INTEGER64_TYPE:
+      {
+        long long* const ivalues = values;
+        long long* const ivalue = ivalues + valueIndex;
+        const long long* const range = option->range;
+        char* end = 0;
+        *ivalue = strtoll( argument, &end, 10 );
+        result = end != argument;
+
+        if ( range ) {
+          const long long minimum = range[ 0 ];
+          const long long maximum = range[ 1 ];
+          result = *ivalue >= minimum && *ivalue <= maximum;
+        }
+      }
+      break;
+    case REAL64_TYPE:
+      {
+        double* const rvalues = values;
+        double* const rvalue = rvalues + valueIndex;
+        const double* const range = option->range;
+        char* end = 0;
+        *rvalue = strtod( argument, &end );
+        result = end != argument;
+
+        if ( range ) {
+          const double minimum = range[ 0 ];
+          const double maximum = range[ 1 ];
+          result = *rvalue >= minimum && *rvalue <= maximum;
+        }
+      }
+      break;
+    case YYYYMMDDHHMMSS_TYPE:
+      {
+        long long* const ivalues = values;
+        long long* const ivalue = ivalues + valueIndex;
+        char* end = 0;
+        *ivalue = strtoll( argument, &end, 10 );
+        result = end != argument;
+
+        if ( result ) {
+          result = isValidYYYYMMDDHHMMSS( *ivalue );
+        }
+      }
+      break;
+    case BOUNDS_TYPE:
+      {
+        double* const rvalues = values;
+        double* const rvalue = rvalues + valueIndex;
+        char* end = 0;
+        *rvalue = strtod( argument, &end );
+        result = end != argument;
+      }
+      break;
+    default:
+      break;
+    }
+  }
+
+  return result;
+}
+
+
+
+/******************************************************************************
+PURPOSE: filterNotes - Erase problematic characters from notes.
+INPUTS:  char* notes  Notes to filter.
+OUTPUTS: char* notes  Filtered notes.
+******************************************************************************/
+
+void filterNotes( char* notes, size_t length ) {
+  size_t index = 0;
+  assert( notes );
+  assert( length );
+
+  for ( index = 0; index < length - 1; ++index ) {
+    int c = notes[ index ];
+
+    if ( c >= 127 ) { /* Erase extended ASCII characters! */
+      notes[ index ] = '_';
+    } else if ( c < 32 ) { /* Erase control characters except '\n': */
+
+      if ( c != '\n' ) {
+        notes[ index ] = '_';
+      }
+    } else if ( c == '\\' ) {
+      notes[ index ] = ' ';
+    } if ( c == '"' ) {
+      notes[ index ] = ' ';
+    } if ( c == ',' ) {
+      notes[ index ] = ' ';
+    }
+  }
+
+}
 

@@ -1,0 +1,12 @@
+
+Rsigserver.java - One-page Java program that forwards ofmpub/rsigserver
+                  requests to maple/rsigserver and copies the resulting
+                  byte stream back out to stdout.
+
+rsig.war - File installed on ofmpub that contains byte-compiled Rsigserver.
+
+These should be replaced with a simple EPA Firewall rule.
+
+Contact: OFM_Support@epa.gov, gayam.jayachandra@epa.gov, 979-353-1234
+
+

@@ -1,0 +1,15 @@
+#!/bin/csh -f
+
+echo ; echo TEST rsigserver ; echo
+
+
+sleep 2 ; echo ; echo TEST GetCapabilities ; echo
+curl --silent --retry 0 'https://maple.hesc.epa.gov/rsig/rsigserver?SERVICE=wcs&VERSION=1.0.0&REQUEST=GetCapabilities' > GetCapabilities.xml ; echo $? ; head GetCapabilities.xml ; echo '...' ; tail GetCapabilities.xml ; xmllint --noout GetCapabilities.xml ; echo $?
+
+sleep 2 ; echo ; echo TEST DescribeCoverage ; echo
+curl --silent --retry 0 'https://maple.hesc.epa.gov/rsig/rsigserver?SERVICE=wcs&VERSION=1.0.0&REQUEST=DescribeCoverage' > DescribeCoverage.xml ; echo $? ; head DescribeCoverage.xml ; echo '...' ; tail DescribeCoverage.xml ; xmllint --noout DescribeCoverage.xml ; echo $?
+
+
+
+/bin/rm -f junk
+echo ; echo DONE rsigserver ; echo

@@ -12,7 +12,7 @@
 #          and modeled after a similar webserver application:
 #          https://webapps.datafed.net/ogc_EPA.wsfl
 #
-#          Uses wget through port 80 to YOUR_WEBSERVER_HOST
+#          Uses wget through port 80 to maple.hesc.epa.gov
 #          and which streams the data back on STDOUT.
 #
 #          Example usage:
@@ -46,9 +46,30 @@ delete @ENV{ 'PATH', 'IFS', 'CDPATH', 'ENV', 'BASH_ENV' };
 
 my $debugging = 0; # 1 = print debug messages to STDERR logs/error_log.
 
+# Reject new rsigserver requests if it would exceed this process limit:
+
+my $maximum_allowed_processes = 512; # Including 24 parallel Subset processes.
+my $get_total_connections = '/data/Apache/rsig/data_status/get_total_connections.csh';
+my $get_satellite_connections = '/data/Apache/rsig/data_status/get_satellite_connections.csh';
+my $temp_file = "/data/tmp/rsigserver.$$";
+my $temp_xml_file = "/data/tmp/rsigserver.$$.xml";
+
+# If RSIG_ID=value option is provided check if it matches one of these ids
+# and if so proceed without checking process count:
+
+my @app_rsig_ids = (
+  'check_server_status',
+  'rsig3d',
+  'rsiglite',
+  'retigo',
+  'edm',
+  'asnat'
+);
+
+
 # Internal server to forward to via wget command:
 
-my $server_host_dir = 'https://YOUR_WEBSERVER_HOST/cgi-bin/';
+my $server_host_dir = 'https://maple.hesc.epa.gov/cgi-bin/';
 my $bindir = '/rsig/current/code/bin/Linux.x86_64';
 my $curl_command = '/usr/bin/curl -k --silent --max-time 3600 --retry 0 -L --tcp-nodelay ';
 
@@ -187,6 +208,7 @@ my @servable_files = (
   'videos/RSIG3D_Wildfire.mp4',
   'videos/RSIG3D_Wildfire.wmv',
   'videos/RSIG_UsingWCS.mp4',
+  'videos/RSIG3D_TEMPO_Arizona_2025-06-26c.mp4',
 
   'download/RSIG2D_VERSION',
   'download/RSIG3D_VERSION',
@@ -267,6 +289,8 @@ my @servable_files = (
   'data/FAQSD/data/2020_pm25_daily_average.txt',
   'data/FAQSD/data/2021_ozone_daily_8hour_maximum.txt',
   'data/FAQSD/data/2021_pm25_daily_average.txt',
+  'data/FAQSD/data/2022_ozone_daily_8hour_maximum.txt',
+  'data/FAQSD/data/2022_pm25_daily_average.txt',
   'data/FAQSD/inputs/2001.zip',
   'data/FAQSD/inputs/2002.zip',
   'data/FAQSD/inputs/2003.zip',
@@ -288,6 +312,7 @@ my @servable_files = (
   'data/FAQSD/inputs/2019.zip',
   'data/FAQSD/inputs/2020.zip',
   'data/FAQSD/inputs/2021.zip',
+  'data/FAQSD/inputs/2022.zip',
   'data/FAQSD/inputs/CMAQ_DS_O3_2001_12km_csv.zip',
   'data/FAQSD/inputs/CMAQ_DS_O3_2001_36km_csv.zip',
   'data/FAQSD/inputs/CMAQ_DS_O3_2001_csv.zip',
@@ -372,6 +397,7 @@ my @servable_files = (
   'data/FAQSD/inputs/ds.input.aqs.o3.2019.csv',
   'data/FAQSD/inputs/ds.input.aqs.o3.2020.csv',
   'data/FAQSD/inputs/ds.input.aqs.o3.2021.csv',
+  'data/FAQSD/inputs/ds.input.aqs.o3.2022.csv',
   'data/FAQSD/inputs/ds.input.aqs.pm25.2002.csv',
   'data/FAQSD/inputs/ds.input.aqs.pm25.2003.csv',
   'data/FAQSD/inputs/ds.input.aqs.pm25.2004.csv',
@@ -388,6 +414,7 @@ my @servable_files = (
   'data/FAQSD/inputs/ds.input.aqs.pm25.2019.csv',
   'data/FAQSD/inputs/ds.input.aqs.pm25.2020.csv',
   'data/FAQSD/inputs/ds.input.aqs.pm25.2021.csv',
+  'data/FAQSD/inputs/ds.input.aqs.pm25.2022.csv',
   'data/FAQSD/inputs/ds.input.cmaq.ozone.2009.csv',
   'data/FAQSD/inputs/ds_input_cmaq_ozone_2009.zip',
   'data/FAQSD/inputs/ds.input.cmaq.ozone.2010.csv',
@@ -414,6 +441,8 @@ my @servable_files = (
   'data/FAQSD/inputs/ds_input_cmaq_ozone_2020.zip',
   'data/FAQSD/inputs/ds.input.cmaq.ozone.2021.csv',
   'data/FAQSD/inputs/ds_input_cmaq_ozone_2021.zip',
+  'data/FAQSD/inputs/ds.input.cmaq.ozone.2022.csv',
+  'data/FAQSD/inputs/ds_input_cmaq_ozone_2022.zip',
   'data/FAQSD/inputs/ds.input.cmaq.pm25.2009.csv',
   'data/FAQSD/inputs/ds_input_cmaq_pm25_2009.zip',
   'data/FAQSD/inputs/ds.input.cmaq.pm25.2010.csv',
@@ -440,6 +469,8 @@ my @servable_files = (
   'data/FAQSD/inputs/ds_input_cmaq_pm25_2020.zip',
   'data/FAQSD/inputs/ds.input.cmaq.pm25.2021.csv',
   'data/FAQSD/inputs/ds_input_cmaq_pm25_2021.zip',
+  'data/FAQSD/inputs/ds.input.cmaq.pm25.2022.csv',
+  'data/FAQSD/inputs/ds_input_cmaq_pm25_2022.zip',
   'data/FAQSD/inputs/oz82009ctymsa.csv',
   'data/FAQSD/inputs/oz82009monitor.csv',
   'data/FAQSD/inputs/oz82010ctymsa.csv',
@@ -507,6 +538,10 @@ my @servable_files = (
   'data/FAQSD/outputs/2021_pm25_daily_average.txt.gz',
   'data/FAQSD/outputs/2021_ozone_daily_8hour_maximum_2010_census.txt.gz',
   'data/FAQSD/outputs/2021_pm25_daily_average_2010_census.txt.gz',
+  'data/FAQSD/outputs/2022_ozone_daily_8hour_maximum.txt.gz',
+  'data/FAQSD/outputs/2022_pm25_daily_average.txt.gz',
+  'data/FAQSD/outputs/2022_ozone_daily_8hour_maximum_2010_census.txt.gz',
+  'data/FAQSD/outputs/2022_pm25_daily_average_2010_census.txt.gz',
   'data/FAQSD/outputs/reports.zip',
 
   'data/FAQSD/docs/2002_HBM_Annual_Report.pdf',
@@ -544,6 +579,340 @@ my @servable_files = (
  
   'data/CMAQ/inputs/CMAQv5.2_Benchmark_SingleDay_Input.tar.gz',
   'data/CMAQ/inputs/WRFv3.8_CMAQv5.2_Input.tar.gz',
+
+# Begin TEMP HACKS
+
+
+  'data/plessel/Erik_Martin/flushing.zip',
+
+  'data/plessel/Naomi/puget_sound_streamflow.zip',
+
+  'data/plessel/2024_pop.zip',
+
+  'data/plessel/EDM.zip', # Non-disabled version for PI 2025-06-25.
+
+  'data/plessel/RSIG3D.zip', # Dev version for Langley demo 2025-09-23.
+
+
+  # rsig3d.tgz has client-side RSIG3D app source code and 3 platform binaries.
+  # rsigserver.tgz has all of the server-side source code and Linux binaries.
+ 
+  'data/plessel/rsig3d.tgz',
+  'data/plessel/rsigserver.tgz',
+
+  'data/plessel/netcdf.tgz',
+  'data/plessel/netcdf_new.tgz',
+  'data/plessel/libs.tgz',
+  'data/plessel/ioapi.tgz',
+
+  'data/plessel/update_cain.tgz',
+
+  'data/plessel/ASNAT.zip',
+
+  'data/plessel/XDRConvert_source_for_Walt.zip',
+  'data/plessel/CALIPSOSubset_source_for_Walt.zip',
+  'data/plessel/TEMPOSubset_source_for_Walt.zip',
+  'data/plessel/bounds_filter_source_for_Walt.zip',
+
+  'data/plessel/cmake',
+
+  'data/plessel/Armour.zip',
+  'data/plessel/fast.tgz',
+
+  'data/plessel/schlaff/FORM_2002.ncf',
+  'data/plessel/schlaff/FORM_2003.ncf',
+  'data/plessel/schlaff/FORM_2004.ncf',
+  'data/plessel/schlaff/FORM_2005.ncf',
+  'data/plessel/schlaff/FORM_2006.ncf',
+  'data/plessel/schlaff/FORM_2007.ncf',
+  'data/plessel/schlaff/FORM_2008.ncf',
+  'data/plessel/schlaff/FORM_2009.ncf',
+  'data/plessel/schlaff/FORM_2010.ncf',
+  'data/plessel/schlaff/FORM_2011.ncf',
+  'data/plessel/schlaff/FORM_2012.ncf',
+  'data/plessel/schlaff/FORM_2013.ncf',
+  'data/plessel/schlaff/FORM_2014.ncf',
+  'data/plessel/schlaff/FORM_2015.ncf',
+  'data/plessel/schlaff/FORM_2016.ncf',
+  'data/plessel/schlaff/FORM_2017.ncf',
+  'data/plessel/schlaff/FORM_2018.ncf',
+  'data/plessel/schlaff/FORM_2019.ncf',
+  'data/plessel/schlaff/ISOP_2002.ncf',
+  'data/plessel/schlaff/ISOP_2003.ncf',
+  'data/plessel/schlaff/ISOP_2004.ncf',
+  'data/plessel/schlaff/ISOP_2005.ncf',
+  'data/plessel/schlaff/ISOP_2006.ncf',
+  'data/plessel/schlaff/ISOP_2007.ncf',
+  'data/plessel/schlaff/ISOP_2008.ncf',
+  'data/plessel/schlaff/ISOP_2009.ncf',
+  'data/plessel/schlaff/ISOP_2010.ncf',
+  'data/plessel/schlaff/ISOP_2011.ncf',
+  'data/plessel/schlaff/ISOP_2012.ncf',
+  'data/plessel/schlaff/ISOP_2013.ncf',
+  'data/plessel/schlaff/ISOP_2014.ncf',
+  'data/plessel/schlaff/ISOP_2015.ncf',
+  'data/plessel/schlaff/ISOP_2016.ncf',
+  'data/plessel/schlaff/ISOP_2017.ncf',
+  'data/plessel/schlaff/ISOP_2018.ncf',
+  'data/plessel/schlaff/ISOP_2019.ncf',
+  'data/plessel/schlaff/OH_2002.ncf',
+  'data/plessel/schlaff/OH_2003.ncf',
+  'data/plessel/schlaff/OH_2004.ncf',
+  'data/plessel/schlaff/OH_2005.ncf',
+  'data/plessel/schlaff/OH_2006.ncf',
+  'data/plessel/schlaff/OH_2007.ncf',
+  'data/plessel/schlaff/OH_2008.ncf',
+  'data/plessel/schlaff/OH_2009.ncf',
+  'data/plessel/schlaff/OH_2010.ncf',
+  'data/plessel/schlaff/OH_2011.ncf',
+  'data/plessel/schlaff/OH_2012.ncf',
+  'data/plessel/schlaff/OH_2013.ncf',
+  'data/plessel/schlaff/OH_2014.ncf',
+  'data/plessel/schlaff/OH_2015.ncf',
+  'data/plessel/schlaff/OH_2016.ncf',
+  'data/plessel/schlaff/OH_2017.ncf',
+  'data/plessel/schlaff/OH_2018.ncf',
+  'data/plessel/schlaff/OH_2019.ncf',
+  'data/plessel/schlaff/SFC_TMP_2002.ncf',
+  'data/plessel/schlaff/SFC_TMP_2003.ncf',
+  'data/plessel/schlaff/SFC_TMP_2004.ncf',
+  'data/plessel/schlaff/SFC_TMP_2005.ncf',
+  'data/plessel/schlaff/SFC_TMP_2006.ncf',
+  'data/plessel/schlaff/SFC_TMP_2007.ncf',
+  'data/plessel/schlaff/SFC_TMP_2008.ncf',
+  'data/plessel/schlaff/SFC_TMP_2009.ncf',
+  'data/plessel/schlaff/SFC_TMP_2010.ncf',
+  'data/plessel/schlaff/SFC_TMP_2011.ncf',
+  'data/plessel/schlaff/SFC_TMP_2012.ncf',
+  'data/plessel/schlaff/SFC_TMP_2013.ncf',
+  'data/plessel/schlaff/SFC_TMP_2014.ncf',
+  'data/plessel/schlaff/SFC_TMP_2015.ncf',
+  'data/plessel/schlaff/SFC_TMP_2016.ncf',
+  'data/plessel/schlaff/SFC_TMP_2017.ncf',
+  'data/plessel/schlaff/SFC_TMP_2018.ncf',
+  'data/plessel/schlaff/SFC_TMP_2019.ncf',
+  'data/plessel/schlaff/RH_2002.ncf',
+  'data/plessel/schlaff/RH_2003.ncf',
+  'data/plessel/schlaff/RH_2004.ncf',
+  'data/plessel/schlaff/RH_2005.ncf',
+  'data/plessel/schlaff/RH_2006.ncf',
+  'data/plessel/schlaff/RH_2007.ncf',
+  'data/plessel/schlaff/RH_2008.ncf',
+  'data/plessel/schlaff/RH_2009.ncf',
+  'data/plessel/schlaff/RH_2010.ncf',
+  'data/plessel/schlaff/RH_2011.ncf',
+  'data/plessel/schlaff/RH_2012.ncf',
+  'data/plessel/schlaff/RH_2013.ncf',
+  'data/plessel/schlaff/RH_2014.ncf',
+  'data/plessel/schlaff/RH_2015.ncf',
+  'data/plessel/schlaff/RH_2016.ncf',
+  'data/plessel/schlaff/RH_2017.ncf',
+  'data/plessel/schlaff/RH_2018.ncf',
+  'data/plessel/schlaff/RH_2019.ncf',
+  'data/plessel/schlaff/NO2_COLUMN_2002.ncf',
+  'data/plessel/schlaff/NO2_COLUMN_2003.ncf',
+  'data/plessel/schlaff/NO2_COLUMN_2004.ncf',
+  'data/plessel/schlaff/NO2_COLUMN_2005.ncf',
+  'data/plessel/schlaff/NO2_COLUMN_2006.ncf',
+  'data/plessel/schlaff/NO2_COLUMN_2007.ncf',
+  'data/plessel/schlaff/NO2_COLUMN_2008.ncf',
+  'data/plessel/schlaff/NO2_COLUMN_2009.ncf',
+  'data/plessel/schlaff/NO2_COLUMN_2010.ncf',
+  'data/plessel/schlaff/NO2_COLUMN_2011.ncf',
+  'data/plessel/schlaff/NO2_COLUMN_2012.ncf',
+  'data/plessel/schlaff/NO2_COLUMN_2013.ncf',
+  'data/plessel/schlaff/NO2_COLUMN_2014.ncf',
+  'data/plessel/schlaff/NO2_COLUMN_2015.ncf',
+  'data/plessel/schlaff/NO2_COLUMN_2016.ncf',
+  'data/plessel/schlaff/NO2_COLUMN_2017.ncf',
+  'data/plessel/schlaff/NO2_COLUMN_2018.ncf',
+  'data/plessel/schlaff/NO2_COLUMN_2019.ncf',
+  'data/plessel/schlaff/HCHO_COLUMN_2002.ncf',
+  'data/plessel/schlaff/HCHO_COLUMN_2003.ncf',
+  'data/plessel/schlaff/HCHO_COLUMN_2004.ncf',
+  'data/plessel/schlaff/HCHO_COLUMN_2005.ncf',
+  'data/plessel/schlaff/HCHO_COLUMN_2006.ncf',
+  'data/plessel/schlaff/HCHO_COLUMN_2007.ncf',
+  'data/plessel/schlaff/HCHO_COLUMN_2008.ncf',
+  'data/plessel/schlaff/HCHO_COLUMN_2009.ncf',
+  'data/plessel/schlaff/HCHO_COLUMN_2010.ncf',
+  'data/plessel/schlaff/HCHO_COLUMN_2011.ncf',
+  'data/plessel/schlaff/HCHO_COLUMN_2012.ncf',
+  'data/plessel/schlaff/HCHO_COLUMN_2013.ncf',
+  'data/plessel/schlaff/HCHO_COLUMN_2014.ncf',
+  'data/plessel/schlaff/HCHO_COLUMN_2015.ncf',
+  'data/plessel/schlaff/HCHO_COLUMN_2016.ncf',
+  'data/plessel/schlaff/HCHO_COLUMN_2017.ncf',
+  'data/plessel/schlaff/HCHO_COLUMN_2018.ncf',
+  'data/plessel/schlaff/HCHO_COLUMN_2019.ncf',
+  'data/plessel/schlaff/O3_2002.ncf',
+  'data/plessel/schlaff/O3_2003.ncf',
+  'data/plessel/schlaff/O3_2004.ncf',
+  'data/plessel/schlaff/O3_2005.ncf',
+  'data/plessel/schlaff/O3_2006.ncf',
+  'data/plessel/schlaff/O3_2007.ncf',
+  'data/plessel/schlaff/O3_2008.ncf',
+  'data/plessel/schlaff/O3_2009.ncf',
+  'data/plessel/schlaff/O3_2010.ncf',
+  'data/plessel/schlaff/O3_2011.ncf',
+  'data/plessel/schlaff/O3_2012.ncf',
+  'data/plessel/schlaff/O3_2013.ncf',
+  'data/plessel/schlaff/O3_2014.ncf',
+  'data/plessel/schlaff/O3_2015.ncf',
+  'data/plessel/schlaff/O3_2016.ncf',
+  'data/plessel/schlaff/O3_2017.ncf',
+  'data/plessel/schlaff/O3_2018.ncf',
+  'data/plessel/schlaff/O3_2019.ncf',
+  'data/plessel/schlaff/HNO3_2002.ncf',
+  'data/plessel/schlaff/HNO3_2003.ncf',
+  'data/plessel/schlaff/HNO3_2004.ncf',
+  'data/plessel/schlaff/HNO3_2005.ncf',
+  'data/plessel/schlaff/HNO3_2006.ncf',
+  'data/plessel/schlaff/HNO3_2007.ncf',
+  'data/plessel/schlaff/HNO3_2008.ncf',
+  'data/plessel/schlaff/HNO3_2009.ncf',
+  'data/plessel/schlaff/HNO3_2010.ncf',
+  'data/plessel/schlaff/HNO3_2011.ncf',
+  'data/plessel/schlaff/HNO3_2012.ncf',
+  'data/plessel/schlaff/HNO3_2013.ncf',
+  'data/plessel/schlaff/HNO3_2014.ncf',
+  'data/plessel/schlaff/HNO3_2015.ncf',
+  'data/plessel/schlaff/HNO3_2016.ncf',
+  'data/plessel/schlaff/HNO3_2017.ncf',
+  'data/plessel/schlaff/HNO3_2018.ncf',
+  'data/plessel/schlaff/HNO3_2019.ncf',
+  'data/plessel/schlaff/NOY_2002.ncf',
+  'data/plessel/schlaff/NOY_2003.ncf',
+  'data/plessel/schlaff/NOY_2004.ncf',
+  'data/plessel/schlaff/NOY_2005.ncf',
+  'data/plessel/schlaff/NOY_2006.ncf',
+  'data/plessel/schlaff/NOY_2007.ncf',
+  'data/plessel/schlaff/NOY_2008.ncf',
+  'data/plessel/schlaff/NOY_2009.ncf',
+  'data/plessel/schlaff/NOY_2010.ncf',
+  'data/plessel/schlaff/NOY_2011.ncf',
+  'data/plessel/schlaff/NOY_2012.ncf',
+  'data/plessel/schlaff/NOY_2013.ncf',
+  'data/plessel/schlaff/NOY_2014.ncf',
+  'data/plessel/schlaff/NOY_2015.ncf',
+  'data/plessel/schlaff/NOY_2016.ncf',
+  'data/plessel/schlaff/NOY_2017.ncf',
+  'data/plessel/schlaff/NOY_2018.ncf',
+  'data/plessel/schlaff/NOY_2019.ncf',
+  'data/plessel/schlaff/AIR_DENS_2002.ncf',
+  'data/plessel/schlaff/AIR_DENS_2003.ncf',
+  'data/plessel/schlaff/AIR_DENS_2004.ncf',
+  'data/plessel/schlaff/AIR_DENS_2005.ncf',
+  'data/plessel/schlaff/AIR_DENS_2006.ncf',
+  'data/plessel/schlaff/AIR_DENS_2007.ncf',
+  'data/plessel/schlaff/AIR_DENS_2008.ncf',
+  'data/plessel/schlaff/AIR_DENS_2009.ncf',
+  'data/plessel/schlaff/AIR_DENS_2010.ncf',
+  'data/plessel/schlaff/AIR_DENS_2011.ncf',
+  'data/plessel/schlaff/AIR_DENS_2012.ncf',
+  'data/plessel/schlaff/AIR_DENS_2013.ncf',
+  'data/plessel/schlaff/AIR_DENS_2014.ncf',
+  'data/plessel/schlaff/AIR_DENS_2015.ncf',
+  'data/plessel/schlaff/AIR_DENS_2016.ncf',
+  'data/plessel/schlaff/AIR_DENS_2017.ncf',
+  'data/plessel/schlaff/AIR_DENS_2018.ncf',
+  'data/plessel/schlaff/AIR_DENS_2019.ncf',
+  'data/plessel/schlaff/H2O2_2002.ncf',
+  'data/plessel/schlaff/H2O2_2003.ncf',
+  'data/plessel/schlaff/H2O2_2004.ncf',
+  'data/plessel/schlaff/H2O2_2005.ncf',
+  'data/plessel/schlaff/H2O2_2006.ncf',
+  'data/plessel/schlaff/H2O2_2007.ncf',
+  'data/plessel/schlaff/H2O2_2008.ncf',
+  'data/plessel/schlaff/H2O2_2009.ncf',
+  'data/plessel/schlaff/H2O2_2010.ncf',
+  'data/plessel/schlaff/H2O2_2011.ncf',
+  'data/plessel/schlaff/H2O2_2012.ncf',
+  'data/plessel/schlaff/H2O2_2013.ncf',
+  'data/plessel/schlaff/H2O2_2014.ncf',
+  'data/plessel/schlaff/H2O2_2015.ncf',
+  'data/plessel/schlaff/H2O2_2016.ncf',
+  'data/plessel/schlaff/H2O2_2017.ncf',
+  'data/plessel/schlaff/H2O2_2018.ncf',
+  'data/plessel/schlaff/H2O2_2019.ncf',
+
+  'data/plessel/jeong/CMAQ_EQUATES_MD_ACONC_2019.ncf',
+  'data/plessel/jeong/CMAQ_EQUATES_MD_CONC_201901.ncf',
+  'data/plessel/jeong/CMAQ_EQUATES_MD_CONC_201902.ncf',
+  'data/plessel/jeong/CMAQ_EQUATES_MD_CONC_201903.ncf',
+  'data/plessel/jeong/CMAQ_EQUATES_MD_CONC_201904.ncf',
+  'data/plessel/jeong/CMAQ_EQUATES_MD_CONC_201905.ncf',
+  'data/plessel/jeong/CMAQ_EQUATES_MD_CONC_201906.ncf',
+  'data/plessel/jeong/CMAQ_EQUATES_MD_CONC_201907.ncf',
+  'data/plessel/jeong/CMAQ_EQUATES_MD_CONC_201908.ncf',
+  'data/plessel/jeong/CMAQ_EQUATES_MD_CONC_201909.ncf',
+  'data/plessel/jeong/CMAQ_EQUATES_MD_CONC_201910.ncf',
+  'data/plessel/jeong/CMAQ_EQUATES_MD_CONC_201911.ncf',
+  'data/plessel/jeong/CMAQ_EQUATES_MD_CONC_201912.ncf',
+  'data/plessel/jeong/CMAQ_EQUATES_MD_GRIDCRO2D',
+
+
+  'data/plessel/priyanka/india.zip',
+  'data/plessel/priyanka/africa.zip',
+  'data/plessel/priyanka/south_america.zip',
+  'data/plessel/priyanka/2018_pm25_atm_a.zip',
+  'data/plessel/priyanka/2018_pm25_atm_b.zip',
+  'data/plessel/priyanka/2018_pm25_cf_1_a.zip',
+  'data/plessel/priyanka/2018_pm25_cf_1_b.zip',
+  'data/plessel/priyanka/2018_humidity.zip',
+  'data/plessel/priyanka/2018_temperature.zip',
+  'data/plessel/priyanka/2018_pressure.zip',
+  'data/plessel/priyanka/2019_pm25_atm_a.zip',
+  'data/plessel/priyanka/2019_pm25_atm_b.zip',
+  'data/plessel/priyanka/2019_pm25_cf_1_a.zip',
+  'data/plessel/priyanka/2019_pm25_cf_1_b.zip',
+  'data/plessel/priyanka/2019_humidity.zip',
+  'data/plessel/priyanka/2019_temperature.zip',
+  'data/plessel/priyanka/2019_pressure.zip',
+  'data/plessel/priyanka/2020_pm25_atm_a.zip',
+  'data/plessel/priyanka/2020_pm25_atm_b.zip',
+  'data/plessel/priyanka/2020_pm25_cf_1_a.zip',
+  'data/plessel/priyanka/2020_pm25_cf_1_b.zip',
+  'data/plessel/priyanka/2020_humidity.zip',
+  'data/plessel/priyanka/2020_temperature.zip',
+  'data/plessel/priyanka/2020_pressure.zip',
+  'data/plessel/priyanka/2021_pm25_atm_a.zip',
+  'data/plessel/priyanka/2021_pm25_atm_b.zip',
+  'data/plessel/priyanka/2021_pm25_cf_1_a.zip',
+  'data/plessel/priyanka/2021_pm25_cf_1_b.zip',
+  'data/plessel/priyanka/2021_humidity.zip',
+  'data/plessel/priyanka/2021_temperature.zip',
+  'data/plessel/priyanka/2021_pressure.zip',
+  'data/plessel/priyanka/2022_pm25_atm_a.zip',
+  'data/plessel/priyanka/2022_pm25_atm_b.zip',
+  'data/plessel/priyanka/2022_pm25_cf_1_a.zip',
+  'data/plessel/priyanka/2022_pm25_cf_1_b.zip',
+  'data/plessel/priyanka/2022_humidity.zip',
+  'data/plessel/priyanka/2022_temperature.zip',
+  'data/plessel/priyanka/2022_pressure.zip',
+  'data/plessel/priyanka/2023_pm25_atm_a.zip',
+  'data/plessel/priyanka/2023_pm25_atm_b.zip',
+  'data/plessel/priyanka/2023_pm25_cf_1_a.zip',
+  'data/plessel/priyanka/2023_pm25_cf_1_b.zip',
+  'data/plessel/priyanka/2023_humidity.zip',
+  'data/plessel/priyanka/2023_temperature.zip',
+  'data/plessel/priyanka/2023_pressure.zip',
+  'data/plessel/priyanka/2024_pm25_atm_a.zip',
+  'data/plessel/priyanka/2024_pm25_atm_b.zip',
+  'data/plessel/priyanka/2024_pm25_cf_1_a.zip',
+  'data/plessel/priyanka/2024_pm25_cf_1_b.zip',
+  'data/plessel/priyanka/2024_humidity.zip',
+  'data/plessel/priyanka/2024_temperature.zip',
+  'data/plessel/priyanka/2024_pressure.zip',
+  'data/plessel/priyanka/2025_pm25_atm_a.zip',
+  'data/plessel/priyanka/2025_pm25_atm_b.zip',
+  'data/plessel/priyanka/2025_pm25_cf_1_a.zip',
+  'data/plessel/priyanka/2025_pm25_cf_1_b.zip',
+  'data/plessel/priyanka/2025_humidity.zip',
+  'data/plessel/priyanka/2025_temperature.zip',
+  'data/plessel/priyanka/2025_pressure.zip',
+
+# End TEMP HACKS
 
   'edm/ACES.pdf',
   'edm/ACES.png',
@@ -747,7 +1116,7 @@ my @retigo_servable_files = (
   'zerofill.js',
   'isNumber.js',
   'get_airnow.js',
-  'get_surfmet.js',
+##'get_surfmet.js',
   'html2canvas.js',
   'unique.js',
   'read_userfile.js',
@@ -821,43 +1190,41 @@ sub main {
       my $denied = '';
 
       if ( $server eq '' && $service eq 'wcs' ) {
+
+        # E.g., REQUEST=GetCapabilities or REQUEST=DescribeCoverage:
+
         my @data_sources = (
           'airnow', 'aqs', 'calipso', 'cmaq', 'modis',
           'nesdis', 'goesbb', 'uvnet', 'faqsd', 'gasp', 'goes', 'mozaic',
           'neubrew', 'ceilometer', 'pandora', 'hrrr',
-          'viirs', 'tropomi', 'tempo', # 'tempo2',
+          'viirs', 'tropomi', 'tempo', 'tempo2',
           'regridded',
-          'surfmet', 'metar', 'compare',
-          'satellitepm', 'omi', 'omibehr', 'omibehrioapi', 'hms',
+          'metar', #'compare',
+          'omi', 'omibehr', 'omibehrioapi', 'hms',
           'acam', 'hsrl', 'tad',
-          'purpleair',
+          'purpleair', 'egrid', 'openaq', 'quantaq', 'castnet',
           # EDM:
           'landuse', 'tidal', 'wqp', 'dv', 'nerrs', 'ncca', 'ncca2',
-          'buoy', 'erddap', 'ofs', 'aquarius', 'smap', 'nldas',
-          # WildfireApp:
-          'hysplit'
+          'buoy', 'erddap', 'ofs', 'aquarius', 'smap', 'nldas', 'woa'
         );
 
+        # Concatenate each webserver GetCapabilities or DescribeCoverage xml
+        # to $temp_file then call print_filtered_xml( $temp_file ) to print
+        # the xml to STDOUT - without the redundant headers/footers.
+
+        if ( -f $temp_xml_file ) {
+          unlink( $temp_xml_file );
+        }
+
         foreach my $data_source ( @data_sources ) {
+          $server = $server_host_dir . $data_source . 'server?';
+          $command = "$curl_command '$server$query_string' >> $temp_xml_file";
+          $result = execute_command( $command );
+        }
 
-          # tempo data is forwarded to cain.larc.nasa.gov/cgi-bin/temposerver
-          # which only accepts connections from YOUR_WEBSERVER_HOST
-          # but not YOUR_WEBSERVER_HOST which is an alternative alias
-          # forwarded to by ofmpub. Thus the forwarding HACK below.
-
-          if ( $data_source eq 'tempo' ) {
-            $server = 'https://cain.larc.nasa.gov/cgi-bin/temposerver?';
-            $command = "$curl_command '$server$query_string' " .
-                       "| $sed 's/<name>/<name>$data_source./g'";
-
-            $result = execute_command( $command );
-          #} elsif ( $data_source ne 'cmaq') {
-          } else {
-            $server = $server_host_dir . $data_source . 'server?';
-            $command = "$curl_command '$server$query_string' " .
-                       "| $sed 's/<name>/<name>$data_source./g'";
-            $result = execute_command( $command );
-          }
+        if ( $result ) {
+          print_filtered_xml( $temp_xml_file );
+          unlink( $temp_xml_file );
         }
 
       } else {
@@ -874,8 +1241,50 @@ sub main {
           $command = "$curl_command '$server$service$hashstring'";
           $result = execute_command( $command );
         } else {
-          $command = "$curl_command '$server$query_string'";
-          $result = execute_command( $command );
+          my $proceed = 0;
+
+          # If killing RSIG processes or caller has RSIG_ID then proceed.
+          # Otherwise check to make sure there are not too many processes
+          # already.
+
+          if ( index( $server, '/rsigkill?' ) != -1 || is_app_rsig_id() ) {
+            $proceed = 1;
+          } elsif ( rsig_process_count() < $maximum_allowed_processes ) {
+            $proceed = 1;
+          }
+
+          if ( ! $proceed ) {
+            print "Content-type: text/plain; charset=iso-8859-1\n\n";
+            print STDOUT "There are too many concurrent RSIG requests.\n";
+            print STDOUT "Please contact rsig\@epa.gov for assistance.\n";
+            $denied = '-DENIED-DUE_TO_TOO_MANY_PROCESSES';
+          } else {
+
+            # Redirect viirsnoaa to viirs (TEMP HACK until RSIG3D deployed 2026-06-05):
+
+            if ( index( $server, 'viirsnoaa' ) != -1 ) {
+              $server         =~ s/viirsnoaa/viirs/g;
+              $rsig_variables =~ s/viirsnoaa/viirs/g;
+            }
+
+            # Redirect erddap.woa. to woa (TEMP HACK until EDM deployed 2026-06-05):
+
+            if ( index( $server, 'erddap' ) != -1 &&
+                 index( $query_string, 'woa' ) != -1 ) {
+              $server         =~ s/erddap/woa/g;
+              $query_string   =~ s/woa.monthly_water_/monthly_/g;
+              $query_string   =~ s/woa.annual_water_/yearly_/g;
+              $query_string   =~ s/woa.monthly_/monthly_/g;
+              $query_string   =~ s/woa.annual_/yearly_/g;
+              $rsig_variables =~ s/erddap.woa.monthly_water_/woa.monthly_/g;
+              $rsig_variables =~ s/erddap.woa.annual_water_/woa.yearly_/g;
+              $rsig_variables =~ s/erddap.woa.monthly_/woa.monthly_/g;
+              $rsig_variables =~ s/erddap.woa.annual_/woa.monthly_/g;
+            }
+
+            $command = "$curl_command '$server$query_string'";
+            $result = execute_command( $command );
+          }
         }
       }
 
@@ -898,13 +1307,152 @@ sub main {
   $result = 1 - $result; # UNIX: zero is success, non-zero is failure.
   debug( "exit result = $result" );
 
-# TEMP HACK:
-if ( $result != 0 ) {
-  print STDOUT "Content-type: text/plain; charset=iso-8859-1\n\n";
-  print STDOUT "\nFAILED\n"; # TEMP HACK: fail fast.
-}
+  # Must return some bytes to avoid 30 second timeout delay when unsuccessful:
+
+  if ( $result != 0 ) {
+    print STDOUT "\nFAILED\n";
+  }
 
   exit $result;
+}
+
+
+
+sub is_app_rsig_id {
+  my $result = 0;
+
+  if ( $rsig_id ne '' ) {
+
+    foreach my $app_rsig_id ( @app_rsig_ids ) {
+      my $found = index( $rsig_id, $app_rsig_id ) == 0;
+
+      if ( $found ) {
+        $result = 1;
+        last;
+      }
+    }
+  }
+
+  debug( "is_app_rsig_id() $rsig_id = $result" );
+
+#print STDERR "TEMP HACK is_app_rsig_id(): result = $result\n";
+
+  return $result;
+}
+
+
+
+sub rsig_process_count {
+  my $result = 0;
+  my $ok = execute_command( "$get_total_connections > $temp_file ; $get_satellite_connections >> $temp_file" );
+
+#print STDERR "TEMP HACK rsig_process_count(): ok = $ok\n";
+
+  if ( $ok ) {
+    
+    if ( open my $input_file, '<', $temp_file ) {
+      my @read_lines = <$input_file>;
+      close $input_file;
+      $result = int( $read_lines[ 0 ] ) + int( $read_lines[ 1 ] );
+      debug( "rsigserver process_count = $result" );
+#print STDERR "TEMP HACK   rsig_process_count(): result = $result\n";
+
+      if ( ! $debugging ) {
+        unlink( "$temp_file" );
+      }
+    }
+  }
+
+  return $result;
+}
+
+
+
+# Read a concatenated GetCapabilities or DescribeCoverage XML file and
+# print it to STDOUT without redundant headers/footers:
+
+sub print_filtered_xml {
+  my $input_file_name = shift;
+
+  if ( open my $input_file, '<', $input_file_name ) {
+    my @lines = <$input_file>;
+    close $input_file;
+
+    my $line_count = @lines;
+    debug( "$input_file_name, line_count = $line_count\n" );
+
+    if ( $line_count > 10 ) {
+      my $header_lines = 0;
+      my $line_index = 0;
+      my $line = '';
+
+      # Print header and count the number of lines in the header:
+
+      while ( $line_index < $line_count ) {
+
+        if ( ! defined( $lines[ $line_index ] ) ) { # Why must this be checked?
+          $line_index = $line_count;
+        } else {
+          $line = $lines[ $line_index ]; # This should not be 'uninitialized'!
+
+          if ( index( $line, '<CoverageOffering' ) != -1 ) {
+            last; # Found line after header so exit loop.
+          } else { # Print header line and increment header line count.
+            print $line;
+            ++$line_index;
+            ++$header_lines;
+          }
+        }
+      }
+
+      if ( $line_index < $line_count ) {
+
+        # Determine number of lines and tags at the end of the document:
+
+        my $end_lines = 0;
+        my $end_tag1 = '';
+        my $end_tag2 = '';
+
+        if ( index( $lines[ $line_index ], '<CoverageOffering>' ) != -1 ) {
+          $end_lines = 1;
+          $end_tag1 = '</CoverageDescription>';
+        } else {
+          $end_lines = 2;
+          $end_tag1 = '</ContentMetadata>';
+          $end_tag2 = '</WCS_Capabilities>';
+        }
+
+        debug( "header_lines = $header_lines, $end_tag1 = $end_tag1, end_tag2 = '$end_tag2'\n" );
+
+        # Print all lines except headers and endings:
+
+        while ( $line_index < $line_count ) {
+          $line = $lines[ $line_index ];
+
+          while ( $line_index < $line_count &&
+                  defined( $line ) &&
+                  index( $line, $end_tag1 ) == -1 ) {
+            print $line;
+            ++$line_index;
+
+            if ( $line_index < $line_count ) {
+              $line = $lines[ $line_index ];
+            }
+          }
+
+          $line_index += $end_lines + $header_lines;
+        }
+
+        # Print end line(s):
+
+        if ( $end_lines > 1 ) {
+          print "    $end_tag1\n$end_tag2\n";
+        } else {
+          print "$end_tag1\n";
+        }
+      }
+    }
+  }
 }
 
 
@@ -921,6 +1469,7 @@ sub parse_url {
   my $count = @names;
   my $result = '';
   my $format = '';
+  my $request = '';
   my $data_source = '';
   debug( "\n\n-------------- BEGIN rsigserver -----------\n" );
   debug( "$count" );
@@ -1128,7 +1677,6 @@ sub parse_url {
         $format = $lc_value;
 
         if ( $content_types{ $format } ) {
-#         print "Content-type: $content_types{$format}; charset=iso-8859-1\n\n";
           print "Content-type: $content_types{$format}; charset=iso-8859-1\n" .
                 "Access-Control-Allow-Origin: * \n" .
                 "Cache-Control: no-cache, no-store, must-revalidate\n" .
@@ -1141,14 +1689,16 @@ sub parse_url {
                 "Pragma: no-cache\n" .
                 "Expires: 0\n\n";
         }
+      } elsif ( $lc_option eq 'request' ) {
+        $request = $lc_value;
       }
 
       my $ok = 1;
 
       if (  $service eq 'wcs' ) {
-        $ok = $lc_option ne '' && $lc_option ne 'rsig_id';
+        $ok = $lc_option ne '';
 
-        if ( $ ok ) {
+        if ( $ok ) {
 
           if ( index( ' minimum_cad maximum_uncertainty ', $lc_option ) != -1 ) {
             $ok = index( $server, 'calipsoserver' ) != -1;
@@ -1179,10 +1729,14 @@ sub parse_url {
         debug( "rsigserver printing HTTP header:\n$header" );
         print $header;
       } else {
-        debug( "rsigserver printing text/plain HTTP header" );
+        debug( "rsigserver printing 2 HTTP header lines" );
         print "Access-Control-Allow-Origin: * \n"; # allow cross-origin requests
-        #print "Content-type: text/xml; charset=iso-8859-1\n\n";
-        print "Content-type: text/plain; charset=iso-8859-1\n\n";
+
+        if ( $request eq 'getcapabilities' || $request eq 'describecoverage' ) {
+          print "Content-type: text/xml; charset=iso-8859-1\n\n";
+        } else {
+          print "Content-type: text/plain; charset=iso-8859-1\n\n";
+        }
       }
     }
 
@@ -1279,7 +1833,7 @@ sub is_servable_file {
       # if sessionkeyfile does not exist, create it
       unless(-e $sessionkeyfile) {
     #Create the file if it doesn't exist
-    open my $fc, ">", $sessionkeyfile;
+    open my $fc, '>', $sessionkeyfile;
     close $fc;
       }
       # set permissions
@@ -1520,7 +2074,7 @@ sub serve_file {
     # insert prefix to rsigserver so clicking the links will work.
     # For non-html files, just echo the lines to output.
 
-    open my $file, "< $file_name" or die "Can't open file for reading: $!";
+    open my $file, '<', $file_name or die "Can't open file for reading: $!";
 
     while ( my $line = <$file> ) {
 
@@ -1615,7 +2169,6 @@ sub debug {
 
   if ( $debugging ) {
     print STDERR "\n$message\n";
-####print STDOUT "\n$message\n";
   }
 }
 
@@ -1630,7 +2183,8 @@ sub execute_command {
 
   # Untaint command (match expression is arbitrary as far as -T is concerned):
 
-  if ( $command =~ m#^(/[\w\-]+/[\w\- /\.\(\)@,':?=&|<>]+)$# ) {
+  if ( $command =~ m#^(/[\w\-]+/[\w\- /\.\(\)@,';:?=&|<>]+)$# )
+  {
     $command = $1; # Re-assign first match, which is enough to satisfy -T.
     debug( "$0 executing command = $command" );
     %ENV = (); # Unset all environment variables prior to popen.
@@ -1644,7 +2198,7 @@ sub execute_command {
         print;
       }
 
-      close( the_pipe ) or die $!;
+      close( the_pipe );
       $result = ! $?;
     } else { # Child process.
       exec( $command ) or die "can't exec program: $!";
